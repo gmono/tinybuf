@@ -1,5 +1,9 @@
 #include "tinybuf_private.h"
+#ifdef _WIN32
+#include <winsock2.h>
+#else
 #include <netinet/in.h>
+#endif
 
 typedef enum {
     serialize_null = 0,
@@ -250,7 +254,7 @@ int tinybuf_value_map_set(tinybuf_value *parent,const char *key,tinybuf_value *v
 }
 
 static int arrayKeyCompare(AVLTreeKey key1, AVLTreeKey key2){
-    return key1 - key2;
+    return (int)(((intptr_t)key1) - ((intptr_t)key2));
 }
 
 int tinybuf_value_array_append(tinybuf_value *parent,tinybuf_value *value){

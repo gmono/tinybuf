@@ -1,10 +1,12 @@
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.5)
 project(tinybuf)
 
 #使能c++11
 #add_compile_options(-std=c++11)
 set(CMAKE_CXX_STANDARD 11)
-add_definitions(-Wno-int-to-void-pointer-cast -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
+if(NOT MSVC)
+    add_definitions(-Wno-int-to-void-pointer-cast -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
+endif()
 
 
 #加载自定义模块
@@ -37,7 +39,11 @@ if(JEMALLOC_FOUND)
     set(LINK_LIST ${JEMALLOC_LIBRARY})
 endif()
 
-target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} pthread)
+if(MSVC)
+    target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} ws2_32)
+else()
+    target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} pthread)
+endif()
 
 
 

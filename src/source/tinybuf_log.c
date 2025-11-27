@@ -1,6 +1,22 @@
 #include "tinybuf_log.h"
+#include <stdarg.h>
+#ifdef _WIN32
+#include <windows.h>
+static int gettimeofday(struct timeval* tv, void* tz) {
+    FILETIME ft;
+    ULARGE_INTEGER uli;
+    GetSystemTimeAsFileTime(&ft);
+    uli.LowPart = ft.dwLowDateTime;
+    uli.HighPart = ft.dwHighDateTime;
+    unsigned long long t = (uli.QuadPart - 116444736000000000ULL) / 10ULL;
+    tv->tv_sec = (long)(t / 1000000ULL);
+    tv->tv_usec = (long)(t % 1000000ULL);
+    return 0;
+}
+#else
 #include <unistd.h>
 #include <sys/time.h>
+#endif
 #include <time.h>
 
 static e_log_lev s_log_leg = log_trace;
@@ -50,4 +66,19 @@ void set_printf_ptr(printf_ptr cb){
 }
 printf_ptr get_printf_ptr(){
     return s_printf ? s_printf : printf;
+}
+
+void log_print(e_log_lev lev, const char *file, int line, const char *func, const char *fmt, ...){
+    if(lev < get_log_level()){
+        return;
+    }
+    char time_str[26];
+    get_now_time_str(time_str,sizeof(time_str));
+    printf_ptr p = get_printf_ptr();
+    p("%s %s | %s ", time_str, LOG_CONST_TABLE[lev][2], func);
+    va_list ap;
+    va_start(ap, fmt);
+    vprintf(fmt, ap);
+    va_end(ap);
+    p("\r\n");
 }

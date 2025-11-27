@@ -66,53 +66,12 @@ void set_printf_ptr(printf_ptr cb);
 printf_ptr get_printf_ptr(void);
 
 
-#ifndef ANDROID
-#define _PRINT_(encble_color,print,lev,file,line,func,fmt,...) \
-do{ \
-    if(lev < get_log_level()){ \
-        break; \
-    } \
-    print("%s %d\r\n",file,line);\
-    char time_str[26];\
-    get_now_time_str(time_str,sizeof(time_str)); \
-    if(!encble_color){\
-        print("%s %s | %s " fmt "\r\n",\
-                time_str ,\
-                LOG_CONST_TABLE[lev][2],\
-                func,\
-                ##__VA_ARGS__);\
-    }else{\
-        print("%s %s %s | %s " fmt CLEAR_COLOR "\r\n",\
-                LOG_CONST_TABLE[lev][1],\
-                time_str ,\
-                LOG_CONST_TABLE[lev][2],\
-                func,\
-                ##__VA_ARGS__);\
-    }\
-} while(0)
-#else
-#define _PRINT_(encble_color,print,lev,file,line,func,fmt,...) \
-do{ \
-    if(lev < get_log_level()){ \
-        break; \
-    } \
-    __android_log_print(LogPriorityArr[lev],"mqtt","%s " fmt "\r\n",func,##__VA_ARGS__);\
-} while(0)
-#endif
-
-#ifdef __alios__
-extern int log_get_mutex();
-extern void log_release_mutex();
-#define PRINT(lev,file,line,func,fmt,...) do{if(log_get_mutex()){_PRINT_(0,get_printf_ptr(),lev,file,line,func,fmt,##__VA_ARGS__); log_release_mutex();}} while(0)
-#else
-#define PRINT(lev,file,line,func,fmt,...) _PRINT_(1,get_printf_ptr(),lev,file,line,func,fmt,##__VA_ARGS__)
-#endif
-//以下宏都是写日志宏
-#define LOGT(...) PRINT(log_trace,__FILE__,__LINE__,__FUNCTION__,##__VA_ARGS__)
-#define LOGD(...) PRINT(log_debug,__FILE__,__LINE__,__FUNCTION__,##__VA_ARGS__)
-#define LOGI(...) PRINT(log_info,__FILE__,__LINE__,__FUNCTION__,##__VA_ARGS__)
-#define LOGW(...) PRINT(log_warn,__FILE__,__LINE__,__FUNCTION__,##__VA_ARGS__)
-#define LOGE(...) PRINT(log_error,__FILE__,__LINE__,__FUNCTION__,##__VA_ARGS__)
+void log_print(e_log_lev lev, const char *file, int line, const char *func, const char *fmt, ...);
+#define LOGT(...) log_print(log_trace,__FILE__,__LINE__,__FUNCTION__,__VA_ARGS__)
+#define LOGD(...) log_print(log_debug,__FILE__,__LINE__,__FUNCTION__,__VA_ARGS__)
+#define LOGI(...) log_print(log_info,__FILE__,__LINE__,__FUNCTION__,__VA_ARGS__)
+#define LOGW(...) log_print(log_warn,__FILE__,__LINE__,__FUNCTION__,__VA_ARGS__)
+#define LOGE(...) log_print(log_error,__FILE__,__LINE__,__FUNCTION__,__VA_ARGS__)
 
 #ifdef __cplusplus
 } // extern "C"

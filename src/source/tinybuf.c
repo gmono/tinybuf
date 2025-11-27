@@ -5,6 +5,8 @@
 #include <netinet/in.h>
 #endif
 
+//1 支持变长数字格式并支持配置开启 2 支持KVPair通用格式
+//3 支持自描述结构和向前兼容支持
 typedef enum {
     serialize_null = 0,
     serialize_positive_int = 1,

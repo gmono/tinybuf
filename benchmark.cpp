@@ -6,7 +6,11 @@
 #include "tinybuf_log.h"
 #include "jsoncpp/json.h"
 #include <sstream>
+#ifndef _WIN32
 #include <sys/time.h>
+#else
+#include <chrono>
+#endif
 #include <assert.h>
 
 
@@ -17,7 +21,7 @@ using namespace Json;
 #define MAX_COUNT 1 * 10000
 
 static inline uint64_t getCurrentMicrosecondOrigin() {
-#if !defined(_WIN32)
+#ifndef _WIN32
     struct timeval tv;
     gettimeofday(&tv, NULL);
     return tv.tv_sec * 1000000LL + tv.tv_usec;
@@ -33,7 +37,7 @@ public:
         _start_time = getCurrentMicrosecondOrigin();
     }
     ~TimePrinter(){
-        LOGD("%s占用时间:%ld ms",_str.data(),(getCurrentMicrosecondOrigin() - _start_time) / 1000);
+        LOGD("%stime spent:%lld ms",_str.data(),(long long)((getCurrentMicrosecondOrigin() - _start_time) / 1000));
     }
 
 private:
@@ -230,7 +234,7 @@ int main(int argc,char *argv[]){
 
     {
         //测试几米序列化性能
-        TimePrinter printer("序列化成tinybuf");
+        TimePrinter printer("serialize to tinybuf");
         buffer *buf = buffer_alloc();
         for(int i = 0 ; i < MAX_COUNT; ++i ){
             buffer_set_length(buf,0);
@@ -241,7 +245,7 @@ int main(int argc,char *argv[]){
 
     {
         //测试几米序列化成json性能
-        TimePrinter printer("序列化成json格式");
+        TimePrinter printer("serialize to json");
         buffer *buf = buffer_alloc();
         for(int i = 0 ; i < MAX_COUNT; ++i ){
             buffer_set_length(buf,0);
@@ -252,7 +256,7 @@ int main(int argc,char *argv[]){
 
     {
         //测试json列化性能
-        TimePrinter printer("jsoncpp序列化");
+        TimePrinter printer("jsoncpp serialize");
         //json对象
         Value obj;
         stringstream ss(buffer_get_data(buf_json));
@@ -264,7 +268,7 @@ int main(int argc,char *argv[]){
 
     {
         //测试几米反序列化性能
-        TimePrinter printer("tinybuf反序列化");
+        TimePrinter printer("tinybuf deserialize");
         tinybuf_value *value_deserialize = tinybuf_value_alloc();
         for(int i = 0 ; i < MAX_COUNT; ++i ){
             tinybuf_value_clear(value_deserialize);
@@ -276,7 +280,7 @@ int main(int argc,char *argv[]){
 
     {
         //测试几米反序列json化性能
-        TimePrinter printer("json反序列化");
+        TimePrinter printer("json deserialize");
         tinybuf_value *value_deserialize = tinybuf_value_alloc();
         for(int i = 0 ; i < MAX_COUNT; ++i ){
             tinybuf_value_clear(value_deserialize);
@@ -287,7 +291,7 @@ int main(int argc,char *argv[]){
 
     {
         //测试json反序列化性能
-        TimePrinter printer("jsoncpp反序列化");
+        TimePrinter printer("jsoncpp deserialize");
         Value obj;
         Json::Reader reader;
         string str(buffer_get_data(buf_json));

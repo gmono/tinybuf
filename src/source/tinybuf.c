@@ -834,8 +834,6 @@ inline int OK_AND_ADDTO(int x, int *s)
 // 从指针位置开始读取box 提供开始位置+偏移
 // 返回值表示消耗的字节数
 
-// 入口
-int try_read_box(buf_ref *buf, tinybuf_value *out);
 typedef tinybuf_value value;
 
 typedef struct
@@ -992,9 +990,9 @@ inline int try_read_int_data(BOOL isneg, buf_ref *buf, QWORD *out)
     int temp = 0;
     if (OK_AND_ADDTO(try_read_int_tovar(isneg, buf->ptr, buf->size, out), &temp))
     {
-        //适配非标准read函数
+        // 适配非标准read函数
         len += temp;
-        buf_offset(buf,temp);
+        buf_offset(buf, temp);
     }
     else
         SET_FAILED("read data error");
@@ -1007,12 +1005,12 @@ inline int try_read_intbox(buf_ref *buf, QWORD *saveptr)
 {
     serialize_type type;
     INIT_STATE
-    if (OK_AND_ADDTO(try_read_type(buf, type), &len))
+    if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
     {
         if (type == serialize_positive_int || type == serialize_negtive_int)
         {
             BOOL isneg = type == serialize_negtive_int;
-            if (OK_AND_ADDTO(try_read_int_tovar(isneg, buf->ptr, buf->size, saveptr), &len))
+            if (OK_AND_ADDTO(try_read_int_data(isneg, buf, saveptr), &len))
             {
                 SET_SUCCESS();
             }
@@ -1025,32 +1023,26 @@ inline int try_read_intbox(buf_ref *buf, QWORD *saveptr)
     else
         SET_FAILED("read type error");
     CHECK_FAILED
+    READ_RETURN
 }
 //---核心box读取函数 当前整数表示 signbyte intdata
 
 int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version)
 {
     // 尝试初阶反序列化
-    int len = tinybuf_value_deserialize(buf->ptr, buf->size, out);
-    BOOL failed = FALSE;
-    const char *reason = NULL;
-
+    INIT_STATE
+    len = tinybuf_value_deserialize(buf->ptr, buf->size, out);
     if (len == 0)
         return len;
     if (len > 0) //=0的情况为缓冲区太小
     {
         // 兼容buf逻辑
-        buf->ptr += len;
-        buf->size -= len;
+        buf_offset(buf, len);
         return len;
     }
     // 执行高阶反序列化 支持环数据引用等
     // len表示已经成功消费的字节数
     len = 0;
-    // 是否读取失败
-    BOOL failed = FALSE;
-    const char *reason = NULL;
-
     serialize_type type = serialize_null;
     if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
     {
@@ -1060,7 +1052,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
         {
             // version后跟一个裸整数 后跟一个 box
             QWORD version;
-            if (OK_AND_ADDTO(try_read_int_tovar(FALSE, buf->ptr, buf->size, &version), &len))
+            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &version), &len))
             {
                 // 检查version是否正确
                 if (target_version(version))

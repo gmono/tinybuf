@@ -16,8 +16,8 @@ struct T_tinybuf_value{
         int64_t _int;
         int _bool;
         double _double;
-        buffer *_string;
-        AVLTree *_map_array;
+        buffer *_string; //变长缓冲区
+        AVLTree *_map_array; //kvpairs
     } _data;
     tinybuf_type _type;
 };

@@ -18,10 +18,6 @@ typedef enum {
     tinybuf_string,
     tinybuf_map,
     tinybuf_array,
-    //数据box指针 支持连续寻址
-    tinybuf_pointer,
-    //pre cache数据项 支持指针寻址性能优化 后跟实际databox
-    tinybuf_pre_cache
 } tinybuf_type;
 
 
@@ -75,6 +71,14 @@ int tinybuf_value_is_same(const tinybuf_value *value1,const tinybuf_value *value
  * @return 数据类型
  */
 tinybuf_type tinybuf_value_get_type(const tinybuf_value *value);
+
+// /**
+//  * 切换对象类型 不修改数据 支持同bytes count数据的不同表示形式
+//  * @param value 对象
+//  * @param type 类型
+//  * @return 类型
+//  */
+// tinybuf_type tinybuf_value_switch_to_type(const tinybuf_value *value,const tinybuf_type type);
 
 /**
  * 获取int值

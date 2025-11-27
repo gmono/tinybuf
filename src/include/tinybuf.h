@@ -7,6 +7,9 @@
 extern "C" {
 #endif // __cplusplus
 
+//开启pointer支持指针 开启precache支持限制指针寻址到pre_cache表
+#define ENABLE_POINTER
+#define ENABLE_PRE_CACHE
 typedef enum {
     tinybuf_null = 0,
     tinybuf_int,
@@ -14,7 +17,11 @@ typedef enum {
     tinybuf_double,
     tinybuf_string,
     tinybuf_map,
-    tinybuf_array
+    tinybuf_array,
+    //数据box指针 支持连续寻址
+    tinybuf_pointer,
+    //pre cache数据项 支持指针寻址性能优化 后跟实际databox
+    tinybuf_pre_cache
 } tinybuf_type;
 
 

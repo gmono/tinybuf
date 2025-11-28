@@ -19,7 +19,9 @@ typedef enum {
     tinybuf_map,
     tinybuf_array,
     //自定义类型 通过指针表示
-    tinybuf_custom
+    tinybuf_custom,
+    tinybuf_value_ref//表示到其他value的引用 如果这个value的指针存在或vid存在则表示一个环 不存在则
+    //应该先写入被引用的value 再写入当前value 
 } tinybuf_type;
 
 

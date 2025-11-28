@@ -61,6 +61,25 @@ typedef enum
     serialize_str_pool=24,
     //用于支持把字符串池放在末尾
     serialize_str_pool_table=25,//字符串池表 用于在文件开头确定字符串池的位置 如果有 则必须在开头
+    serialize_uri=26,//可以是文件uri或其他 结构为 sign uritype otherdata 后面跟一个文件path str 再跟一个整数表示数据在文件中的位置
+    serialize_router_link=27,//跟一个uribox
+    //遇到文件链接 应跳转到另一个文件的指定位置继续读取 高层box 对数据透明
+    //与uri的区别是 uri只读取一个value并返回
+    serialize_text_ref=28,//uri指向的文本文件引用 fileid 有编码说明 
+    serialize_bin_ref=29,//二进制文件引用 支持部分引用 fileid
+    serialize_embed_file,//内嵌文件 有fileid 文件名 文件mime等 支持strptr和str
+    serialize_file_range,//文件范围引用 基于已经有的fileid
+    serialize_with_metadata,//元类型 表示一个带有metadata的box 透明
+    serialize_noseq_part, //表示一个无序区 遇到直接跳过 无序区用于保存孤立对象 这种对象只被某个指针引用 不存在于其他位置
+    //空白区 遇到直接跳过 用于用fat在其中高性能删除已有数据 并留下一个空白区
+    serialize_empty_part, //sign len 
+    //fs和fstable都支持多分块 元数据里会有指向下一个block和上一个block的指针 用于将space联成一片
+    serialize_fs,//表示一个文件系统块里面可以有目录结构
+    serialize_file_table,//表示一个文件表 结构简单 没有目录结构
+    serialize_fs_file,//表示一个文件系统或文件表中的 文件 文件就是具名+具metadata的数据对象
+    serialize_fs_inode,//表示一个inode 一个fs节点 节点可以是目录 链接 或文件
+    serialize_flat_part,//通用连续空间快 支持相对寻址
+    serialize_pointer_advance,//先进指针 支持更丰富的寻址方式 例如flat空间寻址 block内部寻址 跨文件寻址等
     //使用字符串池+索引index来表示额外类型 后跟整数 要求字符串池存在
     serialize_extern_str_idx=253,
     //str类型的extern类型表示 占空间较大

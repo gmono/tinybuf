@@ -21,9 +21,12 @@ struct T_tinybuf_value{
         buffer *_string; //变长缓冲区
         AVLTree *_map_array; //kvpairs
         void* _custom; //自定义类型指针
+        tinybuf_value *_ref; //引用类型指针
     } _data;
     //自定义类型的释放函数
     free_handler _custom_free;
+    //vid默认初始化-1表示不存在vid直接比较指针
+    int64_t vid;
     tinybuf_type _type;
 };
 

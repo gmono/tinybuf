@@ -39,9 +39,12 @@ typedef enum
     // 集束box标识 表示后面是一个异类型序列集合 递归结构  读取时批量读取
     serialize_boxlist = 17, // boxlist_sign lstlen type1 type2 type3 type4 ... data1 data2 data3
     // 压缩树表示中的keysign使用变长int存储
-    serialize_zip_kvpairs = 18,       // 压缩树表示 不存储key 转而存储key 的keysign //需要msgpack的key(0)等标记
-    serialize_zip_kvpairs_boxkey = 19 // 压缩树表示 但key使用完整databox存储 这意味着key支持version或pointer等结构
+    serialize_zip_kvpairs = 18,        // 压缩树表示 不存储key 转而存储key 的keysign //需要msgpack的key(0)等标记
+    serialize_zip_kvpairs_boxkey = 19, // 压缩树表示 但key使用完整databox存储 这意味着key支持version或pointer等结构
     // 任何时候value都是完整box存储
+    // 兼容机制 version列表 支持新版本兼容旧版本
+
+    serialize_version_list = 20
 } serialize_type;
 //---压缩boxlist数据集合的序列化
 static inline int boxlist_serialize()
@@ -948,30 +951,6 @@ void pointer_to_start(const buf_ref *buf, pointer_value *ptr)
     maybe_validate(buf);
 }
 
-// 从给定位置偏移一段距离 读取值
-int _read_box_by_offset(const char *ptr, int size, int64_t offset, value *out)
-{
-    // tinybuf_value *out = NULL;
-    int len = try_read_box(ptr + offset, size - offset, out);
-    if (len <= 0)
-    {
-        return len; // 不初始化value
-    }
-    // 成功反序列化 消耗的字节数为len
-    return len;
-}
-
-// 从指针位置开始读取box 提供开始位置+偏移 返回消耗的字节数 错误返回-1
-int read_box_by_pointer(buf_ref *buf, pointer_value pointer, tinybuf_value *out)
-{
-    // 转化指针
-    pointer_to_start(buf, &pointer);
-    // 确保指针类型为start
-    assert(pointer.type == start);
-    int len = _read_box_by_offset(buf->base, buf->all_size, pointer.offset, out);
-    return len;
-}
-
 typedef BOOL (*CONTAIN_HANDLER)(QWORD);
 // 高级序列化read入口
 // 二级版本 可处理二级格式 readbox标准 成功则修改buf指针 返回>0 否则不修改并返回<=0
@@ -983,7 +962,45 @@ typedef BOOL (*CONTAIN_HANDLER)(QWORD);
     int len = 0;         \
     BOOL failed = FALSE; \
     const char *reason = NULL;
-#define READ_RETURN
+#define READ_RETURN return (failed ? -1 : len);
+
+// 从给定位置偏移一段距离 读取值
+int _read_box_by_offset(buf_ref *buf, int64_t offset, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
+{
+
+    INIT_STATE
+    // tinybuf_value *out = NULL;
+    int64_t cur = buf->ptr;
+    int64_t cursize = buf->size;
+    // 保存现场并修改指针 从base开始 计算
+    buf->ptr = buf->base + offset;
+    buf->size = buf->all_size - offset;
+
+    if (OK_AND_ADDTO(try_read_box(buf, out, contain_handler), &len))
+    {
+        SET_SUCCESS();
+    }
+    else
+        SET_FAILED("read box error");
+    CHECK_FAILED
+    // 恢复现场
+    buf->ptr = cur;
+    buf->size = cursize;
+
+    READ_RETURN
+}
+
+// 从指针位置开始读取box 提供开始位置+偏移 返回消耗的字节数 错误返回-1
+int read_box_by_pointer(buf_ref *buf, pointer_value pointer, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
+{
+    // 转化指针
+    pointer_to_start(buf, &pointer);
+    // 确保指针类型为start
+    assert(pointer.type == start);
+    int len = _read_box_by_offset(buf->base, buf->all_size, pointer.offset, out, contain_handler);
+    return len;
+}
+
 inline int try_read_int_data(BOOL isneg, buf_ref *buf, QWORD *out)
 {
     INIT_STATE
@@ -1041,13 +1058,14 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
         return len;
     }
     // 执行高阶反序列化 支持环数据引用等
-    // len表示已经成功消费的字节数
+    // len表示已经成功消费的字节数 不保存错误码 成功则保存正数 失败保存0 
     len = 0;
     serialize_type type = serialize_null;
     if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
     {
         switch (type)
         {
+            // 单一version box 支持对version进行校验 版本错误则直接失败
         case serialize_version:
         {
             // version后跟一个裸整数 后跟一个 box
@@ -1071,10 +1089,159 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             SET_FAILED("read version failed");
             break;
         }
+        // 版本列表box 后跟一个整数表示列表长度 后跟一个versionbox序列 每个box都必须是versionbox
+        // 整个versionlist中 必须是同种类型数据且一旦找到正确版本 则直接返回该版本数据
+        case serialize_version_list:
+        {
+            // 读取版本列表长度
+            QWORD list_len;
+            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &list_len), &len))
+            {
+                // 读取版本列表
+                for (QWORD i = 0; i < list_len; i++)
+                {
+                    QWORD version;
+                    if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &version), &len))
+                    {
+                        // 检查version是否正确
+                        if (target_version(version))
+                        {
+                            if (OK_AND_ADDTO(try_read_box(buf, out, target_version), &len))
+                            {
+                                SET_SUCCESS();
+                                goto loopend;
+                            }
+                            SET_FAILED("read box failed");
+                            goto loopend;
+                        }
+                        SET_FAILED("version error");
+                        goto loopend;
+                    }
+                    SET_FAILED("read version failed");
+                    goto loopend;
+                }
+                // 没找到直接失败
+                SET_FAILED("read version list failed");
+            loopend:
+                break;
+            }
+        }
+
+        // 指针box 后接偏移整数
         case serialize_pointer_from_start_p:
         {
+            QWORD offset;
+            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
+            {
+                // 读取目标box
+                pointer_value pointer = (pointer_value){start, offset}; // 此处offset在i64范围
+                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                {
+                    SET_SUCCESS();
+                    break;
+                }
+                SET_FAILED("read pointer->box failed");
+                break;
+            }
+            SET_FAILED("read version failed");
+            break;
+        }
+        case serialize_pointer_from_start_n:
+        {
+            SQWORD offset;
+            // 按负数方式读取
+            if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
+            {
+                // 读取目标box
+                pointer_value pointer = (pointer_value){start, offset};
+                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                {
+                    SET_SUCCESS();
+                    break;
+                }
+                SET_FAILED("read pointer->box failed");
+                break;
+            }
+            SET_FAILED("read version failed");
+            break;
+        }
+        case serialize_pointer_from_end_p:
+        {
+            QWORD offset;
+            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
+            {
+                // 读取目标box
+                pointer_value pointer = (pointer_value){end, offset}; // 此处offset在i64范围
+                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                {
+                    SET_SUCCESS();
+                    break;
+                }
+                SET_FAILED("read pointer->box failed");
+                break;
+            }
+            SET_FAILED("read version failed");
+            break;
+        }
+        case serialize_pointer_from_end_n:
+        {
+            SQWORD offset;
+            // 按负数方式读取
+            if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
+            {
+                // 读取目标box
+                pointer_value pointer = (pointer_value){end, offset}; // 此处offset在i64范围
+                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                {
+                    SET_SUCCESS();
+                    break;
+                }
+                SET_FAILED("read pointer->box failed");
+                break;
+            }
+            SET_FAILED("read version failed");
+            break;
+        }
+        //--current
+        case serialize_pointer_from_current_p:
+        {
+            QWORD offset;
+            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
+            {
+                // 读取目标box
+                pointer_value pointer = (pointer_value){current, offset}; // 此处offset在i64范围
+                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                {
+                    SET_SUCCESS();
+                    break;
+                }
+                SET_FAILED("read pointer->box failed");
+                break;
+            }
+            SET_FAILED("read version failed");
+            break;
+        }
+        case serialize_pointer_from_current_n:
+        {
+            SQWORD offset;
+            // 按负数方式读取
+            if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
+            {
+                // 读取目标box
+                pointer_value pointer = (pointer_value){current, offset}; // 此处offset在i64范围
+                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                {
+                    SET_SUCCESS();
+                    break;
+                }
+                SET_FAILED("read pointer->box failed");
+                break;
+            }
+            SET_FAILED("read version failed");
+            break;
         }
         default:
+            SET_FAILED("read type UNKNOWN");
             break;
         }
     }
@@ -1083,10 +1250,8 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
         SET_FAILED("read type failed");
     }
     // 如果
-    if (failed)
-    {
-        buf_offset(buf, -len);
-    }
+    CHECK_FAILED
+    READ_RETURN
 }
 
 //------------------------------

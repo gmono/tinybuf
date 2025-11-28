@@ -10,6 +10,7 @@
 // int类型包括1到8字节整数 包括有符号无符号 且以无符号方式存储
 
 //dll扩展支持 支持dll提交 sign支持列表  并提供read与write接口执行基于插件的序列化
+
 typedef int64_t ssize;
 typedef uint64_t usize;
 
@@ -46,7 +47,15 @@ typedef enum
     // 任何时候value都是完整box存储
     // 兼容机制 version列表 支持新版本兼容旧版本
 
-    serialize_version_list = 20
+    serialize_version_list = 20,
+    //用于支持多part 每个part就是一个分区 用于支持并发读取每个分区拥有自己的长度
+    //分区指针指向分区头部位置 目标必然是一个part类型 type partlen data 其中 其中partlen为intdata
+    serialize_part = 21,
+    //用于支持并发读取
+    serialize_part_table=22,//分区表 后跟一个整数长度 加标准整数列表 非完整box 每个整数表示分区头指针
+    
+    // 扩展序列化类型 使用此类型 后面会跟一个变长正数（非完整box） 来表示更丰富的数据类型 用于支持插件系统
+    serialize_extern=255
 } serialize_type;
 //---压缩boxlist数据集合的序列化
 static inline int boxlist_serialize()

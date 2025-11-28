@@ -951,6 +951,24 @@ void pointer_to_start(const buf_ref *buf, pointer_value *ptr)
     maybe_validate(buf);
 }
 
+// 支持带错误信息的返回
+typedef struct
+{
+    int len;
+    const char *reason;
+} read_result;
+#define RESULT_OK(x) (x.len > 0)
+//--等效ok系列
+BOOL RESULT_OK_AND_ADDTO(read_result x, int *s)
+{
+    if (RESULT_OK(x))
+    {
+        *s += x.len;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 typedef BOOL (*CONTAIN_HANDLER)(QWORD);
 // 高级序列化read入口
 // 二级版本 可处理二级格式 readbox标准 成功则修改buf指针 返回>0 否则不修改并返回<=0
@@ -1058,7 +1076,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
         return len;
     }
     // 执行高阶反序列化 支持环数据引用等
-    // len表示已经成功消费的字节数 不保存错误码 成功则保存正数 失败保存0 
+    // len表示已经成功消费的字节数 不保存错误码 成功则保存正数 失败保存0
     len = 0;
     serialize_type type = serialize_null;
     if (OK_AND_ADDTO(try_read_type(buf, &type), &len))

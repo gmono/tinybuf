@@ -8,6 +8,8 @@
 // 1 支持变长数字格式并支持配置开启 2 支持KVPair通用格式
 // 3 支持自描述结构和向前兼容支持
 // int类型包括1到8字节整数 包括有符号无符号 且以无符号方式存储
+
+//dll扩展支持 支持dll提交 sign支持列表  并提供read与write接口执行基于插件的序列化
 typedef int64_t ssize;
 typedef uint64_t usize;
 

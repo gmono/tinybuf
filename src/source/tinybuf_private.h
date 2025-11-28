@@ -11,6 +11,8 @@
 #include "tinybuf_log.h"
 #include "tinybuf_buffer_private.h"
 
+typedef void (*free_handler)(void*);
+//动态值表示
 struct T_tinybuf_value{
     union {
         int64_t _int;
@@ -18,7 +20,10 @@ struct T_tinybuf_value{
         double _double;
         buffer *_string; //变长缓冲区
         AVLTree *_map_array; //kvpairs
+        void* _custom; //自定义类型指针
     } _data;
+    //自定义类型的释放函数
+    free_handler _custom_free;
     tinybuf_type _type;
 };
 

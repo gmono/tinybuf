@@ -8,8 +8,8 @@
 #endif
 
 typedef struct {
-    uint8_t *signs;
-    int sign_count;
+    uint8_t *types;
+    int type_count;
     tinybuf_plugin_read_fn read;
     tinybuf_plugin_write_fn write;
 } plugin_entry;
@@ -17,11 +17,11 @@ typedef struct {
 static plugin_entry *s_plugins = NULL;
 static int s_plugin_count = 0;
 
-static plugin_entry *find_plugin(uint8_t sign){
+static plugin_entry *find_plugin(uint8_t type){
     for(int i=0;i<s_plugin_count;++i){
         plugin_entry *p = &s_plugins[i];
-        for(int j=0;j<p->sign_count;++j){
-            if(p->signs[j] == sign){
+        for(int j=0;j<p->type_count;++j){
+            if(p->types[j] == type){
                 return p;
             }
         }
@@ -40,8 +40,8 @@ static inline int buf_offset(buf_ref *buf, int64_t offset){
     return 0;
 }
 
-int tinybuf_plugin_register(const uint8_t *signs, int sign_count, tinybuf_plugin_read_fn read, tinybuf_plugin_write_fn write){
-    if(!signs || sign_count <= 0){
+int tinybuf_plugin_register(const uint8_t *types, int type_count, tinybuf_plugin_read_fn read, tinybuf_plugin_write_fn write){
+    if(!types || type_count <= 0){
         return -1;
     }
     plugin_entry *new_list = (plugin_entry *)tinybuf_realloc(s_plugins, sizeof(plugin_entry) * (s_plugin_count + 1));
@@ -50,12 +50,12 @@ int tinybuf_plugin_register(const uint8_t *signs, int sign_count, tinybuf_plugin
     }
     s_plugins = new_list;
     plugin_entry *p = &s_plugins[s_plugin_count];
-    p->signs = (uint8_t *)tinybuf_malloc(sign_count);
-    if(!p->signs){
+    p->types = (uint8_t *)tinybuf_malloc(type_count);
+    if(!p->types){
         return -1;
     }
-    memcpy(p->signs, signs, sign_count);
-    p->sign_count = sign_count;
+    memcpy(p->types, types, type_count);
+    p->type_count = type_count;
     p->read = read;
     p->write = write;
     s_plugin_count += 1;
@@ -64,8 +64,8 @@ int tinybuf_plugin_register(const uint8_t *signs, int sign_count, tinybuf_plugin
 
 int tinybuf_plugin_unregister_all(void){
     for(int i=0;i<s_plugin_count;++i){
-        if(s_plugins[i].signs){
-            tinybuf_free(s_plugins[i].signs);
+        if(s_plugins[i].types){
+            tinybuf_free(s_plugins[i].types);
         }
     }
     tinybuf_free(s_plugins);
@@ -74,36 +74,27 @@ int tinybuf_plugin_unregister_all(void){
     return 0;
 }
 
-int tinybuf_plugins_try_read(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler){
-    if(!buf || buf->size < 1){
-        return 0;
-    }
-    uint8_t sign = (uint8_t)buf->ptr[0];
-    if(buf_offset(buf, 1) != 0){
-        return -1;
-    }
-    plugin_entry *p = find_plugin(sign);
+int tinybuf_plugins_try_read_by_type(uint8_t type, buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler){
+    plugin_entry *p = find_plugin(type);
     if(!p || !p->read){
-        buf_offset(buf, -1);
         return -1;
     }
-    int consumed = p->read(buf, out, contain_handler);
+    int consumed = p->read(type, buf, out, contain_handler);
     if(consumed <= 0){
-        buf_offset(buf, -1);
         return -1;
     }
-    return consumed + 1;
+    return consumed;
 }
 
-int tinybuf_plugins_try_write(uint8_t sign, const tinybuf_value *in, buffer *out){
-    plugin_entry *p = find_plugin(sign);
+int tinybuf_plugins_try_write(uint8_t type, const tinybuf_value *in, buffer *out){
+    plugin_entry *p = find_plugin(type);
     if(!p || !p->write){
         return -1;
     }
-    if(buffer_push(out, (char)sign) != 0){
+    if(buffer_push(out, (char)type) != 0){
         return -1;
     }
-    int w = p->write(sign, in, out);
+    int w = p->write(type, in, out);
     if(w <= 0){
         return -1;
     }
@@ -119,10 +110,18 @@ int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_
         buf_offset(buf, len);
         return len;
     }
-    int r = tinybuf_plugins_try_read(buf, out, contain_handler);
-    if(r > 0){
-        return r;
+    if(buf->size < 1){
+        return 0;
     }
+    uint8_t type = (uint8_t)buf->ptr[0];
+    if(buf_offset(buf, 1) != 0){
+        return -1;
+    }
+    int r = tinybuf_plugins_try_read_by_type(type, buf, out, contain_handler);
+    if(r > 0){
+        return r + 1;
+    }
+    buf_offset(buf, -1);
     return -1;
 }
 
@@ -157,4 +156,3 @@ int tinybuf_plugin_register_from_dll(const char *dll_path){
     return 0;
 #endif
 }
-

@@ -18,6 +18,8 @@ typedef enum {
     tinybuf_string,
     tinybuf_map,
     tinybuf_array,
+    //自定义类型 通过指针表示
+    tinybuf_custom
 } tinybuf_type;
 
 

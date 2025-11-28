@@ -54,8 +54,18 @@ typedef enum
     //用于支持并发读取
     serialize_part_table=22,//分区表 后跟一个整数长度 加标准整数列表 非完整box 每个整数表示分区头指针
     
+    //字符串池索引
+    serialize_str_index=23,
+    //表示一个字符串池 可缩小体积 
+    serialize_str_pool=24,
+    //用于支持把字符串池放在末尾
+    serialize_str_pool_table=25,//字符串池表 用于在文件开头确定字符串池的位置 如果有 则必须在开头
+    //使用字符串池+索引index来表示额外类型 后跟整数 要求字符串池存在
+    serialize_extern_str_idx=253,
+    //str类型的extern类型表示 占空间较大
+    serialize_extern_str=254,
     // 扩展序列化类型 使用此类型 后面会跟一个变长正数（非完整box） 来表示更丰富的数据类型 用于支持插件系统
-    serialize_extern=255
+    serialize_extern_int=255
 } serialize_type;
 //---压缩boxlist数据集合的序列化
 static inline int boxlist_serialize()

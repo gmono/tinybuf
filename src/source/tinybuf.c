@@ -471,7 +471,9 @@ int tinybuf_value_map_set(tinybuf_value *parent, const char *key, tinybuf_value 
 // 以数字为key
 int tinybuf_value_map_set_int(tinybuf_value *parent, uint64_t key, tinybuf_value *value)
 {
-    buffer *key_buf = tinybuf_int64_to_buffer(key);
+    buffer* key_buf=buffer_alloc();
+    assert(key_buf);
+    dump_int(key, key_buf);
     return tinybuf_value_map_set2(parent, key_buf, value);
 }
 
@@ -1835,7 +1837,10 @@ const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *va
 //--version
 void tinybuf_versionlist_add(tinybuf_value *versionlist, int64_t version, tinybuf_value *value)
 {
-    tinybuf_value_map_set2(versionlist, (buffer *)tinybuf_int64_to_buffer(version), value);
+    buffer* key_buf=buffer_alloc();
+    assert(key_buf);
+    dump_int(version, key_buf);
+    tinybuf_value_map_set2(versionlist, key_buf, value);
 }
 void tinybuf_version_set(tinybuf_value *target, int64_t version, tinybuf_value *value)
 {

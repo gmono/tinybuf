@@ -103,6 +103,7 @@
         "cwctype": "cpp",
         "iostream": "cpp",
         "typeindex": "cpp",
-        "xfacet": "cpp"
+        "xfacet": "cpp",
+        "tinybuf_buffer.h": "c"
     }
 }

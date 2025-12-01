@@ -4,10 +4,7 @@
 #else
 #include <netinet/in.h>
 #endif
-
-typedef BOOL bool;
-#define true TRUE
-#define false FALSE
+#include <stdbool.h>
 
 // 1 支持变长数字格式并支持配置开启 2 支持KVPair通用格式
 // 3 支持自描述结构和向前兼容支持
@@ -17,6 +14,57 @@ typedef BOOL bool;
 
 typedef int64_t ssize;
 typedef uint64_t usize;
+
+// 是否含有子引用
+inline bool has_sub_ref(const tinybuf_value *value)
+{
+    return value->_data._ref != NULL && (value->_type == tinybuf_value_ref || value->_type == tinybuf_version);
+}
+
+// 递归需要
+int tinybuf_value_clear(tinybuf_value *value);
+inline bool maybe_free_sub_ref(tinybuf_value *value)
+{
+    if (has_sub_ref(value))
+    {
+        int res = tinybuf_value_clear(value->_data._ref);
+        if (res != 0)
+        {
+            return false;
+        }
+        value->_data._ref = NULL;
+        value->_type = tinybuf_null;
+        return true;
+    }
+    return false;
+}
+
+// 是否需要执行custom 指针释放
+inline bool need_custom_free(const tinybuf_value *value)
+{
+    return value->_data._custom != NULL && value->_type == tinybuf_custom;
+}
+// 释放custom指针
+inline bool maybe_free_custom(tinybuf_value *value)
+{
+    if (need_custom_free(value))
+    {
+        if (value->_custom_free)
+        {
+            value->_custom_free(value->_data._custom);
+            value->_data._custom = NULL;
+            value->_type = tinybuf_null;
+        }
+        else
+        {
+            free(value->_data._custom);
+            value->_data._custom = NULL;
+            value->_type = tinybuf_null;
+        }
+        return true;
+    }
+    return false;
+}
 
 //--目前除了指针系列 version与versionlist其他都未实现
 typedef enum
@@ -216,6 +264,7 @@ int tinybuf_value_free(tinybuf_value *value)
     return 0;
 }
 
+// 清空对象 相当于maybe_free
 int tinybuf_value_clear(tinybuf_value *value)
 {
     assert(value);
@@ -247,6 +296,10 @@ int tinybuf_value_clear(tinybuf_value *value)
     default:
         break;
     }
+
+    // 释放custom指针 如果需要释放的话
+    maybe_free_sub_ref(value);
+    maybe_free_custom(value);
 
     if (value->_type != tinybuf_null)
     {
@@ -390,7 +443,9 @@ int tinybuf_value_map_set2(tinybuf_value *parent, buffer *key, tinybuf_value *va
     assert(parent);
     assert(key);
     assert(value);
-    if (parent->_type != tinybuf_map)
+    // version list也是map类型
+    if (parent->_type != tinybuf_map &&
+        parent->_type != tinybuf_versionlist)
     {
         tinybuf_value_clear(parent);
         parent->_type = tinybuf_map;
@@ -410,6 +465,13 @@ int tinybuf_value_map_set(tinybuf_value *parent, const char *key, tinybuf_value 
     buffer *key_buf = buffer_alloc();
     assert(key_buf);
     buffer_assign(key_buf, key, 0);
+    return tinybuf_value_map_set2(parent, key_buf, value);
+}
+
+// 以数字为key
+int tinybuf_value_map_set_int(tinybuf_value *parent, uint64_t key, tinybuf_value *value)
+{
+    buffer *key_buf = tinybuf_int64_to_buffer(key);
     return tinybuf_value_map_set2(parent, key_buf, value);
 }
 
@@ -592,8 +654,8 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         avl_tree_for_each_node(value->_data._map_array, out, avl_tree_for_each_node_dump_array);
     }
     break;
-    //其他类型 version 和versionlist
-    
+        // 其他类型 version 和versionlist
+
     default:
         // 不可达
         assert(0);
@@ -1483,7 +1545,7 @@ static inline int try_write_pointer(buffer *out, pointer_value pointer)
     return try_write_pointer_value(out, pointer.type, pointer.offset);
 }
 
-//写入总入口
+// 写入总入口
 static inline int try_write_box(buffer *out, const tinybuf_value *value)
 {
     int before = buffer_get_length_inline(out);
@@ -1768,4 +1830,15 @@ const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *va
     }
 
     return (tinybuf_value *)avl_tree_node_value(node);
+}
+
+//--version
+void tinybuf_versionlist_add(tinybuf_value *versionlist, int64_t version, tinybuf_value *value)
+{
+    tinybuf_value_map_set2(versionlist, (buffer *)tinybuf_int64_to_buffer(version), value);
+}
+void tinybuf_version_set(tinybuf_value *target, int64_t version, tinybuf_value *value)
+{
+    target->_type = tinybuf_version;
+    target->_data._ref = value;
 }

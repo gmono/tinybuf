@@ -84,6 +84,25 @@
         "codecvt": "c",
         "stdfloat": "c",
         "stop_token": "c",
-        "cstdint": "c"
+        "cstdint": "c",
+        "fstream": "c",
+        "resumable": "c",
+        "cctype": "cpp",
+        "cfenv": "cpp",
+        "cinttypes": "cpp",
+        "clocale": "cpp",
+        "concepts": "cpp",
+        "csetjmp": "cpp",
+        "csignal": "cpp",
+        "cstdarg": "cpp",
+        "cstdio": "cpp",
+        "cstdlib": "cpp",
+        "cstring": "cpp",
+        "ctime": "cpp",
+        "cwchar": "cpp",
+        "cwctype": "cpp",
+        "iostream": "cpp",
+        "typeindex": "cpp",
+        "xfacet": "cpp"
     }
 }

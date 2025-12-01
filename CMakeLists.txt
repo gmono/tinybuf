@@ -3,7 +3,7 @@ project(tinybuf)
 
 #使能c++11
 #add_compile_options(-std=c++11)
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 23)
 if(NOT MSVC)
     add_definitions(-Wno-int-to-void-pointer-cast -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
 endif()

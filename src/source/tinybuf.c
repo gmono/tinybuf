@@ -5,15 +5,18 @@
 #include <netinet/in.h>
 #endif
 
+typedef BOOL bool;
+#define true TRUE
+#define false FALSE
+
 // 1 支持变长数字格式并支持配置开启 2 支持KVPair通用格式
 // 3 支持自描述结构和向前兼容支持
 // int类型包括1到8字节整数 包括有符号无符号 且以无符号方式存储
 
-//dll扩展支持 支持dll提交 sign支持列表  并提供read与write接口执行基于插件的序列化
+// dll扩展支持 支持dll提交 sign支持列表  并提供read与write接口执行基于插件的序列化
 
 typedef int64_t ssize;
 typedef uint64_t usize;
-
 
 //--
 typedef enum
@@ -49,43 +52,46 @@ typedef enum
     // 兼容机制 version列表 支持新版本兼容旧版本
 
     serialize_version_list = 20,
-    //用于支持多part 每个part就是一个分区 用于支持并发读取每个分区拥有自己的长度
-    //分区指针指向分区头部位置 目标必然是一个part类型 type partlen data 其中 其中partlen为intdata
+    // 用于支持多part 每个part就是一个分区 用于支持并发读取每个分区拥有自己的长度
+    // 分区指针指向分区头部位置 目标必然是一个part类型 type partlen data 其中 其中partlen为intdata
     serialize_part = 21,
-    //用于支持并发读取
-    serialize_part_table=22,//分区表 后跟一个整数长度 加标准整数列表 非完整box 每个整数表示分区头指针
-    
-    //字符串池索引
-    serialize_str_index=23,
-    //表示一个字符串池 可缩小体积 
-    serialize_str_pool=24,
-    //用于支持把字符串池放在末尾
-    serialize_str_pool_table=25,//字符串池表 用于在文件开头确定字符串池的位置 如果有 则必须在开头
-    serialize_uri=26,//可以是文件uri或其他 结构为 sign uritype otherdata 后面跟一个文件path str 再跟一个整数表示数据在文件中的位置
-    serialize_router_link=27,//跟一个uribox
-    //遇到文件链接 应跳转到另一个文件的指定位置继续读取 高层box 对数据透明
-    //与uri的区别是 uri只读取一个value并返回
-    serialize_text_ref=28,//uri指向的文本文件引用 fileid 有编码说明 
-    serialize_bin_ref=29,//二进制文件引用 支持部分引用 fileid
-    serialize_embed_file,//内嵌文件 有fileid 文件名 文件mime等 支持strptr和str
-    serialize_file_range,//文件范围引用 基于已经有的fileid
-    serialize_with_metadata,//元类型 表示一个带有metadata的box 透明
-    serialize_noseq_part, //表示一个无序区 遇到直接跳过 无序区用于保存孤立对象 这种对象只被某个指针引用 不存在于其他位置
-    //空白区 遇到直接跳过 用于用fat在其中高性能删除已有数据 并留下一个空白区
-    serialize_empty_part, //sign len 
-    //fs和fstable都支持多分块 元数据里会有指向下一个block和上一个block的指针 用于将space联成一片
-    serialize_fs,//表示一个文件系统块里面可以有目录结构
-    serialize_file_table,//表示一个文件表 结构简单 没有目录结构
-    serialize_fs_file,//表示一个文件系统或文件表中的 文件 文件就是具名+具metadata的数据对象
-    serialize_fs_inode,//表示一个inode 一个fs节点 节点可以是目录 链接 或文件
-    serialize_flat_part,//通用连续空间快 支持相对寻址
-    serialize_pointer_advance,//先进指针 支持更丰富的寻址方式 例如flat空间寻址 block内部寻址 跨文件寻址等
-    //使用字符串池+索引index来表示额外类型 后跟整数 要求字符串池存在
-    serialize_extern_str_idx=253,
-    //str类型的extern类型表示 占空间较大
-    serialize_extern_str=254,
+    // 用于支持并发读取
+    serialize_part_table = 22, // 分区表 后跟一个整数长度 加标准整数列表 非完整box 每个整数表示分区头指针
+
+    // 字符串池索引
+    serialize_str_index = 23,
+    // 表示一个字符串池 可缩小体积
+    serialize_str_pool = 24,
+    // 用于支持把字符串池放在末尾
+    serialize_str_pool_table = 25, // 字符串池表 用于在文件开头确定字符串池的位置 如果有 则必须在开头
+    serialize_uri = 26,            // 可以是文件uri或其他 结构为 sign uritype otherdata 后面跟一个文件path str 再跟一个整数表示数据在文件中的位置
+    serialize_router_link = 27,    // 跟一个uribox
+    // 遇到文件链接 应跳转到另一个文件的指定位置继续读取 高层box 对数据透明
+    // 与uri的区别是 uri只读取一个value并返回
+    serialize_text_ref = 28, // uri指向的文本文件引用 fileid 有编码说明
+    serialize_bin_ref = 29,  // 二进制文件引用 支持部分引用 fileid
+    serialize_embed_file,    // 内嵌文件 有fileid 文件名 文件mime等 支持strptr和str
+    serialize_file_range,    // 文件范围引用 基于已经有的fileid
+    serialize_with_metadata, // 元类型 表示一个带有metadata的box 透明
+    serialize_noseq_part,    // 表示一个无序区 遇到直接跳过 无序区用于保存孤立对象 这种对象只被某个指针引用 不存在于其他位置
+    // 空白区 遇到直接跳过 用于用fat在其中高性能删除已有数据 并留下一个空白区
+    serialize_empty_part, // sign len
+    // fs和fstable都支持多分块 元数据里会有指向下一个block和上一个block的指针 用于将space联成一片
+    serialize_fs,         // 表示一个文件系统块里面可以有目录结构
+    serialize_file_table, // 表示一个文件表 结构简单 没有目录结构
+    serialize_fs_file,    // 表示一个文件系统或文件表中的 文件 文件就是具名+具metadata的数据对象
+    serialize_fs_inode,   // 表示一个inode 一个fs节点 节点可以是目录 链接 或文件
+    serialize_flat_part,  // 通用连续空间快 支持相对寻址 平台空间第一优先 平坦空间支持指向下一个block或上一个block 使用指针类型
+    // 可以是普通指针或高级指针
+    serialize_pointer_advance, // 先进指针 支持更丰富的寻址方式 例如flat空间寻址 block内部寻址 跨文件寻址等
+    serialize_empty_table,     // 空白空间表 用于配合平坦buf实现文件内连续子空间
+    // 使用字符串池+索引index来表示额外类型 后跟整数 要求字符串池存在
+    // 后面跟的是idx 直接就是idx后面不跟完整databox而是跟index整数
+    serialize_extern_str_idx = 253,
+    // str类型的extern类型表示 占空间较大 后面有一个完整的databox 可以是str或stridx
+    serialize_extern_str = 254,
     // 扩展序列化类型 使用此类型 后面会跟一个变长正数（非完整box） 来表示更丰富的数据类型 用于支持插件系统
-    serialize_extern_int=255
+    serialize_extern_int = 255
 } serialize_type;
 //---压缩boxlist数据集合的序列化
 static inline int boxlist_serialize()
@@ -961,7 +967,10 @@ enum offset_type
 {
     start,
     end,
-    current
+    current,
+    // 高级指针类型
+    parent_flat_start, // 基于父flat 空间寻址
+    parent_flat_end    // 基于父flat 末尾寻址
 };
 typedef struct
 {
@@ -1056,10 +1065,11 @@ int read_box_by_pointer(buf_ref *buf, pointer_value pointer, tinybuf_value *out,
     pointer_to_start(buf, &pointer);
     // 确保指针类型为start
     assert(pointer.type == start);
-    int len = _read_box_by_offset(buf->base, buf->all_size, pointer.offset, out, contain_handler);
+    int len = _read_box_by_offset(buf, pointer.offset, out, contain_handler);
     return len;
 }
 
+// 读取一个整数值
 inline int try_read_int_data(BOOL isneg, buf_ref *buf, QWORD *out)
 {
     INIT_STATE
@@ -1076,6 +1086,7 @@ inline int try_read_int_data(BOOL isneg, buf_ref *buf, QWORD *out)
     CHECK_FAILED
     READ_RETURN
 }
+
 // 读取一个标准的变长整数box
 inline int try_read_intbox(buf_ref *buf, QWORD *saveptr)
 {
@@ -1101,8 +1112,113 @@ inline int try_read_intbox(buf_ref *buf, QWORD *saveptr)
     CHECK_FAILED
     READ_RETURN
 }
-//---核心box读取函数 当前整数表示 signbyte intdata
 
+// 是否简单指针
+inline BOOL is_simple_pointer_type(serialize_type type)
+{
+    return type == serialize_pointer_from_current_n ||
+           type == serialize_pointer_from_start_n ||
+           type == serialize_pointer_from_end_n ||
+           type == serialize_pointer_from_current_n ||
+           type == serialize_pointer_from_start_p ||
+           type == serialize_pointer_from_end_p ||
+           type == serialize_pointer_from_current_p;
+}
+inline bool is_pointer_neg(serialize_type type)
+{
+    return type == serialize_pointer_from_current_n ||
+           type == serialize_pointer_from_start_n ||
+           type == serialize_pointer_from_end_n;
+}
+// 简单指针偏移类型判定
+inline enum offset_type get_offset_type(serialize_type type)
+{
+    switch (type)
+    {
+    case serialize_pointer_from_current_n:
+    case serialize_pointer_from_current_p:
+        return current;
+    case serialize_pointer_from_start_n:
+    case serialize_pointer_from_start_p:
+        return start;
+    case serialize_pointer_from_end_n:
+    case serialize_pointer_from_end_p:
+        return end;
+    default:
+        break;
+    }
+}
+// 尝试读取一个指针值 目前只支持简单指针 这里必须是指针值
+inline int try_read_pointer_value(buf_ref *buf, QWORD *saveptr)
+{
+    INIT_STATE
+    serialize_type type;
+    if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
+    {
+        if (is_simple_pointer_type(type))
+        {
+            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, saveptr), &len))
+            {
+                SET_SUCCESS();
+            }
+            else
+                SET_FAILED("read pointer error");
+        }
+        else
+            SET_FAILED("type error : not simple pointer");
+    }
+    else
+        SET_FAILED("read type error");
+    CHECK_FAILED
+    READ_RETURN
+}
+
+// assert地读取一个简单指针
+inline int try_read_pointer(buf_ref *buf, pointer_value *pointer)
+{
+    INIT_STATE
+    serialize_type type;
+    if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
+    {
+        if (is_simple_pointer_type(type))
+        {
+            QWORD offset;
+            bool isneg = is_pointer_neg(type);
+            if (OK_AND_ADDTO(try_read_int_data(isneg, buf, offset), &len))
+            {
+                pointer->offset = offset;
+                pointer->type = get_offset_type(type);
+                SET_SUCCESS();
+            }
+            else
+                SET_FAILED("read pointer error");
+        }
+        else
+            SET_FAILED("type error : not simple pointer");
+    }
+    else
+        SET_FAILED("read type error");
+    CHECK_FAILED
+    READ_RETURN
+}
+//---核心box读取函数 当前整数表示 signbyte intdata
+// typedef struct flat_space_block
+// {
+//     //对应的flat part的指针
+//     QWORD offset;//start开始的指针
+
+//     QWORD size;
+// } flat_space_block;
+// typedef struct
+// {
+//     flat_space_block *head;
+//     flat_space_block *curr;
+// } flat_space_info;
+// typedef struct state
+// {
+//     // 反序列化状态
+
+// } state;
 int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version)
 {
     // 尝试初阶反序列化
@@ -1311,6 +1427,88 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
     // 如果
     CHECK_FAILED
     READ_RETURN
+}
+
+static inline int try_write_type(buffer *out, serialize_type type)
+{
+    buffer_append(out, (char *)&type, 1);
+    return 1;
+}
+
+static inline int try_write_int_data(BOOL isneg, buffer *out, QWORD val)
+{
+    return dump_int(val, out);
+}
+
+static inline int try_write_intbox(buffer *out, SQWORD sval)
+{
+    int len = 0;
+    serialize_type type = sval < 0 ? serialize_negtive_int : serialize_positive_int;
+    len += try_write_type(out, type);
+    QWORD mag = sval < 0 ? (QWORD)(-sval) : (QWORD)sval;
+    len += try_write_int_data(type == serialize_negtive_int, out, mag);
+    return len;
+}
+
+static inline serialize_type make_pointer_type(enum offset_type t, BOOL neg)
+{
+    switch (t)
+    {
+    case current:
+        return neg ? serialize_pointer_from_current_n : serialize_pointer_from_current_p;
+    case start:
+        return neg ? serialize_pointer_from_start_n : serialize_pointer_from_start_p;
+    case end:
+        return neg ? serialize_pointer_from_end_n : serialize_pointer_from_end_p;
+    default:
+        return serialize_null;
+    }
+}
+
+static inline int try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset)
+{
+    BOOL neg = offset < 0;
+    serialize_type pt = make_pointer_type(t, neg);
+    int len = 0;
+    len += try_write_type(out, pt);
+    QWORD mag = neg ? (QWORD)(-offset) : (QWORD)offset;
+    len += try_write_int_data(FALSE, out, mag);
+    return len;
+}
+
+static inline int try_write_pointer(buffer *out, pointer_value pointer)
+{
+    return try_write_pointer_value(out, pointer.type, pointer.offset);
+}
+
+static inline int try_write_box(buffer *out, const tinybuf_value *value)
+{
+    int before = buffer_get_length_inline(out);
+    tinybuf_value_serialize(value, out);
+    int after = buffer_get_length_inline(out);
+    return after - before;
+}
+
+static inline int try_write_version_box(buffer *out, QWORD version, const tinybuf_value *box)
+{
+    int len = 0;
+    len += try_write_type(out, serialize_version);
+    len += try_write_int_data(FALSE, out, version);
+    len += try_write_box(out, box);
+    return len;
+}
+
+static inline int try_write_version_list(buffer *out, const QWORD *versions, const tinybuf_value **boxes, int count)
+{
+    int len = 0;
+    len += try_write_type(out, serialize_version_list);
+    len += try_write_int_data(FALSE, out, (QWORD)count);
+    for (int i = 0; i < count; ++i)
+    {
+        len += try_write_int_data(FALSE, out, versions[i]);
+        len += try_write_box(out, boxes[i]);
+    }
+    return len;
 }
 
 //------------------------------

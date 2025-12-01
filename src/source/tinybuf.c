@@ -18,7 +18,7 @@ typedef BOOL bool;
 typedef int64_t ssize;
 typedef uint64_t usize;
 
-//--
+//--目前除了指针系列 version与versionlist其他都未实现
 typedef enum
 {
     serialize_null = 0,
@@ -592,6 +592,8 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         avl_tree_for_each_node(value->_data._map_array, out, avl_tree_for_each_node_dump_array);
     }
     break;
+    //其他类型 version 和versionlist
+    
     default:
         // 不可达
         assert(0);
@@ -1481,6 +1483,7 @@ static inline int try_write_pointer(buffer *out, pointer_value pointer)
     return try_write_pointer_value(out, pointer.type, pointer.offset);
 }
 
+//写入总入口
 static inline int try_write_box(buffer *out, const tinybuf_value *value)
 {
     int before = buffer_get_length_inline(out);

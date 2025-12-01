@@ -20,8 +20,10 @@ typedef enum {
     tinybuf_array,
     //自定义类型 通过指针表示
     tinybuf_custom,
-    tinybuf_value_ref//表示到其他value的引用 如果这个value的指针存在或vid存在则表示一个环 不存在则
+    tinybuf_value_ref,//表示到其他value的引用 如果这个value的指针存在或vid存在则表示一个环 不存在则
     //应该先写入被引用的value 再写入当前value 
+    tinybuf_version, //内部为另一个tinybuf的引用 表示版本
+    tinybuf_versionlist, //内部为一个数组 可以添加多个版本
 } tinybuf_type;
 
 

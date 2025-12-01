@@ -195,9 +195,12 @@ void tinybuf_value_test(){
 
     buffer *buf = buffer_alloc();
 
+    //测试序列化与反序列化
     tinybuf_value_serialize(value_origin,buf);
     tinybuf_value_deserialize(buffer_get_data(buf),buffer_get_length(buf),value_deserialize);
 
+    //测试继续bufref的序列化和反序列化
+    
     buffer_set_length(buf,0);
     tinybuf_value_serialize_as_json(value_origin,buf,JSON_COMPACT);
     tinybuf_value_deserialize_from_json(buffer_get_data(buf),buffer_get_length(buf),value_deserialize_from_json);

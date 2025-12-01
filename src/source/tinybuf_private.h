@@ -19,9 +19,9 @@ struct T_tinybuf_value{
         int _bool;
         double _double;
         buffer *_string; //变长缓冲区
-        AVLTree *_map_array; //kvpairs
+        AVLTree *_map_array; //kvpairs versionlist也会使用此字段保存不同版本的buf引用
         void* _custom; //自定义类型指针
-        tinybuf_value *_ref; //引用类型指针
+        tinybuf_value *_ref; //引用类型指针 value_ref version都会使用此字段
     } _data;
     //自定义类型的释放函数
     free_handler _custom_free;

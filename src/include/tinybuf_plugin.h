@@ -29,7 +29,21 @@ int tinybuf_plugins_try_write(uint8_t type, const tinybuf_value *in, buffer *out
 
 int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 
+// core try-read/try-write APIs
+int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
+int tinybuf_try_write_box(buffer *out, const tinybuf_value *value);
+int tinybuf_try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box);
+int tinybuf_try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count);
+
 int tinybuf_plugin_register_from_dll(const char *dll_path);
+
+typedef enum {
+    tinybuf_offset_start = 0,
+    tinybuf_offset_end = 1,
+    tinybuf_offset_current = 2
+} tinybuf_offset_type;
+
+int tinybuf_try_write_pointer(buffer *out, tinybuf_offset_type t, int64_t offset);
 
 #ifdef __cplusplus
 }

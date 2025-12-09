@@ -151,6 +151,12 @@ extern "C"
      * @return 成员对象的指针
      */
     const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *value, int index, buffer **key);
+
+    int tinybuf_dump_buffer_as_text(const char *data, int len, buffer *out);
+
+    int tinybuf_try_write_array_header(buffer *out, int count);
+    int tinybuf_try_write_map_header(buffer *out, int count);
+    int tinybuf_try_write_string_raw(buffer *out, const char *str, int len);
     ////////////////////////////////赋值////////////////////////////////
 
     /**

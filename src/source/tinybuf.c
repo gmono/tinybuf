@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #endif
 #include <stdbool.h>
+#include <stdio.h>
 
 // 1 支持变长数字格式并支持配置开启 2 支持KVPair通用格式
 // 3 支持自描述结构和向前兼容支持
@@ -27,16 +28,55 @@ inline bool maybe_free_sub_ref(tinybuf_value *value)
 {
     if (has_sub_ref(value))
     {
-        int res = tinybuf_value_clear(value->_data._ref);
-        if (res != 0)
-        {
-            return false;
-        }
+        tinybuf_value *sub = value->_data._ref;
+        // break the cycle first
         value->_data._ref = NULL;
-        value->_type = tinybuf_null;
+        // recursively clear the referenced object; container ownership will free its pointer
+        tinybuf_value_clear(sub);
         return true;
     }
     return false;
+}
+
+static tinybuf_value **s_clear_stack = NULL;
+static int s_clear_stack_count = 0;
+static int s_clear_stack_capacity = 0;
+
+static inline int clear_stack_contains(tinybuf_value *v){
+    for(int i=0;i<s_clear_stack_count;++i){
+        if(s_clear_stack[i] == v){
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static inline void clear_stack_push(tinybuf_value *v){
+    if(s_clear_stack_count == s_clear_stack_capacity){
+        int newcap = s_clear_stack_capacity ? (s_clear_stack_capacity * 2) : 16;
+        s_clear_stack = (tinybuf_value **)tinybuf_realloc(s_clear_stack, sizeof(tinybuf_value*) * newcap);
+        s_clear_stack_capacity = newcap;
+    }
+    s_clear_stack[s_clear_stack_count++] = v;
+}
+
+static inline void clear_stack_pop(tinybuf_value *v){
+    if(s_clear_stack_count == 0){
+        return;
+    }
+    if(s_clear_stack[s_clear_stack_count - 1] == v){
+        --s_clear_stack_count;
+        return;
+    }
+    for(int i=0;i<s_clear_stack_count;++i){
+        if(s_clear_stack[i] == v){
+            for(int j=i+1;j<s_clear_stack_count;++j){
+                s_clear_stack[j-1] = s_clear_stack[j];
+            }
+            --s_clear_stack_count;
+            return;
+        }
+    }
 }
 
 // 是否需要执行custom 指针释放
@@ -268,6 +308,11 @@ int tinybuf_value_free(tinybuf_value *value)
 int tinybuf_value_clear(tinybuf_value *value)
 {
     assert(value);
+    if (clear_stack_contains(value))
+    {
+        return 0;
+    }
+    clear_stack_push(value);
     switch (value->_type)
     {
     case tinybuf_string:
@@ -307,6 +352,7 @@ int tinybuf_value_clear(tinybuf_value *value)
         memset(value, 0, sizeof(tinybuf_value));
         value->_type = tinybuf_null;
     }
+    clear_stack_pop(value);
     return 0;
 }
 
@@ -1098,20 +1144,77 @@ typedef BOOL (*CONTAIN_HANDLER)(QWORD);
     const char *reason = NULL;
 #define READ_RETURN return (failed ? -1 : len);
 
+//------------- pointer->object pool for cyclic structures -------------
+typedef struct {
+    int64_t offset;
+    tinybuf_value *value;
+    int complete;
+} offset_pool_entry;
+
+static const char *s_pool_base = NULL;
+static offset_pool_entry *s_pool = NULL;
+static int s_pool_count = 0;
+static int s_pool_capacity = 0;
+
+static inline void pool_reset(const buf_ref *buf){
+    if(s_pool_base != buf->base){
+        if(s_pool){
+            tinybuf_free(s_pool);
+            s_pool = NULL;
+            s_pool_capacity = 0;
+        }
+        s_pool_base = buf->base;
+    }
+    s_pool_count = 0;
+}
+
+static inline offset_pool_entry *pool_find(int64_t offset){
+    for(int i=0;i<s_pool_count;++i){
+        if(s_pool[i].offset == offset){
+            return &s_pool[i];
+        }
+    }
+    return NULL;
+}
+
+static inline offset_pool_entry *pool_register(int64_t offset, tinybuf_value *value){
+    offset_pool_entry *e = pool_find(offset);
+    if(e){
+        if(value){ e->value = value; }
+        return e;
+    }
+    if(s_pool_count == s_pool_capacity){
+        int newcap = s_pool_capacity ? (s_pool_capacity * 2) : 16;
+        s_pool = (offset_pool_entry *)tinybuf_realloc(s_pool, sizeof(offset_pool_entry) * newcap);
+        s_pool_capacity = newcap;
+    }
+    s_pool[s_pool_count].offset = offset;
+    s_pool[s_pool_count].value = value;
+    s_pool[s_pool_count].complete = 0;
+    return &s_pool[s_pool_count++];
+}
+
+static inline void pool_mark_complete(int64_t offset){
+    offset_pool_entry *e = pool_find(offset);
+    if(e){ e->complete = 1; }
+}
 // 从给定位置偏移一段距离 读取值
 int _read_box_by_offset(buf_ref *buf, int64_t offset, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
 
     INIT_STATE
     // tinybuf_value *out = NULL;
-    int64_t cur = buf->ptr;
+    const char *cur = buf->ptr;
     int64_t cursize = buf->size;
     // 保存现场并修改指针 从base开始 计算
     buf->ptr = buf->base + offset;
     buf->size = buf->all_size - offset;
 
+    pool_register(offset, out);
+
     if (OK_AND_ADDTO(try_read_box(buf, out, contain_handler), &len))
     {
+        pool_mark_complete(offset);
         SET_SUCCESS();
     }
     else
@@ -1127,11 +1230,16 @@ int _read_box_by_offset(buf_ref *buf, int64_t offset, tinybuf_value *out, CONTAI
 // 从指针位置开始读取box 提供开始位置+偏移 返回消耗的字节数 错误返回-1
 int read_box_by_pointer(buf_ref *buf, pointer_value pointer, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
-    // 转化指针
-    pointer_to_start(buf, &pointer);
-    // 确保指针类型为start
-    assert(pointer.type == start);
-    int len = _read_box_by_offset(buf, pointer.offset, out, contain_handler);
+    static int s_read_pointer_depth = 0;
+    s_read_pointer_depth++;
+    int len = -1;
+    if (s_read_pointer_depth <= 64)
+    {
+        pointer_to_start(buf, &pointer);
+        assert(pointer.type == start);
+        len = _read_box_by_offset(buf, pointer.offset, out, contain_handler);
+    }
+    s_read_pointer_depth--;
     return len;
 }
 
@@ -1250,7 +1358,7 @@ inline int try_read_pointer(buf_ref *buf, pointer_value *pointer)
         {
             QWORD offset;
             bool isneg = is_pointer_neg(type);
-            if (OK_AND_ADDTO(try_read_int_data(isneg, buf, offset), &len))
+            if (OK_AND_ADDTO(try_read_int_data(isneg, buf, &offset), &len))
             {
                 pointer->offset = offset;
                 pointer->type = get_offset_type(type);
@@ -1289,6 +1397,8 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
 {
     // 尝试初阶反序列化
     INIT_STATE
+    int64_t box_offset = buf_current_offset(buf);
+    pool_register(box_offset, out);
     len = tinybuf_value_deserialize(buf->ptr, buf->size, out);
     if (len == 0)
         return len;
@@ -1296,6 +1406,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
     {
         // 兼容buf逻辑
         buf_offset(buf, len);
+        pool_mark_complete(box_offset);
         return len;
     }
     // 执行高阶反序列化 支持环数据引用等
@@ -1318,6 +1429,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 {
                     if (OK_AND_ADDTO(try_read_box(buf, out, target_version), &len))
                     {
+                        pool_mark_complete(box_offset);
                         SET_SUCCESS();
                         break;
                     }
@@ -1349,6 +1461,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                         {
                             if (OK_AND_ADDTO(try_read_box(buf, out, target_version), &len))
                             {
+                                pool_mark_complete(box_offset);
                                 SET_SUCCESS();
                                 goto loopend;
                             }
@@ -1374,10 +1487,21 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             QWORD offset;
             if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
             {
-                // 读取目标box
-                pointer_value pointer = (pointer_value){start, offset}; // 此处offset在i64范围
-                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                pointer_value pointer = (pointer_value){start, offset};
+                offset_pool_entry *e = pool_find(pointer.offset);
+                if(e){
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = e->value;
+                    SET_SUCCESS();
+                    break;
+                }
+                tinybuf_value *target = tinybuf_value_alloc();
+                pool_register(pointer.offset, target);
+                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, target, target_version), &len))
                 {
+                    pool_mark_complete(pointer.offset);
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = target;
                     SET_SUCCESS();
                     break;
                 }
@@ -1393,10 +1517,21 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             // 按负数方式读取
             if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
             {
-                // 读取目标box
                 pointer_value pointer = (pointer_value){start, offset};
-                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                offset_pool_entry *e = pool_find(pointer.offset);
+                if(e){
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = e->value;
+                    SET_SUCCESS();
+                    break;
+                }
+                tinybuf_value *target = tinybuf_value_alloc();
+                pool_register(pointer.offset, target);
+                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, target, target_version), &len))
                 {
+                    pool_mark_complete(pointer.offset);
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = target;
                     SET_SUCCESS();
                     break;
                 }
@@ -1411,10 +1546,22 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             QWORD offset;
             if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
             {
-                // 读取目标box
-                pointer_value pointer = (pointer_value){end, offset}; // 此处offset在i64范围
-                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                pointer_value pointer = (pointer_value){end, offset};
+                pointer_to_start(buf, &pointer);
+                offset_pool_entry *e = pool_find(pointer.offset);
+                if(e){
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = e->value;
+                    SET_SUCCESS();
+                    break;
+                }
+                tinybuf_value *target = tinybuf_value_alloc();
+                pool_register(pointer.offset, target);
+                if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
                 {
+                    pool_mark_complete(pointer.offset);
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = target;
                     SET_SUCCESS();
                     break;
                 }
@@ -1430,10 +1577,22 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             // 按负数方式读取
             if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
             {
-                // 读取目标box
-                pointer_value pointer = (pointer_value){end, offset}; // 此处offset在i64范围
-                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                pointer_value pointer = (pointer_value){end, offset};
+                pointer_to_start(buf, &pointer);
+                offset_pool_entry *e = pool_find(pointer.offset);
+                if(e){
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = e->value;
+                    SET_SUCCESS();
+                    break;
+                }
+                tinybuf_value *target = tinybuf_value_alloc();
+                pool_register(pointer.offset, target);
+                if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
                 {
+                    pool_mark_complete(pointer.offset);
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = target;
                     SET_SUCCESS();
                     break;
                 }
@@ -1449,10 +1608,22 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             QWORD offset;
             if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
             {
-                // 读取目标box
-                pointer_value pointer = (pointer_value){current, offset}; // 此处offset在i64范围
-                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                pointer_value pointer = (pointer_value){current, offset};
+                pointer_to_start(buf, &pointer);
+                offset_pool_entry *e = pool_find(pointer.offset);
+                if(e){
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = e->value;
+                    SET_SUCCESS();
+                    break;
+                }
+                tinybuf_value *target = tinybuf_value_alloc();
+                pool_register(pointer.offset, target);
+                if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
                 {
+                    pool_mark_complete(pointer.offset);
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = target;
                     SET_SUCCESS();
                     break;
                 }
@@ -1468,10 +1639,22 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             // 按负数方式读取
             if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
             {
-                // 读取目标box
-                pointer_value pointer = (pointer_value){current, offset}; // 此处offset在i64范围
-                if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, out, target_version), &len))
+                pointer_value pointer = (pointer_value){current, offset};
+                pointer_to_start(buf, &pointer);
+                offset_pool_entry *e = pool_find(pointer.offset);
+                if(e){
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = e->value;
+                    SET_SUCCESS();
+                    break;
+                }
+                tinybuf_value *target = tinybuf_value_alloc();
+                pool_register(pointer.offset, target);
+                if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
                 {
+                    pool_mark_complete(pointer.offset);
+                    out->_type = tinybuf_value_ref;
+                    out->_data._ref = target;
                     SET_SUCCESS();
                     break;
                 }
@@ -1492,6 +1675,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
     }
     // 如果
     CHECK_FAILED
+    if(!failed){ pool_mark_complete(box_offset); }
     READ_RETURN
 }
 
@@ -1576,6 +1760,46 @@ static inline int try_write_version_list(buffer *out, const QWORD *versions, con
         len += try_write_box(out, boxes[i]);
     }
     return len;
+}
+
+// public wrappers
+int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
+{
+    pool_reset(buf);
+    return try_read_box(buf, out, contain_handler);
+}
+
+int tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
+{
+    return try_write_box(out, value);
+}
+
+int tinybuf_try_write_version_box(buffer *out, QWORD version, const tinybuf_value *box)
+{
+    return try_write_version_box(out, version, box);
+}
+
+int tinybuf_try_write_version_list(buffer *out, const QWORD *versions, const tinybuf_value **boxes, int count)
+{
+    return try_write_version_list(out, versions, boxes, count);
+}
+
+int tinybuf_try_write_pointer(buffer *out, int t, SQWORD offset)
+{
+    enum offset_type et = start;
+    if (t == 1) et = end;
+    else if (t == 2) et = current;
+    return try_write_pointer_value(out, et, offset);
+}
+
+int tinybuf_try_write_array_header(buffer *out, int count){
+    int len = 0; len += try_write_type(out, serialize_array); len += try_write_int_data(FALSE, out, (QWORD)count); return len;
+}
+int tinybuf_try_write_map_header(buffer *out, int count){
+    int len = 0; len += try_write_type(out, serialize_map); len += try_write_int_data(FALSE, out, (QWORD)count); return len;
+}
+int tinybuf_try_write_string_raw(buffer *out, const char *str, int len){
+    return dump_string(len, str, out);
 }
 
 //------------------------------
@@ -1834,6 +2058,329 @@ const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *va
     return (tinybuf_value *)avl_tree_node_value(node);
 }
 
+static inline void append_cstr(buffer *out, const char *s){
+    buffer_append(out, s, (int)strlen(s));
+}
+static inline void append_int_dec(buffer *out, int64_t v){
+    char tmp[64];
+    int n = snprintf(tmp, sizeof(tmp), "%lld", (long long)v);
+    buffer_append(out, tmp, n);
+}
+static inline void append_newline(buffer *out){
+    buffer_append(out, "\r\n", 2);
+}
+static int s_dump_indent = 0;
+static inline void append_indent(buffer *out){
+    for(int i=0;i<s_dump_indent;++i){
+        buffer_append(out, "    ", 4);
+    }
+}
+
+static int dump_box_text(buf_ref *buf, buffer *out);
+static int collect_box_labels(buf_ref *buf);
+
+typedef struct { int64_t pos; int label; } dump_label;
+static dump_label *s_dump_labels = NULL;
+static int s_dump_labels_count = 0;
+static int s_dump_labels_capacity = 0;
+static const char *s_dump_base = NULL;
+static int64_t s_dump_total = 0;
+static int64_t *s_dump_box_starts = NULL;
+static int s_dump_box_starts_count = 0;
+static int s_dump_box_starts_capacity = 0;
+
+static inline void dump_labels_reset(const buf_ref *buf){
+    s_dump_base = buf->base;
+    s_dump_total = buf->all_size;
+    s_dump_labels_count = 0;
+    s_dump_box_starts_count = 0;
+}
+static inline void dump_labels_register(int64_t target_pos, int label){
+    if(s_dump_labels_count == s_dump_labels_capacity){
+        int newcap = s_dump_labels_capacity ? (s_dump_labels_capacity * 2) : 16;
+        s_dump_labels = (dump_label*)tinybuf_realloc(s_dump_labels, sizeof(dump_label) * newcap);
+        s_dump_labels_capacity = newcap;
+    }
+    s_dump_labels[s_dump_labels_count].pos = target_pos;
+    s_dump_labels[s_dump_labels_count].label = (int)target_pos; // store start-based target to match (p:x)
+    ++s_dump_labels_count;
+}
+static inline int64_t nearest_box_start(int64_t pos){
+    int64_t best = -1;
+    for(int i=0;i<s_dump_box_starts_count;++i){
+        int64_t v = s_dump_box_starts[i];
+        if(v <= pos && v >= 0){
+            if(best < 0 || v > best){ best = v; }
+        }
+    }
+    return best < 0 ? pos : best;
+}
+static inline void dump_labels_emit_prefix(int64_t cur_pos, buffer *out){
+    int first = 1;
+    for(int i=0;i<s_dump_labels_count;++i){
+        if(s_dump_labels[i].pos == cur_pos){
+            if(first){ append_cstr(out, "(p:"); first = 0; }
+            else { append_cstr(out, ","); }
+            append_int_dec(out, (int64_t)s_dump_labels[i].label);
+        }
+    }
+    if(!first){ append_cstr(out, ") "); }
+}
+
+int tinybuf_dump_buffer_as_text(const char *data, int len, buffer *out){
+    buf_ref br;
+    br.base = data;
+    br.all_size = (int64_t)len;
+    br.ptr = data;
+    br.size = (int64_t)len;
+    dump_labels_reset(&br);
+    // first pass: collect labels across entire buffer
+    collect_box_labels(&br);
+    // second pass: real dump with prefixes
+    br.ptr = data; br.size = (int64_t)len;
+    return dump_box_text(&br, out);
+}
+
+static int dump_string_text(buf_ref *buf, buffer *out){
+    QWORD slen=0; int consumed=0; int add=0;
+    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &slen);
+    if(add <= 0) return add;
+    consumed += add;
+    buf_offset(buf, add);
+    append_cstr(out, "\"");
+    if((int64_t)slen <= buf->size){
+        buffer_append(out, buf->ptr, (int)slen);
+        buf_offset(buf, (int)slen);
+        consumed += (int)slen;
+    }
+    append_cstr(out, "\"");
+    return consumed;
+}
+
+static int dump_array_text(buf_ref *buf, buffer *out){
+    QWORD cnt=0; int consumed=0; int add=0;
+    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
+    if(add <= 0) return add;
+    consumed += add; buf_offset(buf, add);
+    append_cstr(out, "["); append_newline(out); ++s_dump_indent;
+    for(QWORD i=0;i<cnt;++i){
+        if(i){ append_cstr(out, ","); append_newline(out); }
+        append_indent(out);
+        consumed += dump_box_text(buf, out);
+    }
+    append_newline(out); --s_dump_indent; append_indent(out); append_cstr(out, "]");
+    return consumed;
+}
+
+static int dump_map_text(buf_ref *buf, buffer *out){
+    QWORD cnt=0; int consumed=0; int add=0;
+    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
+    if(add <= 0) return add;
+    consumed += add; buf_offset(buf, add);
+    append_cstr(out, "{"); append_newline(out); ++s_dump_indent;
+    for(QWORD i=0;i<cnt;++i){
+        if(i){ append_cstr(out, ","); append_newline(out); }
+        append_indent(out);
+        consumed += dump_string_text(buf, out);
+        append_cstr(out, " : ");
+        consumed += dump_box_text(buf, out);
+    }
+    append_newline(out); --s_dump_indent; append_indent(out); append_cstr(out, "}");
+    return consumed;
+}
+
+static int dump_box_text(buf_ref *buf, buffer *out){
+    int consumed=0; int64_t cur_pos = (int64_t)(buf->ptr - buf->base);
+    dump_labels_emit_prefix(cur_pos, out);
+    serialize_type t=serialize_null; int add=try_read_type(buf,&t); if(add<=0) return add; consumed+=add;
+    switch(t){
+        case serialize_null:
+            append_cstr(out, "null");
+            break;
+        case serialize_positive_int:
+        case serialize_negtive_int:
+        {
+            QWORD v=0; int a=try_read_int_tovar(t==serialize_negtive_int, buf->ptr, (int)buf->size, &v);
+            if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            append_int_dec(out, (int64_t)v);
+            break;
+        }
+        case serialize_bool_true: append_cstr(out, "true"); break;
+        case serialize_bool_false: append_cstr(out, "false"); break;
+        case serialize_double:
+        {
+            if(buf->size < 8) return 0; double dv=0; memcpy(&dv, buf->ptr, 8); buf_offset(buf,8); consumed+=8; char tmp[64]; int n=snprintf(tmp,sizeof(tmp),"%g",dv); buffer_append(out,tmp,n);
+            break;
+        }
+        case serialize_string:
+            consumed += dump_string_text(buf, out);
+            break;
+        case serialize_map:
+            consumed += dump_map_text(buf, out);
+            break;
+        case serialize_array:
+            consumed += dump_array_text(buf, out);
+            break;
+        case serialize_pointer_from_current_n:
+        case serialize_pointer_from_start_n:
+        case serialize_pointer_from_end_n:
+        case serialize_pointer_from_current_p:
+        case serialize_pointer_from_start_p:
+        case serialize_pointer_from_end_p:
+        {
+            BOOL neg = (t==serialize_pointer_from_current_n||t==serialize_pointer_from_start_n||t==serialize_pointer_from_end_n);
+            QWORD mag=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &mag);
+            if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            int64_t off = neg ? -(int64_t)mag : (int64_t)mag;
+            int64_t target_pos = 0;
+            if(t==serialize_pointer_from_start_n || t==serialize_pointer_from_start_p){
+                target_pos = off;
+            }else if(t==serialize_pointer_from_end_n || t==serialize_pointer_from_end_p){
+                target_pos = s_dump_total - off;
+            }else{
+                int64_t anchor = (int64_t)(buf->ptr - buf->base);
+                target_pos = anchor + off;
+            }
+            if(target_pos >= 0 && target_pos <= s_dump_total){
+                int64_t adj = nearest_box_start(target_pos);
+                dump_labels_register(adj, (int)adj);
+                target_pos = adj;
+            }
+            const char *type_str = (t==serialize_pointer_from_start_n || t==serialize_pointer_from_start_p) ? "start" : (t==serialize_pointer_from_end_n || t==serialize_pointer_from_end_p) ? "end" : "current";
+            append_cstr(out, "[pointer "); append_cstr(out, type_str); append_cstr(out, " "); append_int_dec(out, off);
+            if(!(t==serialize_pointer_from_start_n || t==serialize_pointer_from_start_p)){
+                append_cstr(out, " -> start "); append_int_dec(out, target_pos);
+            }
+            append_cstr(out, "]");
+            break;
+        }
+        case serialize_version:
+        {
+            QWORD ver=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            consumed += dump_box_text(buf, out); // transparent: dump inner value only
+            break;
+        }
+        case serialize_version_list:
+        {
+            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            append_cstr(out, "{""versions"":{");
+            for(QWORD i=0;i<cnt;++i){
+                if(i) append_cstr(out, ",");
+                QWORD ver=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(b<=0) return b; consumed+=b; buf_offset(buf,b);
+                append_cstr(out, "\""); append_int_dec(out,(int64_t)ver); append_cstr(out, "\":");
+                consumed += dump_box_text(buf, out);
+            }
+            append_cstr(out, "}}");
+            break;
+        }
+        default:
+            append_cstr(out, "<unknown>");
+            break;
+    }
+    return consumed;
+}
+
+static int collect_string(buf_ref *buf){
+    QWORD slen=0; int consumed=0; int add=0;
+    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &slen);
+    if(add <= 0) return add;
+    consumed += add; buf_offset(buf, add);
+    if((int64_t)slen <= buf->size){ buf_offset(buf, (int)slen); consumed += (int)slen; }
+    return consumed;
+}
+static int collect_array(buf_ref *buf){
+    QWORD cnt=0; int consumed=0; int add=0;
+    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
+    if(add <= 0) return add;
+    consumed += add; buf_offset(buf, add);
+    for(QWORD i=0;i<cnt;++i){ consumed += collect_box_labels(buf); }
+    return consumed;
+}
+static int collect_map(buf_ref *buf){
+    QWORD cnt=0; int consumed=0; int add=0;
+    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
+    if(add <= 0) return add;
+    consumed += add; buf_offset(buf, add);
+    for(QWORD i=0;i<cnt;++i){ consumed += collect_string(buf); consumed += collect_box_labels(buf); }
+    return consumed;
+}
+
+static int collect_box_labels(buf_ref *buf){
+    int consumed=0; int64_t start_pos = (int64_t)(buf->ptr - buf->base);
+    if(s_dump_box_starts_count == s_dump_box_starts_capacity){
+        int newcap = s_dump_box_starts_capacity ? (s_dump_box_starts_capacity * 2) : 32;
+        s_dump_box_starts = (int64_t*)tinybuf_realloc(s_dump_box_starts, sizeof(int64_t) * newcap);
+        s_dump_box_starts_capacity = newcap;
+    }
+    s_dump_box_starts[s_dump_box_starts_count++] = start_pos;
+    serialize_type t=serialize_null; int add=try_read_type(buf,&t); if(add<=0) return add; consumed+=add;
+    switch(t){
+        case serialize_null: break;
+        case serialize_positive_int:
+        case serialize_negtive_int:
+        {
+            QWORD v=0; int a=try_read_int_tovar(t==serialize_negtive_int, buf->ptr, (int)buf->size, &v);
+            if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            break;
+        }
+        case serialize_bool_true: break;
+        case serialize_bool_false: break;
+        case serialize_double:
+        {
+            if(buf->size < 8) return 0; buf_offset(buf,8); consumed+=8; break;
+        }
+        case serialize_string:
+            consumed += collect_string(buf);
+            break;
+        case serialize_map:
+            consumed += collect_map(buf);
+            break;
+        case serialize_array:
+            consumed += collect_array(buf);
+            break;
+        case serialize_pointer_from_current_n:
+        case serialize_pointer_from_start_n:
+        case serialize_pointer_from_end_n:
+        case serialize_pointer_from_current_p:
+        case serialize_pointer_from_start_p:
+        case serialize_pointer_from_end_p:
+        {
+            BOOL neg = (t==serialize_pointer_from_current_n||t==serialize_pointer_from_start_n||t==serialize_pointer_from_end_n);
+            QWORD mag=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &mag);
+            if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            int64_t off = neg ? -(int64_t)mag : (int64_t)mag;
+            int64_t target_pos = 0;
+            if(t==serialize_pointer_from_start_n || t==serialize_pointer_from_start_p){
+                target_pos = off;
+            }else if(t==serialize_pointer_from_end_n || t==serialize_pointer_from_end_p){
+                target_pos = s_dump_total - off;
+            }else{
+                int64_t anchor = (int64_t)(buf->ptr - buf->base);
+                target_pos = anchor + off;
+            }
+            if(target_pos >= 0 && target_pos <= s_dump_total){
+                int64_t adj = nearest_box_start(target_pos);
+                dump_labels_register(adj, (int)adj);
+            }
+            break;
+        }
+        case serialize_version:
+        {
+            QWORD ver=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            consumed += collect_box_labels(buf);
+            break;
+        }
+        case serialize_version_list:
+        {
+            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            for(QWORD i=0;i<cnt;++i){ QWORD ver=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(b<=0) return b; consumed+=b; buf_offset(buf,b); consumed += collect_box_labels(buf); }
+            break;
+        }
+        default: break;
+    }
+    return consumed;
+}
+
 //--version
 void tinybuf_versionlist_add(tinybuf_value *versionlist, int64_t version, tinybuf_value *value)
 {
@@ -1847,3 +2394,5 @@ void tinybuf_version_set(tinybuf_value *target, int64_t version, tinybuf_value *
     target->_type = tinybuf_version;
     target->_data._ref = value;
 }
+// forward decl
+int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version);

@@ -2365,6 +2365,42 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             SET_FAILED("read version failed");
             break;
         }
+        case serialize_type_idx:
+        {
+            QWORD idx=0; if(!OK_AND_ADDTO(try_read_int_data(FALSE, buf, &idx), &len)){ SET_FAILED("read type_idx index failed"); break; }
+            QWORD blen=0; if(!OK_AND_ADDTO(try_read_int_data(FALSE, buf, &blen), &len)){ SET_FAILED("read type_idx length failed"); break; }
+            if(buf->size < (int64_t)blen){ SET_FAILED("payload too small"); break; }
+            if (s_strpool_offset_read < 0 || s_strpool_base_read == NULL){ s_last_error_msg = "strpool not initialized"; SET_FAILED("strpool not initialized"); break; }
+            const char *pool_start = s_strpool_base_read + s_strpool_offset_read;
+            const char *q = pool_start; int64_t r = ((const char*)buf->ptr + buf->size) - pool_start;
+            char *name_out = NULL; int name_len = 0;
+            if(r > 0){
+                if((uint8_t)q[0] == serialize_str_pool){
+                    ++q; --r; QWORD cnt=0; int l2=try_read_int_tovar(FALSE,q,(int)r,&cnt); if(l2>0){ q+=l2; r-=l2; for(QWORD i=0;i<cnt;++i){ if(r<1) break; if((uint8_t)q[0]!=serialize_string) break; ++q; --r; QWORD sl=0; int l3=try_read_int_tovar(FALSE,q,(int)r,&sl); if(l3<=0) break; q+=l3; r-=l3; if(r < (int64_t)sl) break; if(i==idx){ name_out=(char*)tinybuf_malloc((int)sl+1); memcpy(name_out,q,(size_t)sl); name_out[sl]='\0'; name_len=(int)sl; break; } q+=sl; r-=sl; } }
+                } else if((uint8_t)q[0] == 27){
+                    ++q; --r; QWORD ncount=0; int l2=try_read_int_tovar(FALSE,q,(int)r,&ncount); if(l2>0){ const char *nodes_base=q+l2; int64_t nodes_size=r-l2; const char *p = nodes_base; int64_t rr = nodes_size; int found=-1; for(QWORD i=0;i<ncount;++i){ QWORD parent=0; int lp=try_read_int_tovar(FALSE,p,(int)rr,&parent); if(lp<=0) break; p+=lp; rr-=lp; if(rr<2) break; unsigned char ch=(unsigned char)p[0]; unsigned char flag=(unsigned char)p[1]; p+=2; rr-=2; if(flag){ QWORD leaf=0; int ll=try_read_int_tovar(FALSE,p,(int)rr,&leaf); if(ll<=0) break; p+=ll; rr-=ll; if(leaf==(QWORD)idx){ found=(int)i; break; } } }
+                        if(found>=0){ buffer *tmp=buffer_alloc(); int current=found; while(1){ const char *p2=nodes_base; int64_t rr2=nodes_size; int node_index=0; int parent_index=-1; unsigned char ch=0; unsigned char flag=0; QWORD leaf=0; while(node_index<=current){ QWORD parent=0; int lp=try_read_int_tovar(FALSE,p2,(int)rr2,&parent); p2+=lp; rr2-=lp; if(rr2<2) break; ch=(unsigned char)p2[0]; flag=(unsigned char)p2[1]; p2+=2; rr2-=2; if(flag){ int ll=try_read_int_tovar(FALSE,p2,(int)rr2,&leaf); p2+=ll; rr2-=ll; } parent_index=(int)parent; ++node_index; } if(ch){ buffer_append(tmp,(const char*)&ch,1); } if(parent_index<=0) break; current=parent_index; }
+                            int tlen=buffer_get_length_inline(tmp); const char *td=buffer_get_data_inline(tmp); name_out=(char*)tinybuf_malloc(tlen+1); for(int i=0;i<tlen;++i){ name_out[i]=td[tlen-1-i]; } name_out[tlen]='\0'; name_len=tlen; buffer_free(tmp);
+                        }
+                    }
+                }
+            }
+            if(name_out){
+                int ir = tinybuf_custom_try_read(name_out, (const uint8_t*)buf->ptr, (int)blen, out, contain_any);
+                if(ir > 0){ buf_offset(buf, (int)blen); len += (int)blen; pool_mark_complete(box_offset); SET_SUCCESS(); }
+                else{
+                    buf_ref br3 = (buf_ref){ (char*)buf->ptr, (int64_t)blen, (char*)buf->ptr, (int64_t)blen };
+                    int ir2 = try_read_box(&br3, out, contain_any);
+                    if(ir2 > 0){ buf_offset(buf, ir2); len += ir2; pool_mark_complete(box_offset); SET_SUCCESS(); }
+                    else { SET_FAILED("custom read failed"); }
+                }
+                tinybuf_free(name_out);
+            } else {
+                SET_FAILED("type_idx name not found");
+            }
+            if(!failed){ READ_RETURN }
+            break;
+        }
         default:
             SET_FAILED("read type UNKNOWN");
             break;
@@ -2601,11 +2637,27 @@ int tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
 tinybuf_result tinybuf_try_read_box_r(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     int r = tinybuf_try_read_box(buf, out, contain_handler);
+    if (r <= 0){ int alt = tinybuf_value_deserialize(buf->ptr, buf->size, out); if(alt > 0){ return tinybuf_result_ok(alt); } }
     if (r > 0) { return tinybuf_result_ok(r); }
+    if(buf && buf->size>0 && (uint8_t)buf->ptr[0] == serialize_type_idx){
+        const char *p = buf->ptr + 1; int64_t sz = buf->size - 1;
+        QWORD idx=0; int a=try_read_int_tovar(FALSE,p,(int)sz,&idx); if(a>0){ p+=a; sz-=a; QWORD blen=0; int b=try_read_int_tovar(FALSE,p,(int)sz,&blen); if(b>0){ p+=b; sz-=b; if(sz >= (int64_t)blen && s_strpool_offset_read>=0 && s_strpool_base_read){ const char *q = s_strpool_base_read + s_strpool_offset_read; int64_t rsz = ((const char*)buf->ptr + buf->size) - q; char *name_out=NULL; if(rsz>0){ if((uint8_t)q[0]==serialize_str_pool){ ++q; --rsz; QWORD cnt=0; int l2=try_read_int_tovar(FALSE,q,(int)rsz,&cnt); if(l2>0){ q+=l2; rsz-=l2; for(QWORD i=0;i<cnt;++i){ if(rsz<1) break; if((uint8_t)q[0]!=serialize_string) break; ++q; --rsz; QWORD sl=0; int l3=try_read_int_tovar(FALSE,q,(int)rsz,&sl); if(l3<=0) break; q+=l3; rsz-=l3; if(rsz < (int64_t)sl) break; if(i==idx){ name_out=(char*)tinybuf_malloc((int)sl+1); memcpy(name_out,q,(size_t)sl); name_out[sl]='\0'; break; } q+=sl; rsz-=sl; } } }
+                                else if((uint8_t)q[0]==27){ ++q; --rsz; QWORD ncount=0; int l2=try_read_int_tovar(FALSE,q,(int)rsz,&ncount); if(l2>0){ const char *nodes_base=q+l2; int64_t nodes_size=rsz-l2; const char *pp=nodes_base; int64_t rr=nodes_size; int found=-1; for(QWORD i=0;i<ncount;++i){ QWORD parent=0; int lp=try_read_int_tovar(FALSE,pp,(int)rr,&parent); if(lp<=0) break; pp+=lp; rr-=lp; if(rr<2) break; unsigned char ch=(unsigned char)pp[0]; unsigned char flag=(unsigned char)pp[1]; pp+=2; rr-=2; if(flag){ QWORD leaf=0; int ll=try_read_int_tovar(FALSE,pp,(int)rr,&leaf); if(ll<=0) break; pp+=ll; rr-=ll; if(leaf==(QWORD)idx){ found=(int)i; break; } } }
+                                        if(found>=0){ buffer *tmp=buffer_alloc(); int current=found; while(1){ const char *p2=nodes_base; int64_t rr2=nodes_size; int node_index=0; int parent_index=-1; unsigned char ch=0; unsigned char flag=0; QWORD leaf=0; while(node_index<=current){ QWORD parent=0; int lp=try_read_int_tovar(FALSE,p2,(int)rr2,&parent); p2+=lp; rr2-=lp; if(rr2<2) break; ch=(unsigned char)p2[0]; flag=(unsigned char)p2[1]; p2+=2; rr2-=2; if(flag){ int ll=try_read_int_tovar(FALSE,p2,(int)rr2,&leaf); p2+=ll; rr2-=ll; } parent_index=(int)parent; ++node_index; } if(ch){ buffer_append(tmp,(const char*)&ch,1); } if(parent_index<=0) break; current=parent_index; }
+                                            int tlen=buffer_get_length_inline(tmp); const char *td=buffer_get_data_inline(tmp); name_out=(char*)tinybuf_malloc(tlen+1); for(int i=0;i<tlen;++i){ name_out[i]=td[tlen-1-i]; } name_out[tlen]='\0'; buffer_free(tmp); }
+                                    }
+                                }
+                if(name_out){ int ir=tinybuf_custom_try_read(name_out,(const uint8_t*)p,(int)blen,out,contain_handler); tinybuf_free(name_out); if(ir>0){ return tinybuf_result_ok(1 + a + b + (int)blen); } }
+            } }
+        /* fallback failed */
+    }
     const char *msg = tinybuf_last_error_message();
     if(!msg) msg = (r == 0) ? "buffer too small" : "read failed";
     tinybuf_result rr = tinybuf_result_err(r, msg, NULL);
     /* add context */ tinybuf_result_add_msg_const(&rr, "tinybuf_try_read_box failed");
+    if(buf && buf->size>0){ char *m=(char*)tinybuf_malloc(64); snprintf(m,64,"head_type=%u",(unsigned)(uint8_t)buf->ptr[0]); tinybuf_result_add_msg(&rr,m,(tinybuf_deleter_fn)tinybuf_free); }
+    { char *m2=(char*)tinybuf_malloc(64); snprintf(m2,64,"strpool_off=%lld",(long long)s_strpool_offset_read); tinybuf_result_add_msg(&rr,m2,(tinybuf_deleter_fn)tinybuf_free); }
+    { char *m3=(char*)tinybuf_malloc(64); snprintf(m3,64,"plugins=%d",tinybuf_plugin_get_count()); tinybuf_result_add_msg(&rr,m3,(tinybuf_deleter_fn)tinybuf_free); }
     return rr;
 }
 

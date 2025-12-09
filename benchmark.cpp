@@ -5,6 +5,23 @@
 #include "tinybuf.h"
 #include "tinybuf_plugin.h"
 #include "tinybuf_log.h"
+#include "tinybuf_oop.h"
+
+// OOP infra demonstration types and trait
+TB_STRUCT_BEGIN(Counter)
+    int v;
+    tb_spinlock_t lk;
+TB_STRUCT_END(Counter)
+
+TB_STATIC_DEF(Counter, Counter, make){ Counter c; c.v = 0; tb_spinlock_init(&c.lk); return c; }
+TB_METHOD_DEF(Counter, void, add, int x){ TB_WITH_LOCK(self->lk){ self->v += x; } }
+
+TB_TRAIT_BEGIN(Addable)
+    TB_TRAIT_METHOD(void, add, int x)
+TB_TRAIT_END(Addable)
+
+static const Addable_vtable Counter_Addable_vt = { (void(*)(void*,int))Counter_add };
+TB_TRAIT_IMPL(Counter, Addable, Counter_Addable_vt);
 #include "jsoncpp/json.h"
 #include <sstream>
 #ifndef _WIN32
@@ -688,6 +705,71 @@ static void pointer_transparent_across_modes_tests(){
     tinybuf_value_free(base);
 }
 
+static int xjson_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br{ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }
+static int xjson_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; buffer *tmp = buffer_alloc(); int l = tinybuf_try_write_box(tmp, in); if(l>0){ buffer_append(out, buffer_get_data(tmp), l); } buffer_free(tmp); return l; }
+static int xjson_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; return tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); }
+
+static int custstr_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; (void)contain_handler; tinybuf_value_init_string(out, (const char*)data, len); return len; }
+static int custstr_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; buffer *s = tinybuf_value_get_string(in); if(!s) return -1; int sl = buffer_get_length(s); if(sl>0){ buffer_append(out, buffer_get_data(s), sl); } return sl; }
+static int custstr_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int64_t len = buf->size; buffer_append(out, "\"", 1); if(len>0){ buffer_append(out, buf->ptr, (int)len); } buffer_append(out, "\"", 1); return (int)len; }
+
+static void custom_type_idx_string_tests(){
+    tinybuf_set_use_strpool(1);
+    buffer *buf = buffer_alloc();
+    tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "hello", 5);
+    tinybuf_register_builtin_plugins();
+    int w = tinybuf_try_write_custom_id_box(buf, "string", s); assert(w > 0);
+    tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+    int r = tinybuf_try_read_box(&br, out, any_version); assert(r > 0);
+    assert(tinybuf_value_get_type(out) == tinybuf_string);
+    buffer *sv = tinybuf_value_get_string(out); assert(sv && buffer_get_length(sv) == 5);
+    tinybuf_value_free(out); tinybuf_value_free(s); buffer_free(buf);
+    tinybuf_set_use_strpool(0);
+}
+
+static void oop_serializable_fallback_tests(){
+    tinybuf_set_use_strpool(1);
+    tinybuf_oop_attach_serializers("xjson", xjson_read, xjson_write, xjson_dump);
+    tinybuf_oop_set_serializable("xjson", 1);
+    tinybuf_register_builtin_plugins();
+    tinybuf_value *m = tinybuf_make_test_value(); buffer *buf = buffer_alloc(); buffer *text = buffer_alloc();
+    int w = tinybuf_try_write_custom_id_box(buf, "xjson", m); assert(w > 0);
+    tinybuf_dump_buffer_as_text(buffer_get_data(buf), buffer_get_length(buf), text);
+    LOGI("\r\n%s", buffer_get_data(text));
+    tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+    int r = tinybuf_try_read_box(&br, out, any_version); assert(r > 0);
+    assert(tinybuf_value_get_type(out) == tinybuf_map);
+    tinybuf_value_free(out); tinybuf_value_free(m); buffer_free(text); buffer_free(buf);
+    tinybuf_set_use_strpool(0);
+}
+
+static void custom_vs_oop_override_tests(){
+    tinybuf_set_use_strpool(1);
+    tinybuf_oop_attach_serializers("mytype", xjson_read, xjson_write, xjson_dump);
+    tinybuf_oop_set_serializable("mytype", 1);
+    tinybuf_custom_register("mytype", custstr_read, custstr_write, custstr_dump);
+    tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "override", 8);
+    buffer *buf = buffer_alloc(); int w = tinybuf_try_write_custom_id_box(buf, "mytype", s); assert(w > 0);
+    tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+    int r = tinybuf_try_read_box(&br, out, any_version); assert(r > 0);
+    assert(tinybuf_value_get_type(out) == tinybuf_string);
+    buffer *sv = tinybuf_value_get_string(out); assert(sv && buffer_get_length(sv) == 8);
+    tinybuf_value_free(out); tinybuf_value_free(s); buffer_free(buf);
+    tinybuf_set_use_strpool(0);
+}
+
+static void strpool_efficiency_tests(){
+    tinybuf_set_use_strpool(1);
+    tinybuf_value *val = tinybuf_make_test_value();
+    buffer *b1 = buffer_alloc(); buffer *b2 = buffer_alloc();
+    int w1 = tinybuf_try_write_custom_id_box(b1, "xjson", val); assert(w1 > 0);
+    int w2 = tinybuf_try_write_custom_id_box(b2, "xjson", val); assert(w2 > 0);
+    int len1 = buffer_get_length(b1); int len2 = buffer_get_length(b2);
+    assert(len1 > 0 && len2 > 0);
+    tinybuf_value_free(val); buffer_free(b1); buffer_free(b2);
+    tinybuf_set_use_strpool(0);
+}
+
 static void strpool_basic_tests(){
     tinybuf_set_use_strpool(1);
     tinybuf_value *v = tinybuf_value_alloc();
@@ -975,6 +1057,150 @@ static void plugin_custom_box_tests(){
     LOGI("plugin_custom_box_tests done");
 }
 
+static void tensor_tests(){
+    LOGI("\r\ntensor_tests");
+    int64_t shape1[1] = {3};
+    int64_t data1[3] = {1,2,3};
+    tinybuf_value *v1 = tinybuf_value_alloc();
+    tinybuf_value_init_tensor(v1, 1, shape1, 1, data1, 3);
+    buffer *b1 = buffer_alloc();
+    tinybuf_try_write_box(b1, v1);
+    buf_ref br1{buffer_get_data(b1), (int64_t)buffer_get_length(b1), buffer_get_data(b1), (int64_t)buffer_get_length(b1)};
+    tinybuf_value *o1 = tinybuf_value_alloc();
+    int r1 = tinybuf_try_read_box(&br1, o1, any_version);
+    assert(r1>0);
+    assert(tinybuf_value_get_type(o1) == tinybuf_tensor);
+    assert(tinybuf_tensor_get_ndim(o1)==1);
+    assert(tinybuf_tensor_get_count(o1)==3);
+    const int64_t *sh1 = tinybuf_tensor_get_shape(o1);
+    assert(sh1 && sh1[0]==3);
+    int64_t *d1 = (int64_t*)tinybuf_tensor_get_data(o1);
+    assert(d1 && d1[0]==1 && d1[1]==2 && d1[2]==3);
+    tinybuf_value_free(o1);
+    tinybuf_value_free(v1);
+    buffer_free(b1);
+
+    int64_t shape2[2] = {2,2};
+    double data2[4] = {1.25, -2.5, 0.0, 3.0};
+    tinybuf_value *v2 = tinybuf_value_alloc();
+    tinybuf_value_init_tensor(v2, 8, shape2, 2, data2, 4);
+    buffer *b2 = buffer_alloc();
+    tinybuf_try_write_box(b2, v2);
+    buf_ref br2{buffer_get_data(b2), (int64_t)buffer_get_length(b2), buffer_get_data(b2), (int64_t)buffer_get_length(b2)};
+    tinybuf_value *o2 = tinybuf_value_alloc();
+    int r2 = tinybuf_try_read_box(&br2, o2, any_version);
+    assert(r2>0);
+    assert(tinybuf_value_get_type(o2) == tinybuf_tensor);
+    assert(tinybuf_tensor_get_ndim(o2)==2);
+    assert(tinybuf_tensor_get_count(o2)==4);
+    const int64_t *sh2 = tinybuf_tensor_get_shape(o2);
+    assert(sh2 && sh2[0]==2 && sh2[1]==2);
+    const double *d2 = (const double*)tinybuf_tensor_get_data_const(o2);
+    assert(d2 && d2[0]==1.25 && d2[1]==-2.5 && d2[2]==0.0 && d2[3]==3.0);
+    tinybuf_value_free(o2);
+    tinybuf_value_free(v2);
+    buffer_free(b2);
+    LOGI("tensor_tests done");
+}
+
+static uint32_t be32(const uint8_t *p){ return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|((uint32_t)p[3]); }
+static double read_double_be_local(const uint8_t *ptr){ uint64_t val = ((uint64_t)be32(ptr) << 32) | be32(ptr + 4); double db = 0; memcpy(&db, &val, 8); return db; }
+
+static void tensor_storage_tests(){
+    // vector<bool> storage: header uses varints; payload packed as bitmap (MSB-first)
+    {
+        int64_t shape[1] = {4};
+        uint8_t data[4] = {1,0,1,1};
+        tinybuf_value *v = tinybuf_value_alloc();
+        tinybuf_value_init_tensor(v, 11, shape, 1, data, 4);
+        buffer *b = buffer_alloc();
+        tinybuf_try_write_box(b, v);
+        const uint8_t *ptr = (const uint8_t*)buffer_get_data(b);
+        int len = buffer_get_length(b);
+        assert(len > 0 && ptr[0] == 43);
+        int pos = 1; uint64_t cnt=0, dt=0; int a = varint_deserialize_local(ptr+pos, len-pos, &cnt); assert(a>0); pos+=a; int bsz = varint_deserialize_local(ptr+pos, len-pos, &dt); assert(bsz>0); pos+=bsz; assert(cnt==4 && dt==11);
+        int need = (int)((cnt + 7) / 8); assert(len - pos >= need);
+        uint8_t one = ptr[pos];
+        for(int i=0;i<4;++i){ int bit = 7 - (i % 8); uint8_t vv = (one >> bit) & 1; assert(vv == data[i]); }
+        pos += need;
+        tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)}; int r = tinybuf_try_read_box(&br, out, any_version); assert(r>0); assert(tinybuf_value_get_type(out)==tinybuf_tensor); assert(tinybuf_tensor_get_count(out)==4);
+        const uint8_t *rd = (const uint8_t*)tinybuf_tensor_get_data_const(out); assert(rd && rd[0]==1 && rd[1]==0 && rd[2]==1 && rd[3]==1);
+        tinybuf_value_free(out); buffer_free(b); tinybuf_value_free(v);
+    }
+    // large vector<bool> storage: verify packed length and round-trip
+    {
+        const int N = 1000; std::vector<uint8_t> data(N);
+        for(int i=0;i<N;++i) data[i] = (uint8_t)((i*37) % 2);
+        int64_t shape[1] = {N}; tinybuf_value *v = tinybuf_value_alloc();
+        tinybuf_value_init_tensor(v, 11, shape, 1, data.data(), N);
+        buffer *b = buffer_alloc(); tinybuf_try_write_box(b, v);
+        const uint8_t *ptr = (const uint8_t*)buffer_get_data(b); int len = buffer_get_length(b);
+        assert(ptr[0]==43); int pos=1; uint64_t cnt=0, dt=0; int a = varint_deserialize_local(ptr+pos, len-pos, &cnt); assert(a>0 && cnt==N); pos+=a; int bsz = varint_deserialize_local(ptr+pos, len-pos, &dt); assert(bsz>0 && dt==11); pos+=bsz;
+        int need = (int)((cnt + 7) / 8); assert(len - pos >= need);
+        tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)}; int r = tinybuf_try_read_box(&br, out, any_version); assert(r>0); assert(tinybuf_value_get_type(out)==tinybuf_tensor); assert(tinybuf_tensor_get_count(out)==N);
+        const uint8_t *rd = (const uint8_t*)tinybuf_tensor_get_data_const(out); for(int i=0;i<N;++i) assert(rd[i]==data[i]);
+        tinybuf_value_free(out); buffer_free(b); tinybuf_value_free(v);
+    }
+    // dense<double> storage: header varints then raw 8*count bytes
+    {
+        int64_t shape[2] = {2,2};
+        double data[4] = {1.25, -2.5, 0.0, 3.0};
+        tinybuf_value *v = tinybuf_value_alloc(); tinybuf_value_init_tensor(v, 8, shape, 2, data, 4);
+        buffer *b = buffer_alloc(); tinybuf_try_write_box(b, v);
+        const uint8_t *ptr = (const uint8_t*)buffer_get_data(b); int len = buffer_get_length(b);
+        assert(len >= 37 && ptr[0] == 44); int pos=1; uint64_t dims=0; int a = varint_deserialize_local(ptr+pos, len-pos, &dims); assert(a>0 && dims==2); pos+=a; uint64_t s0=0,s1=0; int c0 = varint_deserialize_local(ptr+pos, len-pos, &s0); assert(c0>0 && s0==2); pos+=c0; int c1 = varint_deserialize_local(ptr+pos, len-pos, &s1); assert(c1>0 && s1==2); pos+=c1; uint64_t dt=0; int bsz = varint_deserialize_local(ptr+pos, len-pos, &dt); assert(bsz>0 && dt==8); pos+=bsz; assert(len-pos >= 32);
+        double r0 = read_double_be_local(ptr+pos+0); double r1 = read_double_be_local(ptr+pos+8); double r2 = read_double_be_local(ptr+pos+16); double r3 = read_double_be_local(ptr+pos+24);
+        assert(r0==data[0] && r1==data[1] && r2==data[2] && r3==data[3]);
+        tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)}; int r = tinybuf_try_read_box(&br, out, any_version); assert(r>0); assert(tinybuf_value_get_type(out)==tinybuf_tensor); assert(tinybuf_tensor_get_ndim(out)==2); assert(tinybuf_tensor_get_count(out)==4);
+        tinybuf_value_free(out); buffer_free(b); tinybuf_value_free(v);
+    }
+    LOGI("tensor_storage_tests done");
+}
+
+static void bool_map_tests(){
+    {
+        const int N = 20; std::vector<uint8_t> bits((N+7)/8, 0);
+        auto setbit=[&](int i,int v){ int b=i/8, bit=7-(i%8); if(v) bits[b] |= (uint8_t)(1<<bit); else bits[b] &= (uint8_t)~(1<<bit); };
+        for(int i=0;i<N;++i) setbit(i, (i%3)==0);
+        tinybuf_value *v = tinybuf_value_alloc(); tinybuf_value_init_bool_map(v, bits.data(), N);
+        buffer *b = buffer_alloc(); tinybuf_try_write_box(b, v);
+        const uint8_t *ptr = (const uint8_t*)buffer_get_data(b); int len = buffer_get_length(b);
+        assert(ptr[0] == 46); int pos=1; uint64_t cnt=0; int a = varint_deserialize_local(ptr+pos, len-pos, &cnt); assert(a>0 && (int)cnt==N); pos+=a; int need = (int)((cnt+7)/8); assert(len-pos >= need);
+        tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)}; int r = tinybuf_try_read_box(&br, out, any_version); assert(r>0); assert(tinybuf_value_get_type(out)==tinybuf_bool_map); assert(tinybuf_bool_map_get_count(out)==N);
+        const uint8_t *rb = tinybuf_bool_map_get_bits_const(out); for(int i=0;i<N;++i){ int b2=i/8, bit=7-(i%8); int v2 = (rb[b2] >> bit) & 1; int v1 = (bits[b2] >> bit) & 1; assert(v2 == v1); }
+        tinybuf_value_free(out); buffer_free(b); tinybuf_value_free(v);
+    }
+    LOGI("bool_map_tests done");
+}
+
+static void oop_infra_tests(){
+    Counter c = Counter_make();
+    const int N = 8, R = 10000;
+    std::vector<std::thread> th; th.reserve(N);
+    for(int i=0;i<N;++i){ th.emplace_back([&]{ for(int k=0;k<R;++k) Counter_add(&c, 1); }); }
+    for(auto &t: th) t.join();
+    assert(c.v == N*R);
+    LOGI("oop_infra_tests done");
+}
+
+static void indexed_tensor_tests(){
+    // base dense<double> 2x2 with row/col string indices
+    int64_t shape[2] = {2,2}; double data[4] = {1.25, -2.5, 0.0, 3.0};
+    tinybuf_value *ten = tinybuf_value_alloc(); tinybuf_value_init_tensor(ten, 8, shape, 2, data, 4);
+    tinybuf_value *rows = tinybuf_value_alloc(); tinybuf_value *r0 = tinybuf_value_alloc(); tinybuf_value_init_string(r0, "r0", 2); tinybuf_value *r1 = tinybuf_value_alloc(); tinybuf_value_init_string(r1, "r1", 2); tinybuf_value_array_append(rows, r0); tinybuf_value_array_append(rows, r1);
+    tinybuf_value *cols = tinybuf_value_alloc(); tinybuf_value *c0 = tinybuf_value_alloc(); tinybuf_value_init_string(c0, "c0", 2); tinybuf_value *c1 = tinybuf_value_alloc(); tinybuf_value_init_string(c1, "c1", 2); tinybuf_value_array_append(cols, c0); tinybuf_value_array_append(cols, c1);
+    const tinybuf_value *idxs[2] = { rows, cols };
+    tinybuf_value *boxed = tinybuf_value_alloc(); tinybuf_value_init_indexed_tensor(boxed, ten, idxs, 2);
+    buffer *b = buffer_alloc(); tinybuf_try_write_box(b, boxed);
+    // header check
+    const uint8_t *ptr = (const uint8_t*)buffer_get_data(b); int len = buffer_get_length(b); assert(len>0 && ptr[0]==47);
+    // decode
+    tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)}; int r = tinybuf_try_read_box(&br, out, any_version); assert(r>0); assert(tinybuf_value_get_type(out)==tinybuf_indexed_tensor);
+    // free
+    tinybuf_value_free(out); buffer_free(b); tinybuf_value_free(boxed); tinybuf_value_free(cols); tinybuf_value_free(rows); tinybuf_value_free(ten);
+    LOGI("indexed_tensor_tests done");
+}
+
 static void partition_concurrent_write_tests(){
     LOGI("\r\npartition_concurrent_write_tests");
     tinybuf_value *mainv = tinybuf_value_alloc(); tinybuf_value_init_string(mainv, "hello", 5);
@@ -1044,6 +1270,10 @@ int main(int argc,char *argv[]){
     pointer_auto_mode_mixed_tests();
     pointer_subref_tests();
     pointer_transparent_across_modes_tests();
+    custom_type_idx_string_tests();
+    oop_serializable_fallback_tests();
+    custom_vs_oop_override_tests();
+    strpool_efficiency_tests();
     strpool_basic_tests();
     strpool_perf_tests();
     plugin_basic_tests();
@@ -1052,6 +1282,11 @@ int main(int argc,char *argv[]){
     partition_concurrent_write_tests();
     plugin_dll_tests();
     plugin_custom_box_tests();
+    tensor_tests();
+    tensor_storage_tests();
+    bool_map_tests();
+    oop_infra_tests();
+    indexed_tensor_tests();
     // dump readable for pointer types first pointer
     {
         buffer *buf = buffer_alloc();

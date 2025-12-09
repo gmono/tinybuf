@@ -41,7 +41,6 @@ void tinybuf_free(void *ptr){
 }
 
 void *tinybuf_realloc(void *ptr,int size){
-    assert(ptr);
     assert(size);
     void *ret = s_realloc_ptr ? s_realloc_ptr(ptr,size) : realloc(ptr,size);
     assert(ret);

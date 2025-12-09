@@ -1,4 +1,4 @@
-﻿// Copyright 2011 Baptiste Lepilleur
+// Copyright 2011 Baptiste Lepilleur
 // Distributed under MIT license, or public domain if desired and
 // recognized in your jurisdiction.
 // See file LICENSE for detail or copy at http://jsoncpp.sourceforge.net/LICENSE
@@ -48,11 +48,7 @@
 
 namespace Json {
 
-#if __cplusplus >= 201103L
 typedef std::unique_ptr<StreamWriter> StreamWriterPtr;
-#else
-typedef std::auto_ptr<StreamWriter>   StreamWriterPtr;
-#endif
 
 static bool containsControlCharacter(const char* str) {
   while (*str) {

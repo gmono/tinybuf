@@ -55,6 +55,14 @@ int tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HAN
 // core try-read/try-write APIs
 int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 int tinybuf_try_write_box(buffer *out, const tinybuf_value *value);
+
+typedef int (*tinybuf_custom_read_fn)(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
+typedef int (*tinybuf_custom_write_fn)(const char *name, const tinybuf_value *in, buffer *out);
+typedef int (*tinybuf_custom_dump_fn)(const char *name, buf_ref *buf, buffer *out);
+int tinybuf_custom_register(const char *name, tinybuf_custom_read_fn read, tinybuf_custom_write_fn write, tinybuf_custom_dump_fn dump);
+int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
+int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *out);
+int tinybuf_custom_try_dump(const char *name, buf_ref *buf, buffer *out);
 int tinybuf_try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box);
 int tinybuf_try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count);
 
@@ -71,6 +79,18 @@ typedef enum {
 
 int tinybuf_try_write_pointer(buffer *out, tinybuf_offset_type t, int64_t offset);
 int tinybuf_try_write_sub_ref(buffer *out, tinybuf_offset_type t, int64_t offset);
+int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in);
+
+int tinybuf_oop_register_type(const char *type_name);
+int tinybuf_oop_get_type_count(void);
+const char* tinybuf_oop_get_type_name(int index);
+int tinybuf_oop_register_op(const char *type_name, const char *op_name, const char *sig, const char *desc, tinybuf_plugin_value_op_fn fn);
+int tinybuf_oop_get_op_count(const char *type_name);
+int tinybuf_oop_get_op_meta(const char *type_name, int index, const char **name, const char **sig, const char **desc);
+int tinybuf_oop_do_op(const char *type_name, const char *op_name, tinybuf_value *self, const tinybuf_value *args, tinybuf_value *out);
+int tinybuf_oop_attach_serializers(const char *type_name, tinybuf_custom_read_fn read, tinybuf_custom_write_fn write, tinybuf_custom_dump_fn dump);
+int tinybuf_oop_register_types_to_custom(void);
+int tinybuf_oop_set_serializable(const char *type_name, int serializable);
 
 #ifdef __cplusplus
 }

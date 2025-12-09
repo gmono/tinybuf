@@ -1,5 +1,6 @@
 #include "tinybuf_private.h"
 #include "tinybuf_plugin.h"
+static int contain_any(uint64_t v);
 #ifdef _WIN32
 #include <winsock2.h>
 #else
@@ -31,6 +32,9 @@ static inline void pool_unlock(void);
 
 typedef uint64_t QWORD;
 typedef int64_t SQWORD;
+typedef struct { int dtype; int dims; int64_t *shape; void *data; int64_t count; } tinybuf_tensor_t;
+typedef struct { int64_t count; uint8_t *bits; } tinybuf_bool_map_t;
+typedef struct { tinybuf_value *tensor; tinybuf_value **indices; int dims; } tinybuf_indexed_tensor_t;
 
 int s_use_strpool = 0;
 static int s_use_strpool_trie = 1;
@@ -110,7 +114,7 @@ static inline void clear_stack_pop(tinybuf_value *v){
 // 是否需要执行custom 指针释放
 inline bool need_custom_free(const tinybuf_value *value)
 {
-    return value->_data._custom != NULL && value->_type == tinybuf_custom;
+    return value->_data._custom != NULL && (value->_type == tinybuf_custom || value->_type == tinybuf_tensor || value->_type == tinybuf_bool_map || value->_type == tinybuf_indexed_tensor);
 }
 // 释放custom指针
 inline bool maybe_free_custom(tinybuf_value *value)
@@ -203,13 +207,15 @@ typedef enum
     serialize_empty_table=41,     // 未实现 空白空间表 用于配合平坦buf实现文件内连续子空间
     // 子引用：后跟一个完整的指针box，读取时强制生成子引用节点（不透明）
     serialize_sub_ref=42,         // 已实现
-    // 使用字符串池+索引index来表示额外类型 后跟整数 要求字符串池存在
-    // 后面跟的是idx 直接就是idx后面不跟完整databox而是跟index整数
-    serialize_extern_str_idx = 253, // 未实现
-    // str类型的extern类型表示 占空间较大 后面有一个完整的databox 可以是str或stridx
-    serialize_extern_str = 254,     // 未实现
-    // 扩展序列化类型 使用此类型 后面会跟一个变长正数（非完整box） 来表示更丰富的数据类型 用于支持插件系统
-    serialize_extern_int = 255      // 未实现
+    serialize_vector_tensor=43,
+    serialize_dense_tensor=44,
+    serialize_sparse_tensor=45,
+    serialize_bool_map=46,
+    serialize_indexed_tensor=47,
+    serialize_type_idx = 48,
+    serialize_extern_str_idx = 253,
+    serialize_extern_str = 254,
+    serialize_extern_int = 255
 } serialize_type;
 //---压缩boxlist数据集合的序列化
 static inline int boxlist_serialize()
@@ -805,6 +811,94 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         avl_tree_for_each_node(value->_data._map_array, out, avl_tree_for_each_node_dump_array);
     }
     break;
+    case tinybuf_tensor:
+    {
+        tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
+        if(!t){ break; }
+        int64_t elem = t->count;
+        if(t->dims == 1){
+            char type = serialize_vector_tensor;
+            buffer_append(out, &type, 1);
+            dump_int((uint64_t)elem, out);
+            dump_int((uint64_t)t->dtype, out);
+            if(t->dtype==8){
+                const double *pd = (const double*)t->data;
+                for(int64_t i=0;i<elem;++i){ dump_double(pd[i], out); }
+            } else if(t->dtype==10){
+                const float *pf = (const float*)t->data;
+                for(int64_t i=0;i<elem;++i){ uint32_t raw=0; memcpy(&raw,&pf[i],4); raw=htonl(raw); buffer_append(out,(char*)&raw,4);}            
+            } else if(t->dtype==11){
+                const uint8_t *pb = (const uint8_t*)t->data;
+                int64_t bytes = (elem + 7) / 8;
+                for(int64_t b=0;b<bytes;++b){
+                    uint8_t one = 0;
+                    for(int k=0;k<8;++k){
+                        int64_t idx = b*8 + k; if(idx>=elem) break;
+                        uint8_t bit = pb[idx] ? 1 : 0;
+                        one |= (uint8_t)(bit << (7 - k));
+                    }
+                    buffer_append(out, (const char*)&one, 1);
+                }
+            } else {
+                const int64_t *pi64 = (const int64_t*)t->data;
+                for(int64_t i=0;i<elem;++i){ uint64_t v = (uint64_t)(pi64[i] < 0 ? -pi64[i] : pi64[i]); char ty = (pi64[i] < 0)?serialize_negtive_int:serialize_positive_int; buffer_append(out,&ty,1); dump_int(v, out); }
+            }
+        } else {
+            char type = serialize_dense_tensor;
+            buffer_append(out, &type, 1);
+            dump_int((uint64_t)t->dims, out);
+            for(int i=0;i<t->dims;++i){ dump_int((uint64_t)t->shape[i], out); }
+            dump_int((uint64_t)t->dtype, out);
+            if(t->dtype==8){
+                const double *pd = (const double*)t->data;
+                for(int64_t i=0;i<elem;++i){ dump_double(pd[i], out); }
+            } else if(t->dtype==10){
+                const float *pf = (const float*)t->data;
+                for(int64_t i=0;i<elem;++i){ uint32_t raw=0; memcpy(&raw,&pf[i],4); raw=htonl(raw); buffer_append(out,(char*)&raw,4);}            
+            } else if(t->dtype==11){
+                const uint8_t *pb = (const uint8_t*)t->data;
+                int64_t bytes = (elem + 7) / 8;
+                for(int64_t b=0;b<bytes;++b){
+                    uint8_t one = 0;
+                    for(int k=0;k<8;++k){
+                        int64_t idx = b*8 + k; if(idx>=elem) break;
+                        uint8_t bit = pb[idx] ? 1 : 0;
+                        one |= (uint8_t)(bit << (7 - k));
+                    }
+                    buffer_append(out, (const char*)&one, 1);
+                }
+            } else {
+                const int64_t *pi64 = (const int64_t*)t->data;
+                for(int64_t i=0;i<elem;++i){ uint64_t v = (uint64_t)(pi64[i] < 0 ? -pi64[i] : pi64[i]); char ty = (pi64[i] < 0)?serialize_negtive_int:serialize_positive_int; buffer_append(out,&ty,1); dump_int(v, out); }
+            }
+        }
+        }
+    break;
+    case tinybuf_bool_map:
+    {
+        tinybuf_bool_map_t *bm = (tinybuf_bool_map_t*)value->_data._custom;
+        if(!bm){ break; }
+        char type = serialize_bool_map;
+        buffer_append(out, &type, 1);
+        dump_int((uint64_t)bm->count, out);
+        int64_t bytes = (bm->count + 7) / 8;
+        if(bytes>0){ buffer_append(out, (const char*)bm->bits, (int)bytes); }
+    }
+    break;
+    case tinybuf_indexed_tensor:
+    {
+        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)value->_data._custom;
+        if(!it || !it->tensor){ break; }
+        char type = serialize_indexed_tensor;
+        buffer_append(out, &type, 1);
+        try_write_box(out, it->tensor);
+        dump_int((uint64_t)it->dims, out);
+        for(int i=0;i<it->dims;++i){
+            if(it->indices && it->indices[i]){ dump_int(1, out); try_write_box(out, it->indices[i]); }
+            else { dump_int(0, out); }
+        }
+    }
+    break;
         // 其他类型 version 和versionlist
 
     default:
@@ -874,6 +968,216 @@ inline int optional_add(int x, int addx)
 // }
 
 //--核心反序列化路由函数 初级版本 只能处理纯初级格式 内部不能嵌套二级box
+static int tinybuf_deserialize_vector_tensor(const char *ptr, int size, tinybuf_value *out){
+    uint64_t cnt = 0;
+    uint64_t dt = 0;
+    int a = 0;
+    int b = 0;
+    int64_t count = 0;
+    tinybuf_tensor_t *tensor = NULL;
+    int64_t *shape = NULL;
+    uint8_t *buf_u8 = NULL;
+    int64_t *buf_i64 = NULL;
+    int64_t i = 0;
+    a = int_deserialize((uint8_t*)ptr, size, &cnt); if(a<=0) return a; ptr += a; size -= a;
+    b = int_deserialize((uint8_t*)ptr, size, &dt); if(b<=0) return b; ptr += b; size -= b;
+    count = (int64_t)cnt;
+    tensor = (tinybuf_tensor_t*)tinybuf_malloc((int)sizeof(tinybuf_tensor_t));
+    tensor->dtype = (int)dt; tensor->dims = 1;
+    shape = (int64_t*)tinybuf_malloc((int)sizeof(int64_t));
+    if(!shape){ tinybuf_free(tensor); return -1; }
+    shape[0] = count; tensor->shape = shape;
+    tensor->count = count;
+    if(tensor->dtype == 8){
+        if(size < count*8){ tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+        tensor->data = tinybuf_malloc((int)(count*8));
+        memcpy(tensor->data, ptr, (size_t)(count*8));
+        ptr += count*8; size -= count*8;
+    }
+    else if(tensor->dtype == 10){
+        if(size < count*4){ tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+        tensor->data = tinybuf_malloc((int)(count*4));
+        memcpy(tensor->data, ptr, (size_t)(count*4));
+        ptr += count*4; size -= count*4;
+    }
+    else if(tensor->dtype == 11){
+        int64_t bytes = (count + 7) / 8;
+        if(size < bytes){ tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+        buf_u8 = (uint8_t*)tinybuf_malloc((int)count);
+        for(i=0;i<count;++i){
+            uint8_t one = ((const uint8_t*)ptr)[i/8]; int bit = 7 - (int)(i % 8);
+            buf_u8[i] = (uint8_t)((one >> bit) & 1);
+        }
+        ptr += bytes; size -= bytes;
+        tensor->data = buf_u8;
+    }
+    else {
+        buf_i64 = (int64_t*)tinybuf_malloc((int)(count*(int64_t)sizeof(int64_t)));
+        for(i=0;i<count;++i){
+            if(size<1){ tinybuf_free(buf_i64); tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+            serialize_type tt = (serialize_type)ptr[0]; ptr += 1; size -= 1;
+            uint64_t v = 0; int c = int_deserialize((uint8_t*)ptr, size, &v);
+            if(c<=0){ tinybuf_free(buf_i64); tinybuf_free(shape); tinybuf_free(tensor); return c; }
+            ptr += c; size -= c;
+            int64_t sv = (tt==serialize_negtive_int)?-(int64_t)v:(int64_t)v;
+            buf_i64[i] = sv;
+        }
+        tensor->data = buf_i64;
+    }
+    out->_type = tinybuf_tensor; out->_data._custom = tensor; out->_custom_free = NULL;
+    return 1 + a + b;
+}
+
+static int tinybuf_deserialize_dense_tensor(const char *ptr, int size, tinybuf_value *out){
+    uint64_t dims = 0;
+    uint64_t dt = 0;
+    uint64_t i = 0;
+    int a = 0;
+    int b = 0;
+    int64_t *shape = NULL;
+    int64_t prod = 1;
+    tinybuf_tensor_t *tensor = NULL;
+    int64_t ii = 0;
+    uint8_t *buf_u8 = NULL;
+    int64_t *buf_i64 = NULL;
+    a = int_deserialize((uint8_t*)ptr, size, &dims); if(a<=0) return a; ptr += a; size -= a;
+    shape = (int64_t*)tinybuf_malloc((int)(sizeof(int64_t)*(int)dims));
+    for(i=0;i<dims;++i){
+        uint64_t d=0; int c=int_deserialize((uint8_t*)ptr, size, &d);
+        if(c<=0){ tinybuf_free(shape); return c; }
+        ptr += c; size -= c; shape[i] = (int64_t)d; prod *= shape[i];
+    }
+    b = int_deserialize((uint8_t*)ptr, size, &dt); if(b<=0){ tinybuf_free(shape); return b; } ptr += b; size -= b;
+    tensor = (tinybuf_tensor_t*)tinybuf_malloc((int)sizeof(tinybuf_tensor_t));
+    tensor->dtype = (int)dt; tensor->dims = (int)dims; tensor->shape = shape; tensor->count = prod;
+    if(tensor->dtype == 8){
+        if(size < prod*8){ tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+        tensor->data = tinybuf_malloc((int)(prod*8));
+        memcpy(tensor->data, ptr, (size_t)(prod*8));
+        ptr += prod*8; size -= prod*8;
+    }
+    else if(tensor->dtype == 10){
+        if(size < prod*4){ tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+        tensor->data = tinybuf_malloc((int)(prod*4));
+        memcpy(tensor->data, ptr, (size_t)(prod*4));
+        ptr += prod*4; size -= prod*4;
+    }
+    else if(tensor->dtype == 11){
+        int64_t bytes = (prod + 7) / 8;
+        if(size < bytes){ tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+        buf_u8 = (uint8_t*)tinybuf_malloc((int)prod);
+        for(ii=0; ii<prod; ++ii){
+            uint8_t one = ((const uint8_t*)ptr)[ii/8]; int bit = 7 - (int)(ii % 8);
+            buf_u8[ii] = (uint8_t)((one >> bit) & 1);
+        }
+        ptr += bytes; size -= bytes;
+        tensor->data = buf_u8;
+    }
+    else {
+        buf_i64 = (int64_t*)tinybuf_malloc((int)(prod*(int64_t)sizeof(int64_t)));
+        for(ii=0; ii<prod; ++ii){
+            if(size<1){ tinybuf_free(buf_i64); tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+            serialize_type tt = (serialize_type)ptr[0]; ptr += 1; size -= 1;
+            uint64_t v = 0; int c = int_deserialize((uint8_t*)ptr, size, &v);
+            if(c<=0){ tinybuf_free(buf_i64); tinybuf_free(shape); tinybuf_free(tensor); return c; }
+            ptr += c; size -= c; int64_t sv = (tt==serialize_negtive_int)?-(int64_t)v:(int64_t)v; buf_i64[ii] = sv;
+        }
+        tensor->data = buf_i64;
+    }
+    out->_type = tinybuf_tensor; out->_data._custom = tensor; out->_custom_free = NULL;
+    return 1 + a + b;
+}
+
+static int tinybuf_deserialize_sparse_tensor(const char *ptr, int size, tinybuf_value *out){
+    uint64_t dims = 0;
+    uint64_t dt = 0;
+    uint64_t k = 0;
+    uint64_t i = 0;
+    uint64_t ii = 0;
+    int a = 0;
+    int b = 0;
+    int e = 0;
+    int64_t *shape = NULL;
+    int64_t prod = 1;
+    tinybuf_tensor_t *tensor = NULL;
+    int j = 0;
+    a = int_deserialize((uint8_t*)ptr, size, &dims); if(a<=0) return a; ptr += a; size -= a;
+    shape = (int64_t*)tinybuf_malloc((int)(sizeof(int64_t)*(int)dims));
+    for(i=0;i<dims;++i){
+        uint64_t d=0; int c=int_deserialize((uint8_t*)ptr, size, &d);
+        if(c<=0){ tinybuf_free(shape); return c; }
+        ptr += c; size -= c; shape[i] = (int64_t)d; prod *= shape[i];
+    }
+    b = int_deserialize((uint8_t*)ptr, size, &dt); if(b<=0){ tinybuf_free(shape); return b; } ptr += b; size -= b;
+    e = int_deserialize((uint8_t*)ptr, size, &k); if(e<=0){ tinybuf_free(shape); return e; } ptr += e; size -= e;
+    tensor = (tinybuf_tensor_t*)tinybuf_malloc((int)sizeof(tinybuf_tensor_t));
+    tensor->dtype = (int)dt; tensor->dims = (int)dims; tensor->shape = shape; tensor->count = prod;
+    if(tensor->dtype == 8){
+        double *buf = (double*)tinybuf_malloc((int)(prod*8)); memset(buf,0,(size_t)(prod*8));
+        for(ii=0; ii<k; ++ii){
+            int64_t stride=1; int64_t flat=0;
+            for(j=(int)dims-1; j>=0; --j){
+                uint64_t idx=0; int c=int_deserialize((uint8_t*)ptr, size, &idx);
+                if(c<=0){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return c; }
+                ptr += c; size -= c; flat += (int64_t)idx * stride; stride *= shape[j];
+            }
+            if(size<8){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+            double dv = read_double((uint8_t*)ptr); ptr += 8; size -= 8; buf[flat] = dv;
+        }
+        tensor->data = buf;
+    }
+    else if(tensor->dtype == 10){
+        float *buf = (float*)tinybuf_malloc((int)(prod*4)); memset(buf,0,(size_t)(prod*4));
+        for(ii=0; ii<k; ++ii){
+            int64_t stride=1; int64_t flat=0;
+            for(j=(int)dims-1; j>=0; --j){
+                uint64_t idx=0; int c=int_deserialize((uint8_t*)ptr, size, &idx);
+                if(c<=0){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return c; }
+                ptr += c; size -= c; flat += (int64_t)idx * stride; stride *= shape[j];
+            }
+            if(size<4){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+            uint32_t raw = load_be32(ptr); float fv = 0; memcpy(&fv,&raw,4); ptr += 4; size -= 4; buf[flat] = fv;
+        }
+        tensor->data = buf;
+    }
+    else if(tensor->dtype == 11){
+        uint8_t *buf = (uint8_t*)tinybuf_malloc((int)prod); memset(buf,0,(size_t)prod);
+        for(ii=0; ii<k; ++ii){
+            int64_t stride=1; int64_t flat=0;
+            for(j=(int)dims-1; j>=0; --j){
+                uint64_t idx=0; int c=int_deserialize((uint8_t*)ptr, size, &idx);
+                if(c<=0){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return c; }
+                ptr += c; size -= c; flat += (int64_t)idx * stride; stride *= shape[j];
+            }
+            if(size<1) { tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+            serialize_type tt = (serialize_type)ptr[0]; ptr += 1; size -= 1;
+            uint64_t v = 0; int c = int_deserialize((uint8_t*)ptr, size, &v);
+            if(c<=0){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return c; }
+            ptr += c; size -= c; buf[flat] = (uint8_t)(v?1:0);
+        }
+        tensor->data = buf;
+    }
+    else {
+        int64_t *buf = (int64_t*)tinybuf_malloc((int)(prod*(int64_t)sizeof(int64_t)));
+        memset(buf,0,(size_t)(prod*(int64_t)sizeof(int64_t)));
+        for(ii=0; ii<k; ++ii){
+            int64_t stride=1; int64_t flat=0;
+            for(j=(int)dims-1; j>=0; --j){
+                uint64_t idx=0; int c=int_deserialize((uint8_t*)ptr, size, &idx);
+                if(c<=0){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return c; }
+                ptr += c; size -= c; flat += (int64_t)idx * stride; stride *= shape[j];
+            }
+            if(size<1){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return 0; }
+            serialize_type tt = (serialize_type)ptr[0]; ptr += 1; size -= 1;
+            uint64_t v = 0; int c = int_deserialize((uint8_t*)ptr, size, &v);
+            if(c<=0){ tinybuf_free(buf); tinybuf_free(shape); tinybuf_free(tensor); return c; }
+            ptr += c; size -= c; int64_t sv = (tt==serialize_negtive_int)?-(int64_t)v:(int64_t)v; buf[flat] = sv;
+        }
+        tensor->data = buf;
+    }
+    out->_type = tinybuf_tensor; out->_data._custom = tensor; out->_custom_free = NULL;
+    return 1;
+}
 int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
 {
     assert(out);
@@ -884,6 +1188,12 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         // 数据不够
         return 0;
     }
+
+    uint64_t cnt=0, dt=0, dims=0, k=0;
+    int a=0, b=0, e=0;
+    int64_t count=0, prod=1;
+    int64_t *shape=NULL;
+    tinybuf_tensor_t *tnsr=NULL;
 
     serialize_type type = ptr[0];
     // 剩余字节数
@@ -1122,6 +1432,65 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         return consumed;
     }
     break;
+    case serialize_vector_tensor:
+    {
+        return tinybuf_deserialize_vector_tensor(ptr, size, out);
+    }
+    case serialize_dense_tensor:
+    {
+        return tinybuf_deserialize_dense_tensor(ptr, size, out);
+    }
+    case serialize_sparse_tensor:
+    {
+        return tinybuf_deserialize_sparse_tensor(ptr, size, out);
+    }
+    case serialize_bool_map:
+    {
+        uint64_t cnt=0; int a = int_deserialize((uint8_t*)ptr, size, &cnt); if(a<=0) return a; ptr += a; size -= a;
+        int64_t bytes = ((int64_t)cnt + 7) / 8; if(size < bytes) return 0;
+        tinybuf_bool_map_t *bm = (tinybuf_bool_map_t*)tinybuf_malloc((int)sizeof(tinybuf_bool_map_t)); bm->count = (int64_t)cnt;
+        bm->bits = (uint8_t*)tinybuf_malloc((int)bytes);
+        memcpy(bm->bits, ptr, (size_t)bytes);
+        out->_type = tinybuf_bool_map; out->_data._custom = bm; out->_custom_free = NULL;
+        return 1 + a + (int)bytes;
+    }
+    case serialize_indexed_tensor:
+    {
+        const char *p0 = ptr;
+        buf_ref br = (buf_ref){ (char*)ptr, (int64_t)size, (char*)ptr, (int64_t)size };
+        tinybuf_value *ten = tinybuf_value_alloc(); int r1 = try_read_box(&br, ten, contain_any); if(r1<=0){ tinybuf_value_free(ten); return r1; }
+        ptr += r1; size -= r1;
+        uint64_t dims=0; int a = int_deserialize((uint8_t*)ptr, size, &dims); if(a<=0){ tinybuf_value_free(ten); return a; }
+        ptr += a; size -= a;
+        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)tinybuf_malloc((int)sizeof(tinybuf_indexed_tensor_t)); it->tensor = ten; it->dims = (int)dims; it->indices = NULL;
+        if(dims>0){ it->indices = (tinybuf_value**)tinybuf_malloc(sizeof(tinybuf_value*)*(size_t)dims); for(uint64_t i=0;i<dims;++i) it->indices[i] = NULL; }
+        for(uint64_t i=0;i<dims;++i){ uint64_t has=0; int c = int_deserialize((uint8_t*)ptr, size, &has); if(c<=0){ /* cleanup */ if(it->indices){ for(uint64_t k=0;k<i;++k){ if(it->indices[k]) tinybuf_value_free(it->indices[k]); } tinybuf_free(it->indices);} tinybuf_value_free(ten); tinybuf_free(it); return c; } ptr+=c; size-=c; if(has){ tinybuf_value *idx = tinybuf_value_alloc(); buf_ref br2 = (buf_ref){ (char*)ptr, (int64_t)size, (char*)ptr, (int64_t)size }; int r2 = try_read_box(&br2, idx, contain_any); if(r2<=0){ tinybuf_value_free(idx); if(it->indices){ for(uint64_t k=0;k<i;++k){ if(it->indices[k]) tinybuf_value_free(it->indices[k]); } tinybuf_free(it->indices);} tinybuf_value_free(ten); tinybuf_free(it); return r2; } ptr += r2; size -= r2; it->indices[i] = idx; } }
+        out->_type = tinybuf_indexed_tensor; out->_data._custom = it; out->_custom_free = NULL;
+        return 1 + (int)(ptr - p0);
+    }
+    case serialize_type_idx:
+    {
+        uint64_t idx=0; int a=int_deserialize((uint8_t*)ptr, size, &idx); if(a<=0) return a; ptr+=a; size-=a;
+        uint64_t blen=0; int b=int_deserialize((uint8_t*)ptr, size, &blen); if(b<=0) return b; ptr+=b; size-=b;
+        if(size < (int64_t)blen) return 0;
+        if (s_strpool_offset_read < 0 || s_strpool_base_read == NULL) return -1;
+        const char *pool_start = s_strpool_base_read + s_strpool_offset_read;
+        const char *q = pool_start; int64_t r = ((const char*)ptr + size) - pool_start;
+        if(r < 1) return 0;
+        char *name_out = NULL; int name_len = 0;
+        if((uint8_t)q[0] == serialize_str_pool){
+            ++q; --r; uint64_t cnt=0; int l2=int_deserialize((uint8_t*)q,(int)r,&cnt); if(l2<=0) return l2; q+=l2; r-=l2; if(idx>=cnt) return -1; for(uint64_t i=0;i<cnt;++i){ if(r<1) return 0; if((uint8_t)q[0]!=serialize_string) return -1; ++q; --r; uint64_t sl=0; int l3=int_deserialize((uint8_t*)q,(int)r,&sl); if(l3<=0) return l3; q+=l3; r-=l3; if(r < (int64_t)sl) return 0; if(i==idx){ name_out=(char*)tinybuf_malloc((int)sl+1); memcpy(name_out,q,(size_t)sl); name_out[sl]='\0'; name_len=(int)sl; break; } q+=sl; r-=sl; }
+        } else if((uint8_t)q[0] == 27){
+            ++q; --r; uint64_t ncount=0; int l2=int_deserialize((uint8_t*)q,(int)r,&ncount); if(l2<=0) return l2; const char *nodes_base=q+l2; int64_t nodes_size=r-l2; const char *p = nodes_base; int64_t rr = nodes_size; int found=-1; for(uint64_t i=0;i<ncount;++i){ uint64_t parent=0; int lp=int_deserialize((uint8_t*)p,(int)rr,&parent); if(lp<=0) return lp; p+=lp; rr-=lp; if(rr<2) return 0; unsigned char ch=(unsigned char)p[0]; unsigned char flag=(unsigned char)p[1]; p+=2; rr-=2; if(flag){ uint64_t leaf=0; int ll=int_deserialize((uint8_t*)p,(int)rr,&leaf); if(ll<=0) return ll; p+=ll; rr-=ll; if(leaf==(uint64_t)idx){ found=(int)i; break; } } }
+            if(found<0) return -1; buffer *tmp=buffer_alloc(); int current=found; while(1){ const char *p2=nodes_base; int64_t rr2=nodes_size; int node_index=0; int parent_index=-1; unsigned char ch=0; unsigned char flag=0; uint64_t leaf=0; while(node_index<=current){ uint64_t parent=0; int lp=int_deserialize((uint8_t*)p2,(int)rr2,&parent); p2+=lp; rr2-=lp; if(rr2<2) return 0; ch=(unsigned char)p2[0]; flag=(unsigned char)p2[1]; p2+=2; rr2-=2; if(flag){ int ll=int_deserialize((uint8_t*)p2,(int)rr2,&leaf); p2+=ll; rr2-=ll; } parent_index=(int)parent; ++node_index; } if(ch){ buffer_append(tmp,(const char*)&ch,1); } if(parent_index<=0) break; current=parent_index; }
+            int tlen=buffer_get_length_inline(tmp); const char *td=buffer_get_data_inline(tmp); name_out=(char*)tinybuf_malloc(tlen+1); for(int i=0;i<tlen;++i){ name_out[i]=td[tlen-1-i]; } name_out[tlen]='\0'; name_len=tlen; buffer_free(tmp);
+        } else { return -1; }
+        if(!name_out) return -1;
+        int rr = tinybuf_custom_try_read(name_out, (const uint8_t*)ptr, (int)blen, out, contain_any);
+        tinybuf_free(name_out);
+        if(rr < 0) return rr;
+        return 1 + a + b + (int)blen;
+    }
     default:
         // 解析失败
         return -1;
@@ -1593,37 +1962,54 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
         // 整个versionlist中 必须是同种类型数据且一旦找到正确版本 则直接返回该版本数据
         case serialize_version_list:
         {
-            // 读取版本列表长度
             QWORD list_len;
             if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &list_len), &len))
             {
-                // 读取版本列表
+                int found = 0;
                 for (QWORD i = 0; i < list_len; i++)
                 {
-                    QWORD version;
+                    QWORD version = 0;
                     if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &version), &len))
                     {
-                        // 检查version是否正确
                         if (target_version(version))
                         {
-                            if (OK_AND_ADDTO(try_read_box(buf, out, target_version), &len))
+                            int inner = try_read_box(buf, out, target_version);
+                            if (inner > 0)
                             {
+                                len += inner;
                                 pool_mark_complete(box_offset);
                                 SET_SUCCESS();
-                                goto loopend;
+                                found = 1;
+                                break;
                             }
                             SET_FAILED("read box failed");
-                            goto loopend;
+                            break;
                         }
-                        SET_FAILED("version error");
-                        goto loopend;
+                        else
+                        {
+                            tinybuf_value *skip = tinybuf_value_alloc();
+                            int consumed = try_read_box(buf, skip, target_version);
+                            if (consumed <= 0)
+                            {
+                                tinybuf_value_free(skip);
+                                SET_FAILED("read non-match box failed");
+                                break;
+                            }
+                            len += consumed;
+                            tinybuf_value_free(skip);
+                            continue;
+                        }
                     }
-                    SET_FAILED("read version failed");
-                    goto loopend;
+                    else
+                    {
+                        SET_FAILED("read version failed");
+                        break;
+                    }
                 }
-                // 没找到直接失败
-                SET_FAILED("read version list failed");
-            loopend:
+                if (!found)
+                {
+                    SET_FAILED("read version list failed");
+                }
                 break;
             }
         }
@@ -2251,6 +2637,20 @@ int tinybuf_try_write_map_header(buffer *out, int count){
 int tinybuf_try_write_string_raw(buffer *out, const char *str, int len){
     return dump_string(len, str, out);
 }
+int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in){
+    buffer *body = buffer_alloc(); buffer *pool = buffer_alloc(); strpool_reset_write(body);
+    int idx = strpool_add(name, (int)strlen(name)); uint8_t ty = serialize_type_idx; buffer_append(body, (const char*)&ty, 1); dump_int((uint64_t)idx, body);
+    buffer *payload = buffer_alloc(); int plen = tinybuf_custom_try_write(name, in, payload); dump_int((uint64_t)plen, body); if(plen>0){ buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload)); }
+    strpool_write_tail(pool);
+    uint64_t body_len = (uint64_t)buffer_get_length_inline(body);
+    uint64_t offset_guess_len = 1; uint8_t tmpv[16]; while(1){ uint64_t off = 1 + offset_guess_len + body_len; int l = int_serialize(off, tmpv); if((uint64_t)l == offset_guess_len) break; offset_guess_len = (uint64_t)l; }
+    uint64_t final_off = 1 + offset_guess_len + body_len;
+    try_write_type(out, serialize_str_pool_table); try_write_int_data(FALSE, out, final_off);
+    buffer_append(out, buffer_get_data_inline(body), (int)body_len);
+    int pool_len = buffer_get_length_inline(pool); if(pool_len){ buffer_append(out, buffer_get_data_inline(pool), pool_len); }
+    buffer_free(payload); buffer_free(body); buffer_free(pool);
+    return 1 + (int)offset_guess_len + (int)body_len + pool_len;
+}
 
 //------------------------------
 static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
@@ -2397,7 +2797,7 @@ tinybuf_value *tinybuf_value_clone(const tinybuf_value *value)
         return ret;
     }
     default:
-        assert(0);
+        memcpy(ret, value, sizeof(tinybuf_value));
         return ret;
     }
 }
@@ -2448,6 +2848,19 @@ buffer *tinybuf_value_get_string(const tinybuf_value *value)
     }
     return value->_data._string;
 }
+
+int tinybuf_tensor_get_dtype(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return 0; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->dtype : 0; }
+int tinybuf_tensor_get_ndim(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return 0; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->dims : 0; }
+const int64_t* tinybuf_tensor_get_shape(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return NULL; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->shape : NULL; }
+int64_t tinybuf_tensor_get_count(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return 0; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->count : 0; }
+void* tinybuf_tensor_get_data(tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return NULL; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->data : NULL; }
+const void* tinybuf_tensor_get_data_const(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return NULL; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->data : NULL; }
+
+int tinybuf_value_init_tensor(tinybuf_value *value, int dtype, const int64_t *shape, int dims, const void *data, int64_t elem_count){ if(!value || !shape || dims<=0 || elem_count<0) return -1; tinybuf_value_clear(value); tinybuf_tensor_t *t=(tinybuf_tensor_t*)tinybuf_malloc(sizeof(tinybuf_tensor_t)); t->dtype=dtype; t->dims=dims; t->shape=(int64_t*)tinybuf_malloc(sizeof(int64_t)*(size_t)dims); for(int i=0;i<dims;++i){ t->shape[i]=shape[i]; } t->count=elem_count; size_t bytes=0; if(dtype==8){ bytes=(size_t)(elem_count*8); } else if(dtype==10){ bytes=(size_t)(elem_count*4); } else if(dtype==11){ bytes=(size_t)(elem_count); } else { bytes=(size_t)(elem_count*sizeof(int64_t)); } t->data=tinybuf_malloc(bytes); if(data && bytes){ memcpy(t->data, data, bytes); } value->_type=tinybuf_tensor; value->_data._custom=t; value->_custom_free=NULL; return 0; }
+
+int tinybuf_value_init_bool_map(tinybuf_value *value, const uint8_t *bits, int64_t count){ if(!value || count<0) return -1; tinybuf_value_clear(value); tinybuf_bool_map_t *bm=(tinybuf_bool_map_t*)tinybuf_malloc(sizeof(tinybuf_bool_map_t)); bm->count=count; int64_t bytes=(count+7)/8; bm->bits=(uint8_t*)tinybuf_malloc((int)bytes); if(bits && bytes>0){ memcpy(bm->bits, bits, (size_t)bytes); } else if(bytes>0){ memset(bm->bits, 0, (size_t)bytes); } value->_type=tinybuf_bool_map; value->_data._custom=bm; value->_custom_free=NULL; return 0; }
+int64_t tinybuf_bool_map_get_count(const tinybuf_value *value){ if(!value || value->_type!=tinybuf_bool_map) return 0; tinybuf_bool_map_t *bm=(tinybuf_bool_map_t*)value->_data._custom; return bm? bm->count : 0; }
+const uint8_t* tinybuf_bool_map_get_bits_const(const tinybuf_value *value){ if(!value || value->_type!=tinybuf_bool_map) return NULL; tinybuf_bool_map_t *bm=(tinybuf_bool_map_t*)value->_data._custom; return bm? bm->bits : NULL; }
 
 int tinybuf_value_get_child_size(const tinybuf_value *value)
 {
@@ -2672,6 +3085,37 @@ static int dump_box_text(buf_ref *buf, buffer *out){
         case serialize_array:
             consumed += dump_array_text(buf, out);
             break;
+        case serialize_vector_tensor:
+        {
+            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; buf_offset(buf,a); consumed+=a; QWORD dt=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dt); if(b<=0) return b; buf_offset(buf,b); consumed+=b; append_cstr(out, "tensor(shape=["); append_int_dec(out,(int64_t)cnt); append_cstr(out, "], dtype="); append_int_dec(out,(int64_t)dt); append_cstr(out, ", count="); append_int_dec(out,(int64_t)cnt); append_cstr(out, ")"); if((int64_t)dt==8){ int64_t need=(int64_t)cnt*8; if(buf->size<need) return 0; buf_offset(buf,need); consumed+=(int)need; } else if((int64_t)dt==10){ int64_t need=(int64_t)cnt*4; if(buf->size<need) return 0; buf_offset(buf,need); consumed+=(int)need; } else if((int64_t)dt==11){ int64_t need=((int64_t)cnt + 7) / 8; if(buf->size<need) return 0; buf_offset(buf,(int)need); consumed+=(int)need; } else { for(QWORD i=0;i<cnt;++i){ serialize_type t2=(serialize_type)buf->ptr[0]; buf_offset(buf,1); consumed+=1; QWORD v=0; int c=try_read_int_tovar(t2==serialize_negtive_int, buf->ptr, (int)buf->size, &v); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } } return consumed;
+        }
+        case serialize_dense_tensor:
+        {
+            QWORD dims=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dims); if(a<=0) return a; buf_offset(buf,a); consumed+=a; int64_t prod=1; for(QWORD i=0;i<dims;++i){ QWORD d=0; int c=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &d); if(c<=0) return c; buf_offset(buf,c); consumed+=c; prod *= (int64_t)d; } QWORD dt=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dt); if(b<=0) return b; buf_offset(buf,b); consumed+=b; append_cstr(out, "tensor(shape=["); for(QWORD i=0;i<dims;++i){ if(i) append_cstr(out, ","); } append_cstr(out, "], dtype="); append_int_dec(out,(int64_t)dt); append_cstr(out, ", count="); append_int_dec(out,prod); append_cstr(out, ")"); if((int64_t)dt==8){ int64_t need=prod*8; if(buf->size<need) return 0; buf_offset(buf,need); consumed+=(int)need; } else if((int64_t)dt==10){ int64_t need=prod*4; if(buf->size<need) return 0; buf_offset(buf,need); consumed+=(int)need; } else if((int64_t)dt==11){ int64_t need=(prod + 7) / 8; if(buf->size<need) return 0; buf_offset(buf,(int)need); consumed+=(int)need; } else { for(int64_t i=0;i<prod;++i){ serialize_type t2=(serialize_type)buf->ptr[0]; buf_offset(buf,1); consumed+=1; QWORD v=0; int c=try_read_int_tovar(t2==serialize_negtive_int, buf->ptr, (int)buf->size, &v); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } } return consumed;
+        }
+        case serialize_indexed_tensor:
+        {
+            tinybuf_value tmp; memset(&tmp,0,sizeof(tmp));
+            buf_ref hb = *buf; int r1 = try_read_box(&hb, &tmp, contain_any); if(r1<=0) return r1; buf_offset(buf,r1); consumed+=r1; tinybuf_value_free(&tmp);
+            QWORD dims=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dims); if(a<=0) return a; buf_offset(buf,a); consumed+=a;
+            append_cstr(out, "indexed_tensor(dims="); append_int_dec(out,(int64_t)dims); append_cstr(out, ")");
+            for(QWORD i=0;i<dims;++i){ QWORD has=0; int c=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &has); if(c<=0) return c; buf_offset(buf,c); consumed+=c; if(has){ tinybuf_value tmp2; memset(&tmp2,0,sizeof(tmp2)); buf_ref hb2 = *buf; int r2 = try_read_box(&hb2, &tmp2, contain_any); if(r2<=0) return r2; buf_offset(buf,r2); consumed+=r2; tinybuf_value_free(&tmp2);} }
+            return consumed;
+        }
+        case serialize_type_idx:
+        {
+            QWORD idx=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &idx); if(a<=0) return a; buf_offset(buf,a); consumed+=a; QWORD blen=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &blen); if(b<=0) return b; buf_offset(buf,b); consumed+=b; const char *pool_start = s_strpool_base_read + s_strpool_offset_read; const char *q = pool_start; int64_t r = ((const char*)buf->ptr + buf->size) - pool_start; char *name_out=NULL; int name_len=0; if(r>0){ if((uint8_t)q[0]==serialize_str_pool){ ++q; --r; QWORD cnt=0; int l2=try_read_int_tovar(FALSE,q,(int)r,&cnt); if(l2>0){ q+=l2; r-=l2; for(QWORD i=0;i<cnt;++i){ if(r<1) break; if((uint8_t)q[0]!=serialize_string) break; ++q; --r; QWORD sl=0; int l3=try_read_int_tovar(FALSE,q,(int)r,&sl); if(l3<=0) break; q+=l3; r-=l3; if(r < (int64_t)sl) break; if(i==idx){ name_out=(char*)tinybuf_malloc((int)sl+1); memcpy(name_out,q,(size_t)sl); name_out[sl]='\0'; name_len=(int)sl; break; } q+=sl; r-=sl; } } } }
+            if(name_out){ buffer_append(out, "custom:", 7); buffer_append(out, name_out, name_len); tinybuf_free(name_out); }
+            if((int64_t)blen > buf->size) return 0; buf_offset(buf, (int)blen); consumed += (int)blen; break;
+        }
+        case serialize_bool_map:
+        {
+            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; buf_offset(buf,a); consumed+=a; int64_t need=((int64_t)cnt + 7) / 8; if(buf->size<need) return 0; buf_offset(buf,(int)need); consumed+=(int)need; append_cstr(out, "bool_map(count="); append_int_dec(out,(int64_t)cnt); append_cstr(out, ")"); return consumed;
+        }
+        case serialize_sparse_tensor:
+        {
+            QWORD dims=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dims); if(a<=0) return a; buf_offset(buf,a); consumed+=a; for(QWORD i=0;i<dims;++i){ QWORD d=0; int c=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &d); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } QWORD dt=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dt); if(b<=0) return b; buf_offset(buf,b); consumed+=b; QWORD k=0; int e=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &k); if(e<=0) return e; buf_offset(buf,e); consumed+=e; append_cstr(out, "tensor(sparse, entries="); append_int_dec(out,(int64_t)k); append_cstr(out, ")"); for(QWORD i=0;i<k;++i){ for(QWORD j=0;j<dims;++j){ QWORD idx=0; int c=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &idx); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } if((int64_t)dt==8){ if(buf->size<8) return 0; buf_offset(buf,8); consumed+=8; } else if((int64_t)dt==10){ if(buf->size<4) return 0; buf_offset(buf,4); consumed+=4; } else { serialize_type t2=(serialize_type)buf->ptr[0]; buf_offset(buf,1); consumed+=1; QWORD v=0; int c=try_read_int_tovar(t2==serialize_negtive_int, buf->ptr, (int)buf->size, &v); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } } return consumed;
+        }
         case serialize_pointer_from_current_n:
         case serialize_pointer_from_start_n:
         case serialize_pointer_from_end_n:
@@ -2841,6 +3285,10 @@ static int collect_box_labels(buf_ref *buf){
             for(QWORD i=0;i<cnt;++i){ QWORD ver=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(b<=0) return b; consumed+=b; buf_offset(buf,b); consumed += collect_box_labels(buf); }
             break;
         }
+        case serialize_type_idx:
+        {
+            QWORD idx=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &idx); if(a<=0) return a; consumed+=a; buf_offset(buf,a); QWORD blen=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &blen); if(b<=0) return b; consumed+=b; buf_offset(buf,b); if(buf->size < (int64_t)blen) return 0; buf_offset(buf,(int)blen); consumed+=(int)blen; break;
+        }
         default: break;
     }
     return consumed;
@@ -2874,3 +3322,8 @@ static atomic_flag s_pool_lock_var = ATOMIC_FLAG_INIT;
 static inline void pool_lock(){ int spins=0; while(atomic_flag_test_and_set(&s_pool_lock_var)){ if(spins<64){ ++spins; } else if(spins<1024){ sched_yield(); ++spins; } else { struct timespec ts={0,1000000}; nanosleep(&ts,NULL); } } }
 static inline void pool_unlock(){ atomic_flag_clear(&s_pool_lock_var); }
 #endif
+static void tinybuf_indexed_tensor_free(void *p){ if(!p) return; tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)p; if(it->tensor) tinybuf_value_free(it->tensor); if(it->indices){ for(int i=0;i<it->dims;++i){ if(it->indices[i]) tinybuf_value_free(it->indices[i]); } tinybuf_free(it->indices);} tinybuf_free(it); }
+int tinybuf_value_init_indexed_tensor(tinybuf_value *value, const tinybuf_value *tensor, const tinybuf_value **indices, int dims){ if(!value || !tensor || dims<0) return -1; tinybuf_value_clear(value); tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)tinybuf_malloc(sizeof(tinybuf_indexed_tensor_t)); it->dims=dims; it->tensor=tinybuf_value_clone(tensor); it->indices=NULL; if(dims>0){ it->indices=(tinybuf_value**)tinybuf_malloc(sizeof(tinybuf_value*)*(size_t)dims); for(int i=0;i<dims;++i){ it->indices[i] = indices ? (indices[i] ? tinybuf_value_clone(indices[i]) : NULL) : NULL; } } value->_type=tinybuf_indexed_tensor; value->_data._custom=it; value->_custom_free=tinybuf_indexed_tensor_free; return 0; }
+static int contain_any(uint64_t v){ (void)v; return 1; }
+const tinybuf_value* tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value *value){ if(!value || value->_type!=tinybuf_indexed_tensor) return NULL; tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)value->_data._custom; return it? it->tensor : NULL; }
+const tinybuf_value* tinybuf_indexed_tensor_get_index_const(const tinybuf_value *value, int dim){ if(!value || value->_type!=tinybuf_indexed_tensor) return NULL; tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)value->_data._custom; if(!it || dim<0 || dim>=it->dims) return NULL; return it->indices ? it->indices[dim] : NULL; }

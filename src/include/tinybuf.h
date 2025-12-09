@@ -26,6 +26,9 @@ extern "C"
         // 应该先写入被引用的value 再写入当前value
         tinybuf_version,     // 内部为另一个tinybuf的引用 表示版本
         tinybuf_versionlist, // 内部为一个map 可以添加多个版本 key为版本号 版本号为一个int64_t
+        tinybuf_tensor,
+        tinybuf_bool_map,
+        tinybuf_indexed_tensor,
     } tinybuf_type;
 
     typedef struct T_tinybuf_value tinybuf_value;
@@ -196,6 +199,20 @@ extern "C"
      * @return
      */
     int tinybuf_value_init_double(tinybuf_value *value, double db_val);
+
+    int tinybuf_value_init_tensor(tinybuf_value *value, int dtype, const int64_t *shape, int dims, const void *data, int64_t elem_count);
+    int tinybuf_value_init_bool_map(tinybuf_value *value, const uint8_t *bits, int64_t count);
+    int tinybuf_value_init_indexed_tensor(tinybuf_value *value, const tinybuf_value *tensor, const tinybuf_value **indices, int dims);
+    int tinybuf_tensor_get_dtype(const tinybuf_value *value);
+    int tinybuf_tensor_get_ndim(const tinybuf_value *value);
+    const int64_t* tinybuf_tensor_get_shape(const tinybuf_value *value);
+    int64_t tinybuf_tensor_get_count(const tinybuf_value *value);
+    void* tinybuf_tensor_get_data(tinybuf_value *value);
+    const void* tinybuf_tensor_get_data_const(const tinybuf_value *value);
+    const tinybuf_value* tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value *value);
+    const tinybuf_value* tinybuf_indexed_tensor_get_index_const(const tinybuf_value *value, int dim);
+    int64_t tinybuf_bool_map_get_count(const tinybuf_value *value);
+    const uint8_t* tinybuf_bool_map_get_bits_const(const tinybuf_value *value);
 
     /**
      * 对象赋值为string类型

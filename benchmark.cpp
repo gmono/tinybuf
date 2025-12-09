@@ -937,19 +937,42 @@ static void plugin_dll_tests(){
     tinybuf_plugin_register_from_dll(path);
 #endif
     buffer *b = buffer_alloc();
-    tinybuf_try_write_array_header(b, 2);
+    tinybuf_try_write_array_header(b, 3);
     tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "hello", 5);
     tinybuf_plugins_try_write(201, s, b);
     tinybuf_try_write_string_raw(b, "world", 5);
+    tinybuf_value *sv = tinybuf_value_alloc(); tinybuf_value_init_string(sv, "AbCd", 4);
+    tinybuf_plugin_do_value_op_by_type(201, "to_lower", sv, NULL, sv);
+    tinybuf_try_write_box(b, sv);
     tinybuf_value_free(s);
+    tinybuf_value_free(sv);
     buffer *text = buffer_alloc(); tinybuf_dump_buffer_as_text(buffer_get_data(b), buffer_get_length(b), text); LOGI("\r\n%s", buffer_get_data(text)); buffer_free(text);
     tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)}; int r = tinybuf_try_read_box_with_plugins(&br, out, any_version); assert(r>0);
-    const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0); const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
-    buffer *bs0 = tinybuf_value_get_string((tinybuf_value*)c0); buffer *bs1 = tinybuf_value_get_string((tinybuf_value*)c1);
+    const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0); const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1); const tinybuf_value *c2 = tinybuf_value_get_array_child(out, 2);
+    buffer *bs0 = tinybuf_value_get_string((tinybuf_value*)c0); buffer *bs1 = tinybuf_value_get_string((tinybuf_value*)c1); buffer *bs2 = tinybuf_value_get_string((tinybuf_value*)c2);
     assert(memcmp(buffer_get_data(bs0), "HELLO", 5) == 0);
     assert(memcmp(buffer_get_data(bs1), "world", 5) == 0);
+    assert(memcmp(buffer_get_data(bs2), "abcd", 4) == 0);
     tinybuf_value_free(out); buffer_free(b);
     LOGI("plugin_dll_tests done");
+}
+
+static void plugin_custom_box_tests(){
+    LOGI("\r\nplugin_custom_box_tests");
+    tinybuf_plugin_unregister_all();
+    tinybuf_register_builtin_plugins();
+#ifdef _WIN32
+    char path[256]; snprintf(path, sizeof(path), "%s", "build\\lib\\Release\\upper_plugin.dll");
+    tinybuf_plugin_register_from_dll(path);
+#endif
+    tinybuf_value *v = tinybuf_value_alloc(); tinybuf_value_init_string(v, "hello", 5);
+    tinybuf_value_set_custom_box_type(v, 201);
+    buffer *b = buffer_alloc(); tinybuf_try_write_box(b, v);
+    buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
+    tinybuf_value *out = tinybuf_value_alloc(); int r = tinybuf_try_read_box_with_plugins(&br, out, any_version); assert(r>0);
+    buffer *bs = tinybuf_value_get_string(out); assert(buffer_get_length(bs)==5); assert(memcmp(buffer_get_data(bs), "HELLO", 5)==0);
+    tinybuf_value_free(out); tinybuf_value_free(v); buffer_free(b);
+    LOGI("plugin_custom_box_tests done");
 }
 
 static void partition_concurrent_write_tests(){
@@ -1028,6 +1051,7 @@ int main(int argc,char *argv[]){
     partition_concurrent_read_tests();
     partition_concurrent_write_tests();
     plugin_dll_tests();
+    plugin_custom_box_tests();
     // dump readable for pointer types first pointer
     {
         buffer *buf = buffer_alloc();

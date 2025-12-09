@@ -29,6 +29,7 @@ struct T_tinybuf_value
     free_handler _custom_free;
     tinybuf_type _type;
     int _plugin_index;
+    int _custom_box_type;
 };
 
 #endif // TINYBUF_PRIVATE_H

@@ -280,6 +280,8 @@ extern "C"
 
     int tinybuf_value_set_plugin_index(tinybuf_value *value, int index);
     int tinybuf_value_get_plugin_index(const tinybuf_value *value);
+    int tinybuf_value_set_custom_box_type(tinybuf_value *value, int type);
+    int tinybuf_value_get_custom_box_type(const tinybuf_value *value);
 
 #ifdef __cplusplus
 }

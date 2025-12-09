@@ -12,6 +12,7 @@ typedef struct {
     tinybuf_plugin_write_fn write;
     tinybuf_plugin_dump_fn dump;
     tinybuf_plugin_show_value_fn show_value;
+    const char **op_names; const char **op_sigs; const char **op_descs; tinybuf_plugin_value_op_fn *op_fns; int op_count;
 } plugin_entry;
 
 static plugin_entry *s_plugins = NULL;
@@ -43,6 +44,7 @@ int tinybuf_plugin_register(const uint8_t *types, int type_count, tinybuf_plugin
     e.write = write;
     e.dump = dump;
     e.show_value = show_value;
+    e.op_names = NULL; e.op_sigs = NULL; e.op_descs = NULL; e.op_fns = NULL; e.op_count = 0;
     s_plugins[s_plugins_count++] = e;
     return 0;
 }
@@ -94,6 +96,10 @@ static int plugin_list_index_by_type(uint8_t type){ for(int i=0;i<s_plugins_coun
 static int runtime_index_by_guid(const char *guid){ if(!guid || s_plugin_runtime_map_count<=0) return -1; for(int i=0;i<s_plugin_runtime_map_count;++i){ if(s_plugin_runtime_map[i] && strcmp(s_plugin_runtime_map[i], guid)==0) return i; } return -1; }
 int tinybuf_plugin_get_runtime_index_by_type(uint8_t type){ int li = plugin_list_index_by_type(type); if(li<0) return -1; const char *g = s_plugins[li].guid; return runtime_index_by_guid(g); }
 
+static int plugin_list_index_by_runtime_index(int runtime_index){ if(runtime_index<0 || runtime_index>=s_plugin_runtime_map_count) return -1; const char *g = s_plugin_runtime_map[runtime_index]; if(!g) return -1; for(int i=0;i<s_plugins_count;++i){ if(s_plugins[i].guid && strcmp(s_plugins[i].guid, g)==0) return i; } return -1; }
+int tinybuf_plugin_do_value_op(int plugin_runtime_index, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ int li = plugin_list_index_by_runtime_index(plugin_runtime_index); if(li<0) return -1; plugin_entry *pe = &s_plugins[li]; if(!name || pe->op_count<=0) return -1; for(int i=0;i<pe->op_count;++i){ if(pe->op_names[i] && strcmp(pe->op_names[i], name)==0){ return pe->op_fns[i](value, args, out); } } return -1; }
+int tinybuf_plugin_do_value_op_by_type(uint8_t type, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ int li = plugin_list_index_by_type(type); if(li<0) return -1; plugin_entry *pe = &s_plugins[li]; if(!name || pe->op_count<=0) return -1; for(int i=0;i<pe->op_count;++i){ if(pe->op_names[i] && strcmp(pe->op_names[i], name)==0){ return pe->op_fns[i](value, args, out); } } return -1; }
+
 int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler){
     if(buf->size <= 0) return 0;
     uint8_t t = (uint8_t)buf->ptr[0];
@@ -104,6 +110,7 @@ int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_
 
 // builtin sample plugin: type 200 -> upper-string
 #define TINYBUF_PLUGIN_UPPER_STRING 200
+static int plugin_upper_to_lower(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out);
 
 static int plugin_upper_read(uint8_t type, buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler){
     (void)contain_handler;
@@ -165,6 +172,7 @@ int tinybuf_register_builtin_plugins(void){
     uint8_t types[1] = { TINYBUF_PLUGIN_UPPER_STRING };
     int r = tinybuf_plugin_register(types, 1, plugin_upper_read, plugin_upper_write, plugin_upper_dump, plugin_upper_show_value);
     if(r==0){ if(s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = "builtin:upper-string"; } }
+    if(r==0){ if(s_plugins_count>0){ static const char *names[1] = { "to_lower" }; static const char *sigs[1] = { "string->string" }; static const char *descs[1] = { "lowercase" }; static tinybuf_plugin_value_op_fn fns[1] = { plugin_upper_to_lower }; plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = names; pe->op_sigs = sigs; pe->op_descs = descs; pe->op_fns = fns; pe->op_count = 1; } }
     return r;
 }
 
@@ -180,6 +188,7 @@ int tinybuf_plugin_register_from_dll(const char *dll_path){
     if(!d){ FreeLibrary(h); return -1; }
     int r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
     if(r==0){ if(s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = d->guid; } }
+    if(r==0){ if(s_plugins_count>0){ plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = d->op_names; pe->op_sigs = d->op_sigs; pe->op_descs = d->op_descs; pe->op_fns = d->op_fns; pe->op_count = d->op_count; } }
     return r;
 }
 #else
@@ -187,3 +196,4 @@ int tinybuf_plugin_register_from_dll(const char *dll_path){ (void)dll_path; retu
 #endif
 int tinybuf_plugin_get_count(void){ return s_plugins_count; }
 const char* tinybuf_plugin_get_guid(int index){ if(index<0 || index>=s_plugins_count) return NULL; return s_plugins[index].guid; }
+static int plugin_upper_to_lower(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ (void)args; buffer *s = tinybuf_value_get_string(value); int len = buffer_get_length(s); char *tmp=(char*)tinybuf_malloc(len); const char *p = buffer_get_data(s); for(int i=0;i<len;++i){ char c=p[i]; if(c>='A'&&c<='Z') c=(char)(c+('a'-'A')); tmp[i]=c; } tinybuf_value_init_string(out, tmp, len); tinybuf_free(tmp); return 0; }

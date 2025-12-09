@@ -1,4 +1,5 @@
 #include "tinybuf_private.h"
+#include "tinybuf_plugin.h"
 #ifdef _WIN32
 #include <winsock2.h>
 #else
@@ -13,6 +14,7 @@
 #include <sched.h>
 #include <time.h>
 #endif
+ 
 
 // 1 支持变长数字格式并支持配置开启 2 支持KVPair通用格式
 // 3 支持自描述结构和向前兼容支持
@@ -305,9 +307,10 @@ tinybuf_value *tinybuf_value_alloc(void)
 {
     tinybuf_value *ret = tinybuf_malloc(sizeof(tinybuf_value));
     assert(ret);
-    // 置0
     memset(ret, 0, sizeof(tinybuf_value));
     ret->_type = tinybuf_null;
+    ret->_plugin_index = -1;
+    ret->_custom_box_type = -1;
     return ret;
 }
 
@@ -432,6 +435,19 @@ int tinybuf_value_get_plugin_index(const tinybuf_value *value)
 {
     if(!value) return -1;
     return value->_plugin_index;
+}
+
+int tinybuf_value_set_custom_box_type(tinybuf_value *value, int type)
+{
+    assert(value);
+    value->_custom_box_type = type;
+    return 0;
+}
+
+int tinybuf_value_get_custom_box_type(const tinybuf_value *value)
+{
+    if(!value) return -1;
+    return value->_custom_box_type;
 }
 
 int tinybuf_value_init_double(tinybuf_value *value, double db_val)
@@ -700,6 +716,7 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
 {
     assert(value);
     assert(out);
+    if(value && value->_custom_box_type >= 0){ return tinybuf_plugins_try_write((uint8_t)value->_custom_box_type, value, out); }
     // 如果开启了重定向，并且该对象已注册为预写，则输出指针到start位置
     if (s_precache_redirect && value)
     {
@@ -1132,19 +1149,7 @@ inline int OK_AND_ADDTO(int x, int *s)
 
 typedef tinybuf_value value;
 
-typedef struct
-{
-    // 缓冲区基址
-    const char *base;
-
-    // 缓冲区总大小
-    int64_t all_size;
-
-    // 缓冲区当前位置指针
-    const char *ptr;
-    // 剩余缓冲区大小
-    int64_t size;
-} buf_ref;
+ 
 //---util function s
 const char *buf_end_ptr(buf_ref *buf)
 {
@@ -1265,7 +1270,7 @@ BOOL RESULT_OK_AND_ADDTO(read_result x, int *s)
     return FALSE;
 }
 
-typedef BOOL (*CONTAIN_HANDLER)(QWORD);
+ 
 // 高级序列化read入口
 // 二级版本 可处理二级格式 readbox标准 成功则修改buf指针 返回>0 否则不修改并返回<=0
 
@@ -1690,7 +1695,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 tinybuf_plugin_set_runtime_map(guids, (int)cnt);
                 for(QWORD i=0;i<cnt;++i){ tinybuf_free((void*)guids[i]); }
                 tinybuf_free(guids);
-                int inner = try_read_box(buf, out, target_version);
+                int inner = tinybuf_try_read_box_with_plugins(buf, out, target_version);
                 if(inner > 0){ len += inner; SET_SUCCESS(); break; }
                 SET_FAILED("plugin map followed by invalid box"); break;
             }

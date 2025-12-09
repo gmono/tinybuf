@@ -157,6 +157,18 @@ extern "C"
     int tinybuf_try_write_array_header(buffer *out, int count);
     int tinybuf_try_write_map_header(buffer *out, int count);
     int tinybuf_try_write_string_raw(buffer *out, const char *str, int len);
+
+    typedef enum {
+        tinybuf_read_pointer_ref = 0,
+        tinybuf_read_pointer_deref = 1
+    } tinybuf_read_pointer_mode;
+    void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode);
+    int tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode);
+
+    void tinybuf_precache_reset(buffer *out);
+    int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value);
+    void tinybuf_precache_set_redirect(int enable);
+    int tinybuf_precache_is_redirect(void);
     ////////////////////////////////赋值////////////////////////////////
 
     /**

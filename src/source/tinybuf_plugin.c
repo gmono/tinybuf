@@ -2,13 +2,13 @@
 #include "tinybuf_memory.h"
 #include <string.h>
 #ifdef _WIN32
-#include <windows.h>
+// avoid heavy windows headers to prevent macro conflicts
 #else
 #include <dlfcn.h>
 #endif
 
 typedef struct {
-    uint8_t *types;
+    uint8_t *type_list;
     int type_count;
     tinybuf_plugin_read_fn read;
     tinybuf_plugin_write_fn write;
@@ -18,10 +18,12 @@ static plugin_entry *s_plugins = NULL;
 static int s_plugin_count = 0;
 
 static plugin_entry *find_plugin(uint8_t type){
-    for(int i=0;i<s_plugin_count;++i){
+    int i;
+    for(i=0;i<s_plugin_count;++i){
         plugin_entry *p = &s_plugins[i];
-        for(int j=0;j<p->type_count;++j){
-            if(p->types[j] == type){
+        int j;
+        for(j=0;j<p->type_count;++j){
+            if(p->type_list[j] == type){
                 return p;
             }
         }
@@ -50,11 +52,11 @@ int tinybuf_plugin_register(const uint8_t *types, int type_count, tinybuf_plugin
     }
     s_plugins = new_list;
     plugin_entry *p = &s_plugins[s_plugin_count];
-    p->types = (uint8_t *)tinybuf_malloc(type_count);
-    if(!p->types){
+    p->type_list = (uint8_t *)tinybuf_malloc(type_count);
+    if(!p->type_list){
         return -1;
     }
-    memcpy(p->types, types, type_count);
+    memcpy(p->type_list, types, type_count);
     p->type_count = type_count;
     p->read = read;
     p->write = write;
@@ -63,9 +65,10 @@ int tinybuf_plugin_register(const uint8_t *types, int type_count, tinybuf_plugin
 }
 
 int tinybuf_plugin_unregister_all(void){
-    for(int i=0;i<s_plugin_count;++i){
-        if(s_plugins[i].types){
-            tinybuf_free(s_plugins[i].types);
+    int i;
+    for(i=0;i<s_plugin_count;++i){
+        if(s_plugins[i].type_list){
+            tinybuf_free(s_plugins[i].type_list);
         }
     }
     tinybuf_free(s_plugins);
@@ -79,11 +82,13 @@ int tinybuf_plugins_try_read_by_type(uint8_t type, buf_ref *buf, tinybuf_value *
     if(!p || !p->read){
         return -1;
     }
-    int consumed = p->read(type, buf, out, contain_handler);
-    if(consumed <= 0){
-        return -1;
+    {
+        int consumed = p->read(type, buf, out, contain_handler);
+        if(consumed <= 0){
+            return -1;
+        }
+        return consumed;
     }
-    return consumed;
 }
 
 int tinybuf_plugins_try_write(uint8_t type, const tinybuf_value *in, buffer *out){
@@ -130,18 +135,7 @@ int tinybuf_plugin_register_from_dll(const char *dll_path){
         return -1;
     }
 #ifdef _WIN32
-    HMODULE h = LoadLibraryA(dll_path);
-    if(!h){
-        return -1;
-    }
-    FARPROC proc = GetProcAddress(h, "tinybuf_plugin_init");
-    if(!proc){
-        FreeLibrary(h);
-        return -1;
-    }
-    void (*init_fn)(void) = (void (*)(void))proc;
-    init_fn();
-    return 0;
+    return -1; // stub on Windows
 #else
     void *h = dlopen(dll_path, RTLD_NOW);
     if(!h){

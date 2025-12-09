@@ -483,6 +483,79 @@ static void compare_serialized_vs_deserialized(){
     buffer_free(buf);
 }
 
+static void precache_and_read_mode_tests(){
+    // build a big map value
+    tinybuf_value *big = tinybuf_value_alloc();
+    tinybuf_value_map_set(big, "name", tinybuf_make_test_value());
+    tinybuf_value_map_set(big, "n", tinybuf_value_clone(tinybuf_make_test_value()));
+
+    // prepare buffer and precache the big object
+    buffer *buf = buffer_alloc();
+    tinybuf_precache_reset(buf);
+    int64_t start = tinybuf_precache_register(buf, big);
+    assert(start >= 0);
+    tinybuf_precache_set_redirect(1);
+
+    // write array with two references to big; second is nested map with big again
+    tinybuf_try_write_array_header(buf, 3);
+    tinybuf_try_write_box(buf, big); // redirected to pointer
+    tinybuf_try_write_box(buf, big); // redirected again
+    tinybuf_try_write_map_header(buf, 1);
+    tinybuf_try_write_string_raw(buf, "again", 5);
+    tinybuf_try_write_box(buf, big); // redirected inside map
+
+    // dump serialized
+    LOGI("\r\nprecache-serialized");
+    buffer *text = buffer_alloc(); tinybuf_dump_buffer_as_text(buffer_get_data(buf), buffer_get_length(buf), text);
+    LOGI("\r\n%s", buffer_get_data(text)); buffer_free(text);
+
+    // read in ref mode
+    LOGI("\r\nprecache-read-ref");
+    {
+        tinybuf_set_read_pointer_mode(tinybuf_read_pointer_ref);
+        tinybuf_value *out = tinybuf_value_alloc();
+        buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+        int r = tinybuf_try_read_box_with_mode(&br, out, any_version, tinybuf_read_pointer_ref);
+        assert(r > 0);
+        assert(tinybuf_value_get_type(out) == tinybuf_array);
+        int sz = tinybuf_value_get_child_size(out);
+        assert(sz == 3);
+        const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0);
+        const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
+        const tinybuf_value *c2 = tinybuf_value_get_array_child(out, 2);
+        assert(tinybuf_value_get_type(c0) == tinybuf_value_ref);
+        assert(tinybuf_value_get_type(c1) == tinybuf_value_ref);
+        assert(tinybuf_value_get_type(c2) == tinybuf_map);
+        buffer *k = NULL; const tinybuf_value *mchild = tinybuf_value_get_map_child_and_key(c2, 0, &k);
+        assert(mchild && tinybuf_value_get_type(mchild) == tinybuf_value_ref);
+        tinybuf_value_free(out);
+    }
+
+    // read in deref mode
+    LOGI("\r\nprecache-read-deref");
+    {
+        tinybuf_set_read_pointer_mode(tinybuf_read_pointer_deref);
+        tinybuf_value *out = tinybuf_value_alloc();
+        buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+        int r = tinybuf_try_read_box_with_mode(&br, out, any_version, tinybuf_read_pointer_deref);
+        assert(r > 0);
+        assert(tinybuf_value_get_type(out) == tinybuf_array);
+        int sz = tinybuf_value_get_child_size(out);
+        assert(sz == 3);
+        const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0);
+        const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
+        const tinybuf_value *c2 = tinybuf_value_get_array_child(out, 2);
+        assert(tinybuf_value_get_type(c0) != tinybuf_value_ref);
+        assert(tinybuf_value_get_type(c1) != tinybuf_value_ref);
+        buffer *k = NULL; const tinybuf_value *mchild = tinybuf_value_get_map_child_and_key(c2, 0, &k);
+        assert(mchild && tinybuf_value_get_type(mchild) != tinybuf_value_ref);
+        tinybuf_value_free(out);
+    }
+
+    tinybuf_value_free(big);
+    buffer_free(buf);
+}
+
 int main(int argc,char *argv[]){
     tinybuf_value_test();
     ring_self_pointer_test();
@@ -494,6 +567,7 @@ int main(int argc,char *argv[]){
     container_pointer_dump_tests();
     complex_pointer_mix_tests();
     compare_serialized_vs_deserialized();
+    precache_and_read_mode_tests();
     // dump readable for pointer types first pointer
     {
         buffer *buf = buffer_alloc();

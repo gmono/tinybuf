@@ -933,7 +933,7 @@ static void plugin_dll_tests(){
     tinybuf_plugin_unregister_all();
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    char path[256]; snprintf(path, sizeof(path), "%s", "build\\bin\\Release\\upper_plugin.dll");
+    char path[256]; snprintf(path, sizeof(path), "%s", "build\\lib\\Release\\upper_plugin.dll");
     tinybuf_plugin_register_from_dll(path);
 #endif
     buffer *b = buffer_alloc();

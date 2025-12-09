@@ -28,6 +28,7 @@ struct T_tinybuf_value
     // 自定义类型的释放函数 不存在时为NULL 表示直接free
     free_handler _custom_free;
     tinybuf_type _type;
+    int _plugin_index;
 };
 
 #endif // TINYBUF_PRIVATE_H

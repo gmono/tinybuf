@@ -31,6 +31,7 @@ typedef uint64_t QWORD;
 typedef int64_t SQWORD;
 
 int s_use_strpool = 0;
+static int s_use_strpool_trie = 1;
 static int64_t s_strpool_offset_read = -1;
 static const char *s_strpool_base_read = NULL;
 typedef struct { buffer *buf; } strpool_entry;
@@ -420,6 +421,19 @@ int tinybuf_value_set_type(tinybuf_value *value, tinybuf_type type)
     return 0;
 }
 
+int tinybuf_value_set_plugin_index(tinybuf_value *value, int index)
+{
+    assert(value);
+    value->_plugin_index = index;
+    return 0;
+}
+
+int tinybuf_value_get_plugin_index(const tinybuf_value *value)
+{
+    if(!value) return -1;
+    return value->_plugin_index;
+}
+
 int tinybuf_value_init_double(tinybuf_value *value, double db_val)
 {
     assert(value);
@@ -790,7 +804,8 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
 static inline void strpool_reset_write(const buffer *out){ s_strpool_count = 0; s_strpool_base = (const char*)out; }
 static inline int strpool_find(const char *data, int len){ for(int i=0;i<s_strpool_count;++i){ int l = buffer_get_length_inline(s_strpool[i].buf); if(l==len && memcmp(buffer_get_data_inline(s_strpool[i].buf), data, len)==0){ return i; } } return -1; }
 static inline int strpool_add(const char *data, int len){ int idx = strpool_find(data, len); if(idx>=0) return idx; if(s_strpool_count==s_strpool_capacity){ int newcap = s_strpool_capacity? s_strpool_capacity*2:16; s_strpool = (strpool_entry*)tinybuf_realloc(s_strpool, sizeof(strpool_entry)*newcap); s_strpool_capacity = newcap; } buffer *b = buffer_alloc(); buffer_assign(b, data, len); s_strpool[s_strpool_count].buf = b; return s_strpool_count++; }
-static inline int strpool_write_tail(buffer *out){ if(!s_use_strpool || s_strpool_count==0) return 0; int len = 0; len += try_write_type(out, serialize_str_pool); len += try_write_int_data(FALSE, out, (QWORD)s_strpool_count); for(int i=0;i<s_strpool_count;++i){ int sl = buffer_get_length_inline(s_strpool[i].buf); len += try_write_type(out, serialize_string); len += try_write_int_data(FALSE, out, (QWORD)sl); if(sl){ buffer_append(out, buffer_get_data_inline(s_strpool[i].buf), sl); } } return len; }
+typedef struct { int parent; unsigned char ch; unsigned char is_leaf; int leaf_id; } trie_node;
+static inline int strpool_write_tail(buffer *out){ if(!s_use_strpool || s_strpool_count==0) return 0; if(!s_use_strpool_trie){ int len = 0; len += try_write_type(out, serialize_str_pool); len += try_write_int_data(FALSE, out, (QWORD)s_strpool_count); for(int i=0;i<s_strpool_count;++i){ int sl = buffer_get_length_inline(s_strpool[i].buf); len += try_write_type(out, serialize_string); len += try_write_int_data(FALSE, out, (QWORD)sl); if(sl){ buffer_append(out, buffer_get_data_inline(s_strpool[i].buf), sl); } } return len; } int before = buffer_get_length_inline(out); try_write_type(out, 27); /* trie pool */ trie_node *nodes = NULL; int ncount = 1; nodes = (trie_node*)tinybuf_malloc(sizeof(trie_node)*1); nodes[0].parent=-1; nodes[0].ch=0; nodes[0].is_leaf=0; nodes[0].leaf_id=-1; for(int i=0;i<s_strpool_count;++i){ const char *p = buffer_get_data_inline(s_strpool[i].buf); int sl = buffer_get_length_inline(s_strpool[i].buf); int cur = 0; for(int k=0;k<sl;++k){ unsigned char c = (unsigned char)p[k]; int found=-1; for(int j=1;j<ncount;++j){ if(nodes[j].parent==cur && nodes[j].ch==c){ found=j; break; } } if(found<0){ nodes = (trie_node*)tinybuf_realloc(nodes, sizeof(trie_node)*(ncount+1)); nodes[ncount].parent=cur; nodes[ncount].ch=c; nodes[ncount].is_leaf=0; nodes[ncount].leaf_id=-1; found = ncount; ++ncount; } cur = found; } nodes[cur].is_leaf=1; nodes[cur].leaf_id=i; } try_write_int_data(FALSE, out, (QWORD)ncount); for(int i=0;i<ncount;++i){ try_write_int_data(FALSE, out, (QWORD)(nodes[i].parent<0?0:(QWORD)nodes[i].parent)); buffer_append(out, (const char*)&nodes[i].ch, 1); uint8_t flag = nodes[i].is_leaf?1:0; buffer_append(out, (const char*)&flag, 1); if(nodes[i].is_leaf){ try_write_int_data(FALSE, out, (QWORD)nodes[i].leaf_id); } } tinybuf_free(nodes); int after = buffer_get_length_inline(out); return after - before; }
 
 // 裸整数操作读写函数 正整数做uint64 负数作为int64
 inline int try_read_int_tovar(BOOL isneg, const char *ptr, int size, QWORD *out_val)
@@ -930,13 +945,38 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         const char *q = pool_start;
         int64_t r = ((const char*)ptr + size) - pool_start; // remaining after pool start
         if(r < 1){ return 0; }
-        if((uint8_t)q[0] != serialize_str_pool){ return -1; }
-        ++q; --r;
-        uint64_t cnt = 0; int l2 = int_deserialize((uint8_t *)q, (int)r, &cnt); if(l2 <= 0){ return -1; }
-        q += l2; r -= l2;
-        if(idx >= cnt){ return -1; }
-        for(uint64_t i=0;i<cnt;++i){ if(r < 1){ return 0; } if((uint8_t)q[0] != serialize_string){ return -1; } ++q; --r; uint64_t sl; int l3 = int_deserialize((uint8_t *)q, (int)r, &sl); if(l3 <= 0){ return l3; } q += l3; r -= l3; if(r < (int64_t)sl){ return 0; } if(i == idx){ tinybuf_value_init_string_l(out, q, (int)sl, 0); return 1 + len; } q += sl; r -= sl; }
-        return -1;
+        if((uint8_t)q[0] == serialize_str_pool){
+            ++q; --r;
+            uint64_t cnt = 0; int l2 = int_deserialize((uint8_t *)q, (int)r, &cnt); if(l2 <= 0){ return -1; }
+            q += l2; r -= l2;
+            if(idx >= cnt){ return -1; }
+            for(uint64_t i=0;i<cnt;++i){ if(r < 1){ return 0; } if((uint8_t)q[0] != serialize_string){ return -1; } ++q; --r; uint64_t sl; int l3 = int_deserialize((uint8_t *)q, (int)r, &sl); if(l3 <= 0){ return l3; } q += l3; r -= l3; if(r < (int64_t)sl){ return 0; } if(i == idx){ tinybuf_value_init_string_l(out, q, (int)sl, 0); return 1 + len; } q += sl; r -= sl; }
+            return -1;
+        } else if((uint8_t)q[0] == 27){
+            ++q; --r;
+            uint64_t ncount = 0; int l2 = int_deserialize((uint8_t*)q, (int)r, &ncount); if(l2<=0){ return -1; }
+            const char *nodes_base = q + l2; int64_t nodes_size = r - l2;
+            /* find leaf node with leaf_id == idx */
+            const char *p = nodes_base; int64_t rr = nodes_size; int found = -1; for(uint64_t i=0;i<ncount;++i){ uint64_t parent=0; int lp = int_deserialize((uint8_t*)p, (int)rr, &parent); if(lp<=0) return lp; p+=lp; rr-=lp; if(rr<2) return 0; unsigned char ch = (unsigned char)p[0]; unsigned char flag = (unsigned char)p[1]; p+=2; rr-=2; if(flag){ uint64_t leaf=0; int ll = int_deserialize((uint8_t*)p, (int)rr, &leaf); if(ll<=0) return ll; p+=ll; rr-=ll; if(leaf == idx){ found = (int)i; break; } } }
+            if(found < 0){ return -1; }
+            /* reconstruct path up to root by scanning nodes repeatedly to find parents */
+            buffer *tmp = buffer_alloc();
+            int current = found;
+            while(1){ /* scan to get node 'current' fields */ const char *p2 = nodes_base; int64_t rr2 = nodes_size; int node_index = 0; int parent_index = -1; unsigned char ch = 0; unsigned char flag = 0; uint64_t leaf = 0; while(node_index <= current){ uint64_t parent=0; int lp = int_deserialize((uint8_t*)p2, (int)rr2, &parent); p2+=lp; rr2-=lp; if(rr2<2) return 0; ch = (unsigned char)p2[0]; flag = (unsigned char)p2[1]; p2+=2; rr2-=2; if(flag){ int ll = int_deserialize((uint8_t*)p2, (int)rr2, &leaf); p2+=ll; rr2-=ll; }
+                    parent_index = (int)parent; ++node_index;
+                }
+                if(ch){ buffer_append(tmp, (const char*)&ch, 1); }
+                if(parent_index <= 0){ break; }
+                current = parent_index;
+            }
+            /* reverse tmp into output string */
+            int tlen = buffer_get_length_inline(tmp); const char *td = buffer_get_data_inline(tmp);
+            char *rev = (char*)tinybuf_malloc(tlen);
+            for(int i=0;i<tlen;++i){ rev[i] = td[tlen-1-i]; }
+            tinybuf_value_init_string_l(out, rev, tlen, 0);
+            tinybuf_free(rev); buffer_free(tmp);
+            return 1 + len;
+        } else { return -1; }
     }
 
     case serialize_map:
@@ -1640,6 +1680,23 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             break;
         }
 
+        case 26:
+        {
+            QWORD cnt = 0;
+            if(OK_AND_ADDTO(try_read_int_data(FALSE, buf, &cnt), &len))
+            {
+                const char **guids = (const char**)tinybuf_malloc(sizeof(const char*) * cnt);
+                for(QWORD i=0;i<cnt;++i){ if(buf->size<=0) { SET_FAILED("plugin map truncated"); break; } if((uint8_t)buf->ptr[0] != serialize_string){ SET_FAILED("plugin map entry not string"); break; } buf_offset(buf,1); len += 1; QWORD sl=0; int l3 = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &sl); if(l3<=0){ SET_FAILED("plugin map string len"); break; } buf_offset(buf,l3); len += l3; if(buf->size < (int64_t)sl){ SET_FAILED("plugin map string body"); break; } char *g = (char*)tinybuf_malloc((int)sl+1); memcpy(g, buf->ptr, (size_t)sl); g[sl] = '\0'; guids[i] = g; buf_offset(buf,(int)sl); len += (int)sl; }
+                tinybuf_plugin_set_runtime_map(guids, (int)cnt);
+                for(QWORD i=0;i<cnt;++i){ tinybuf_free((void*)guids[i]); }
+                tinybuf_free(guids);
+                int inner = try_read_box(buf, out, target_version);
+                if(inner > 0){ len += inner; SET_SUCCESS(); break; }
+                SET_FAILED("plugin map followed by invalid box"); break;
+            }
+            SET_FAILED("plugin map header failed"); break;
+        }
+
         // 指针box 后接偏移整数
         case serialize_pointer_from_start_p:
         {
@@ -2039,6 +2096,16 @@ static inline int try_write_version_list(buffer *out, const QWORD *versions, con
     return len;
 }
 
+static inline int try_write_plugin_map_table(buffer *out){
+    int before = buffer_get_length_inline(out);
+    int pc = tinybuf_plugin_get_count();
+    try_write_type(out, 26);
+    try_write_int_data(FALSE, out, (QWORD)pc);
+    for(int i=0;i<pc;++i){ const char *g = tinybuf_plugin_get_guid(i); if(!g) g=""; int gl = (int)strlen(g); try_write_type(out, serialize_string); try_write_int_data(FALSE, out, (QWORD)gl); if(gl){ buffer_append(out, g, gl); } }
+    int after = buffer_get_length_inline(out);
+    return after - before;
+}
+
 static inline int try_write_part(buffer *out, const tinybuf_value *value)
 {
     buffer *body = buffer_alloc();
@@ -2141,6 +2208,8 @@ int tinybuf_try_write_version_list(buffer *out, const QWORD *versions, const tin
 {
     return try_write_version_list(out, versions, boxes, count);
 }
+
+int tinybuf_try_write_plugin_map_table(buffer *out){ return try_write_plugin_map_table(out); }
 
 int tinybuf_try_write_part(buffer *out, const tinybuf_value *value)
 {
@@ -2648,6 +2717,15 @@ static int dump_box_text(buf_ref *buf, buffer *out){
                 consumed += dump_box_text(buf, out);
             }
             append_cstr(out, "}}");
+            break;
+        }
+        case 26: /* plugin map table */
+        {
+            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
+            append_cstr(out, "{\"plugins\":[");
+            for(QWORD i=0;i<cnt;++i){
+                int64_t size = buf->size; if(size < 1) return 0; uint8_t t2 = (uint8_t)buf->ptr[0]; if(t2 != serialize_string) return -1; buf_offset(buf,1); consumed+=1; QWORD sl=0; int l3 = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &sl); if(l3<=0) return l3; buf_offset(buf,l3); consumed+=l3; if(buf->size < (int64_t)sl) return 0; buffer_append(out, "\"", 1); buffer_append(out, buf->ptr, (int)sl); buffer_append(out, "\"", 1); buf_offset(buf,(int)sl); consumed+=(int)sl; if(i+1<cnt) append_cstr(out, ","); }
+            append_cstr(out, "]}");
             break;
         }
         default:

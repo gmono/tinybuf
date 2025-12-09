@@ -278,6 +278,9 @@ extern "C"
      */
     int tinybuf_value_deserialize_from_json(const char *ptr, int size, tinybuf_value *out);
 
+    int tinybuf_value_set_plugin_index(tinybuf_value *value, int index);
+    int tinybuf_value_get_plugin_index(const tinybuf_value *value);
+
 #ifdef __cplusplus
 }
 #endif // __cplusplus

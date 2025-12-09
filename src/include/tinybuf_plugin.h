@@ -22,17 +22,28 @@ typedef int (*tinybuf_plugin_read_fn)(uint8_t type, buf_ref *buf, tinybuf_value 
 typedef int (*tinybuf_plugin_write_fn)(uint8_t type, const tinybuf_value *in, buffer *out);
 typedef int (*tinybuf_plugin_dump_fn)(uint8_t type, buf_ref *buf, buffer *out);
 typedef int (*tinybuf_plugin_show_value_fn)(uint8_t type, const tinybuf_value *in, buffer *out);
+typedef struct {
+    const uint8_t *types; int type_count; const char *guid;
+    tinybuf_plugin_read_fn read; tinybuf_plugin_write_fn write; tinybuf_plugin_dump_fn dump; tinybuf_plugin_show_value_fn show_value;
+} tinybuf_plugin_descriptor;
 
 int tinybuf_plugin_register(const uint8_t *types, int type_count, tinybuf_plugin_read_fn read, tinybuf_plugin_write_fn write, tinybuf_plugin_dump_fn dump, tinybuf_plugin_show_value_fn show_value);
 int tinybuf_plugin_unregister_all(void);
+int tinybuf_plugin_get_count(void);
+const char* tinybuf_plugin_get_guid(int index);
 
 int tinybuf_plugins_try_read_by_type(uint8_t type, buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 int tinybuf_plugins_try_write(uint8_t type, const tinybuf_value *in, buffer *out);
 int tinybuf_plugins_try_dump_by_type(uint8_t type, buf_ref *buf, buffer *out);
 int tinybuf_plugins_try_show_value(uint8_t type, const tinybuf_value *in, buffer *out);
+int tinybuf_plugin_set_runtime_map(const char **guids, int count);
+int tinybuf_plugin_get_runtime_index_by_type(uint8_t type);
 
 int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 int tinybuf_register_builtin_plugins(void);
+int tinybuf_plugin_register_from_dll(const char *dll_path);
+
+int tinybuf_try_write_plugin_map_table(buffer *out);
 
 // pointer read mode API
 int tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode);

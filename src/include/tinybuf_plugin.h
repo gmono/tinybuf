@@ -91,10 +91,6 @@ int tinybuf_oop_do_op(const char *type_name, const char *op_name, tinybuf_value 
 int tinybuf_oop_attach_serializers(const char *type_name, tinybuf_custom_read_fn read, tinybuf_custom_write_fn write, tinybuf_custom_dump_fn dump);
 int tinybuf_oop_register_types_to_custom(void);
 int tinybuf_oop_set_serializable(const char *type_name, int serializable);
-int tinybuf_trait_register(const char *trait_name, const char **methods, int method_count);
-int tinybuf_trait_attach(const char *type_name, const char *trait_name);
-int tinybuf_trait_has(const char *type_name, const char *trait_name);
-int tinybuf_trait_do(const char *type_name, const char *trait_name, const char *method_name, tinybuf_value *self, const tinybuf_value *args, tinybuf_value *out);
 
 #ifdef __cplusplus
 }

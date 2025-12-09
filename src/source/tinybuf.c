@@ -1364,7 +1364,9 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
             int value_len = tinybuf_value_deserialize(ptr, size, value);
             if (value_len <= 0)
             {
+                // 数据不够解析value部分
                 tinybuf_value_free(value);
+                // 清空掉未解析完毕的map
                 tinybuf_value_clear(out);
                 return value_len;
             }
@@ -1413,7 +1415,9 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
             int value_len = tinybuf_value_deserialize(ptr, size, value);
             if (value_len <= 0)
             {
+                // 数据不够解析value部分
                 tinybuf_value_free(value);
+                // 清空掉未解析完毕的array
                 tinybuf_value_clear(out);
                 return value_len;
             }
@@ -1487,11 +1491,11 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         if(rr < 0) return rr;
         return 1 + a + b + (int)blen;
     }
-        default:
-            // 解析失败
-            return -1;
-        }
+    default:
+        // 解析失败
+        return -1;
     }
+}
 
 //! --------------------------高级反序列化系列--------------
 
@@ -1914,8 +1918,9 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
     len = tinybuf_value_deserialize(buf->ptr, buf->size, out);
     if (len == 0)
         return len;
-    if (len > 0)
+    if (len > 0) //=0的情况为缓冲区太小
     {
+        // 兼容buf逻辑
         buf_offset(buf, len);
         pool_mark_complete(box_offset);
         return len;

@@ -901,17 +901,13 @@ static void partition_concurrent_read_tests(){
     uint64_t cnt = 0; int c = varint_deserialize_local(base+pos, (int)(all-pos), &cnt); pos += c; assert(cnt>=1);
     std::vector<uint64_t> offs(cnt);
     for(uint64_t i=0;i<cnt;++i){ uint64_t off=0; int k = varint_deserialize_local(base+pos, (int)(all-pos), &off); pos += k; offs[(size_t)i] = off; }
-    std::mutex mu;
     std::vector<tinybuf_value*> outs(cnt-1);
     std::vector<std::thread> th;
     for(size_t i=1;i<offs.size();++i){
         outs[i-1] = tinybuf_value_alloc();
         th.emplace_back([&,i]{
             buf_ref br{(const char*)base, all, (const char*)base + (int64_t)offs[i], all - (int64_t)offs[i]};
-            int r; {
-                std::lock_guard<std::mutex> lk(mu);
-                r = tinybuf_try_read_box(&br, outs[i-1], any_version);
-            }
+            int r = tinybuf_try_read_box(&br, outs[i-1], any_version);
             assert(r>0);
         });
     }
@@ -930,6 +926,30 @@ static void partition_concurrent_read_tests(){
     tinybuf_value_free(s2);
     tinybuf_value_free(s3);
     LOGI("partition_concurrent_read_tests done");
+}
+
+static void plugin_dll_tests(){
+    LOGI("\r\nplugin_dll_tests");
+    tinybuf_plugin_unregister_all();
+    tinybuf_register_builtin_plugins();
+#ifdef _WIN32
+    char path[256]; snprintf(path, sizeof(path), "%s", "build\\bin\\Release\\upper_plugin.dll");
+    tinybuf_plugin_register_from_dll(path);
+#endif
+    buffer *b = buffer_alloc();
+    tinybuf_try_write_array_header(b, 2);
+    tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "hello", 5);
+    tinybuf_plugins_try_write(201, s, b);
+    tinybuf_try_write_string_raw(b, "world", 5);
+    tinybuf_value_free(s);
+    buffer *text = buffer_alloc(); tinybuf_dump_buffer_as_text(buffer_get_data(b), buffer_get_length(b), text); LOGI("\r\n%s", buffer_get_data(text)); buffer_free(text);
+    tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)}; int r = tinybuf_try_read_box_with_plugins(&br, out, any_version); assert(r>0);
+    const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0); const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
+    buffer *bs0 = tinybuf_value_get_string((tinybuf_value*)c0); buffer *bs1 = tinybuf_value_get_string((tinybuf_value*)c1);
+    assert(memcmp(buffer_get_data(bs0), "HELLO", 5) == 0);
+    assert(memcmp(buffer_get_data(bs1), "world", 5) == 0);
+    tinybuf_value_free(out); buffer_free(b);
+    LOGI("plugin_dll_tests done");
 }
 
 static void partition_concurrent_write_tests(){
@@ -1007,6 +1027,7 @@ int main(int argc,char *argv[]){
     partition_basic_tests();
     partition_concurrent_read_tests();
     partition_concurrent_write_tests();
+    plugin_dll_tests();
     // dump readable for pointer types first pointer
     {
         buffer *buf = buffer_alloc();

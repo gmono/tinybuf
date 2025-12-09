@@ -45,6 +45,13 @@ else()
     target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} pthread)
 endif()
 
+add_library(upper_plugin SHARED ${Source_Root}/../src/plugins/upper_plugin.c)
+if(MSVC)
+    target_link_libraries(upper_plugin tinybuf ws2_32)
+else()
+    target_link_libraries(upper_plugin tinybuf pthread)
+endif()
+
 
 
 

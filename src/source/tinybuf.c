@@ -6,6 +6,13 @@
 #endif
 #include <stdbool.h>
 #include <stdio.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <stdatomic.h>
+#include <sched.h>
+#include <time.h>
+#endif
 
 // 1 支持变长数字格式并支持配置开启 2 支持KVPair通用格式
 // 3 支持自描述结构和向前兼容支持
@@ -17,6 +24,8 @@ typedef int64_t ssize;
 typedef uint64_t usize;
 
 static tinybuf_read_pointer_mode s_read_pointer_mode = tinybuf_read_pointer_ref;
+static inline void pool_lock(void);
+static inline void pool_unlock(void);
 
 typedef uint64_t QWORD;
 typedef int64_t SQWORD;
@@ -1254,19 +1263,21 @@ static inline void pool_reset(const buf_ref *buf){
 }
 
 static inline offset_pool_entry *pool_find(int64_t offset){
+    pool_lock();
     for(int i=0;i<s_pool_count;++i){
         if(s_pool[i].offset == offset){
-            return &s_pool[i];
+            offset_pool_entry *ret = &s_pool[i]; pool_unlock(); return ret;
         }
     }
-    return NULL;
+    pool_unlock(); return NULL;
 }
 
 static offset_pool_entry *pool_register(int64_t offset, tinybuf_value *value){
-    offset_pool_entry *e = pool_find(offset);
+    pool_lock();
+    offset_pool_entry *e = NULL; for(int i=0;i<s_pool_count;++i){ if(s_pool[i].offset==offset){ e=&s_pool[i]; break; } }
     if(e){
         if(value){ e->value = value; }
-        return e;
+        pool_unlock(); return e;
     }
     if(s_pool_count == s_pool_capacity){
         int newcap = s_pool_capacity ? (s_pool_capacity * 2) : 16;
@@ -1276,12 +1287,14 @@ static offset_pool_entry *pool_register(int64_t offset, tinybuf_value *value){
     s_pool[s_pool_count].offset = offset;
     s_pool[s_pool_count].value = value;
     s_pool[s_pool_count].complete = 0;
-    return &s_pool[s_pool_count++];
+    offset_pool_entry *ret = &s_pool[s_pool_count++]; pool_unlock(); return ret;
 }
 
 static inline void pool_mark_complete(int64_t offset){
-    offset_pool_entry *e = pool_find(offset);
+    pool_lock();
+    offset_pool_entry *e = NULL; for(int i=0;i<s_pool_count;++i){ if(s_pool[i].offset==offset){ e=&s_pool[i]; break; } }
     if(e){ e->complete = 1; }
+    pool_unlock();
 }
 
 static inline void set_out_ref(tinybuf_value *out, tinybuf_value *target){ out->_type = tinybuf_value_ref; out->_data._ref = target; }
@@ -2553,6 +2566,7 @@ static int dump_map_text(buf_ref *buf, buffer *out){
 }
 
 static int dump_box_text(buf_ref *buf, buffer *out){
+    int tinybuf_plugins_try_dump_by_type(uint8_t type, buf_ref *buf, buffer *out);
     int consumed=0; int64_t cur_pos = (int64_t)(buf->ptr - buf->base);
     dump_labels_emit_prefix(cur_pos, out);
     serialize_type t=serialize_null; int add=try_read_type(buf,&t); if(add<=0) return add; consumed+=add;
@@ -2637,8 +2651,13 @@ static int dump_box_text(buf_ref *buf, buffer *out){
             break;
         }
         default:
-            append_cstr(out, "<unknown>");
+        {
+            uint8_t raw = (uint8_t)t;
+            int a = tinybuf_plugins_try_dump_by_type(raw, buf, out);
+            if(a>0){ consumed += a; }
+            else{ append_cstr(out, "<unknown>"); }
             break;
+        }
     }
     return consumed;
 }
@@ -2763,3 +2782,12 @@ static inline int dump_int(uint64_t len, buffer *out);
 static inline int try_write_type(buffer *out, serialize_type type);
 static inline int try_write_int_data(BOOL isneg, buffer *out, QWORD val);
 static inline int try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset);
+#ifdef _WIN32
+static volatile LONG s_pool_lock_var = 0;
+static inline void pool_lock(){ int spins=0; while(InterlockedCompareExchange(&s_pool_lock_var,1,0)!=0){ if(spins<64){ ++spins; } else if(spins<1024){ Sleep(0); ++spins; } else { Sleep(1); } } }
+static inline void pool_unlock(){ InterlockedExchange(&s_pool_lock_var,0); }
+#else
+static atomic_flag s_pool_lock_var = ATOMIC_FLAG_INIT;
+static inline void pool_lock(){ int spins=0; while(atomic_flag_test_and_set(&s_pool_lock_var)){ if(spins<64){ ++spins; } else if(spins<1024){ sched_yield(); ++spins; } else { struct timespec ts={0,1000000}; nanosleep(&ts,NULL); } } }
+static inline void pool_unlock(){ atomic_flag_clear(&s_pool_lock_var); }
+#endif

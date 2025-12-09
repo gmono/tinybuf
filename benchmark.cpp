@@ -13,6 +13,8 @@
 #include <chrono>
 #endif
 #include <assert.h>
+#include <thread>
+#include <mutex>
 
 
 using namespace std;
@@ -881,6 +883,109 @@ static void partition_basic_tests(){
     LOGI("partition_basic_tests done");
 }
 
+static int varint_deserialize_local(const uint8_t *in, int in_size, uint64_t *out){ if(in_size<1) return 0; *out=0; int index=0; while(1){ uint8_t byte=in[index]; (*out) |= (uint64_t)(byte & 0x7F) << ((index++) * 7); if((byte & 0x80)==0) break; if(index>=in_size) return 0; if(index*7>56) return -1; } return index; }
+static int varint_serialize_local(uint64_t in, uint8_t *out){ int index=0; for(int i=0;i<= (8*sizeof(in))/7; ++i, ++index){ out[index] = (uint8_t)(in & 0x7F); in >>= 7; if(!in){ break; } out[index] |= 0x80; } return ++index; }
+
+static void partition_concurrent_read_tests(){
+    LOGI("\r\npartition_concurrent_read_tests");
+    tinybuf_value *mainv = tinybuf_value_alloc(); tinybuf_value_init_string(mainv, "hello", 5);
+    tinybuf_value *s1 = tinybuf_value_alloc(); tinybuf_value_init_int(s1, 1);
+    tinybuf_value *s2 = tinybuf_value_alloc(); tinybuf_value_init_int(s2, 2);
+    tinybuf_value *s3 = tinybuf_value_alloc(); tinybuf_value_init_int(s3, 3);
+    const tinybuf_value *subs[3] = { s1, s2, s3 };
+    buffer *b = buffer_alloc();
+    tinybuf_try_write_partitions(b, mainv, subs, 3);
+    const uint8_t *base = (const uint8_t*)buffer_get_data(b);
+    int64_t all = (int64_t)buffer_get_length(b);
+    int pos = 0; assert(base[0] == 22); pos++;
+    uint64_t cnt = 0; int c = varint_deserialize_local(base+pos, (int)(all-pos), &cnt); pos += c; assert(cnt>=1);
+    std::vector<uint64_t> offs(cnt);
+    for(uint64_t i=0;i<cnt;++i){ uint64_t off=0; int k = varint_deserialize_local(base+pos, (int)(all-pos), &off); pos += k; offs[(size_t)i] = off; }
+    std::mutex mu;
+    std::vector<tinybuf_value*> outs(cnt-1);
+    std::vector<std::thread> th;
+    for(size_t i=1;i<offs.size();++i){
+        outs[i-1] = tinybuf_value_alloc();
+        th.emplace_back([&,i]{
+            buf_ref br{(const char*)base, all, (const char*)base + (int64_t)offs[i], all - (int64_t)offs[i]};
+            int r; {
+                std::lock_guard<std::mutex> lk(mu);
+                r = tinybuf_try_read_box(&br, outs[i-1], any_version);
+            }
+            assert(r>0);
+        });
+    }
+    for(auto &t: th) t.join();
+    tinybuf_value *out = tinybuf_value_alloc();
+    {
+        buf_ref br{(const char*)base, all, (const char*)base, all};
+        int r = tinybuf_try_read_box(&br, out, any_version);
+        assert(r>0);
+    }
+    tinybuf_value_free(out);
+    for(auto *p: outs) tinybuf_value_free(p);
+    buffer_free(b);
+    tinybuf_value_free(mainv);
+    tinybuf_value_free(s1);
+    tinybuf_value_free(s2);
+    tinybuf_value_free(s3);
+    LOGI("partition_concurrent_read_tests done");
+}
+
+static void partition_concurrent_write_tests(){
+    LOGI("\r\npartition_concurrent_write_tests");
+    tinybuf_value *mainv = tinybuf_value_alloc(); tinybuf_value_init_string(mainv, "hello", 5);
+    tinybuf_value *s1 = tinybuf_value_alloc(); tinybuf_value_init_int(s1, 1);
+    tinybuf_value *s2 = tinybuf_value_alloc(); tinybuf_value_init_int(s2, 2);
+    tinybuf_value *s3 = tinybuf_value_alloc(); tinybuf_value_init_int(s3, 3);
+    const tinybuf_value *subs[3] = { s1, s2, s3 };
+    std::vector<buffer*> parts(4);
+    for(size_t i=0;i<parts.size();++i) parts[i] = buffer_alloc();
+    {
+        std::thread t0([&]{ tinybuf_try_write_part(parts[0], mainv); });
+        std::thread t1([&]{ tinybuf_try_write_part(parts[1], subs[0]); });
+        std::thread t2([&]{ tinybuf_try_write_part(parts[2], subs[1]); });
+        std::thread t3([&]{ tinybuf_try_write_part(parts[3], subs[2]); });
+        t0.join(); t1.join(); t2.join(); t3.join();
+    }
+    std::vector<int> lens(4);
+    for(size_t i=0;i<parts.size();++i) lens[i] = buffer_get_length(parts[i]);
+    std::vector<uint64_t> offs(4);
+    std::vector<uint64_t> vlen(4,1);
+    uint8_t tmp[32];
+    while(1){
+        uint64_t table_len = 1 + (uint64_t)varint_serialize_local((uint64_t)offs.size(), tmp);
+        for(size_t i=0;i<offs.size();++i) table_len += vlen[i];
+        offs[0] = table_len;
+        for(size_t i=1;i<offs.size();++i) offs[i] = offs[i-1] + (uint64_t)lens[i-1];
+        int stable = 1;
+        for(size_t i=0;i<offs.size();++i){ int l = varint_serialize_local(offs[i], tmp); if((uint64_t)l != vlen[i]){ vlen[i]= (uint64_t)l; stable=0; } }
+        if(stable) break;
+    }
+    buffer *out = buffer_alloc();
+    {
+        uint8_t t = 22; buffer_append(out, (const char*)&t, 1);
+        uint8_t hdr[32]; int hl = varint_serialize_local((uint64_t)offs.size(), hdr);
+        buffer_append(out, (const char*)hdr, hl);
+        for(size_t i=0;i<offs.size();++i){ int l = varint_serialize_local(offs[i], hdr); buffer_append(out, (const char*)hdr, l); }
+        for(size_t i=0;i<parts.size();++i){ buffer_append(out, buffer_get_data(parts[i]), buffer_get_length(parts[i])); }
+    }
+    tinybuf_value *readv = tinybuf_value_alloc();
+    {
+        buf_ref br{buffer_get_data(out), (int64_t)buffer_get_length(out), buffer_get_data(out), (int64_t)buffer_get_length(out)};
+        int r = tinybuf_try_read_box(&br, readv, any_version);
+        assert(r>0);
+        tinybuf_value_free(readv);
+    }
+    for(auto *p: parts) buffer_free(p);
+    buffer_free(out);
+    tinybuf_value_free(mainv);
+    tinybuf_value_free(s1);
+    tinybuf_value_free(s2);
+    tinybuf_value_free(s3);
+    LOGI("partition_concurrent_write_tests done");
+}
+
 int main(int argc,char *argv[]){
     tinybuf_value_test();
     ring_self_pointer_test();
@@ -900,6 +1005,8 @@ int main(int argc,char *argv[]){
     strpool_perf_tests();
     plugin_basic_tests();
     partition_basic_tests();
+    partition_concurrent_read_tests();
+    partition_concurrent_write_tests();
     // dump readable for pointer types first pointer
     {
         buffer *buf = buffer_alloc();

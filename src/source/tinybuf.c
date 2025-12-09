@@ -18,6 +18,20 @@ typedef uint64_t usize;
 
 static tinybuf_read_pointer_mode s_read_pointer_mode = tinybuf_read_pointer_ref;
 
+typedef uint64_t QWORD;
+typedef int64_t SQWORD;
+
+int s_use_strpool = 0;
+static int64_t s_strpool_offset_read = -1;
+static const char *s_strpool_base_read = NULL;
+typedef struct { buffer *buf; } strpool_entry;
+static strpool_entry *s_strpool = NULL;
+static int s_strpool_count = 0;
+static int s_strpool_capacity = 0;
+static const char *s_strpool_base = NULL;
+
+ 
+
 // 是否含有子引用
 inline bool has_sub_ref(const tinybuf_value *value)
 {
@@ -111,79 +125,79 @@ inline bool maybe_free_custom(tinybuf_value *value)
 //--目前除了指针系列 version与versionlist其他都未实现
 typedef enum
 {
-    serialize_null = 0,
-    serialize_positive_int = 1,
-    serialize_negtive_int = 2,
-    serialize_bool_true = 3,
-    serialize_bool_false = 4,
-    serialize_double = 5,
-    serialize_string = 6,
-    serialize_map = 7,
-    serialize_array = 8,
+    serialize_null = 0,                 // 已实现
+    serialize_positive_int = 1,         // 已实现
+    serialize_negtive_int = 2,          // 已实现
+    serialize_bool_true = 3,            // 已实现
+    serialize_bool_false = 4,           // 已实现
+    serialize_double = 5,               // 已实现
+    serialize_string = 6,               // 已实现
+    serialize_map = 7,                  // 已实现
+    serialize_array = 8,                // 已实现
     //--额外序列化类型 支持自偏移与头尾偏移 最小化指针int体积
     // p表示正偏移 n表示负偏 后跟变长整数 非完整databox
-    serialize_pointer_from_current_n = 9,
-    serialize_pointer_from_start_n = 10,
-    serialize_pointer_from_end_n = 11,
-    serialize_pointer_from_current_p = 12,
-    serialize_pointer_from_start_p = 13,
-    serialize_pointer_from_end_p = 14,
+    serialize_pointer_from_current_n = 9, // 已实现
+    serialize_pointer_from_start_n = 10,  // 已实现
+    serialize_pointer_from_end_n = 11,    // 已实现
+    serialize_pointer_from_current_p = 12,// 已实现
+    serialize_pointer_from_start_p = 13,  // 已实现
+    serialize_pointer_from_end_p = 14,    // 已实现
     // 支持精准锁定环结构 递归结构后面跟databox
-    serialize_pre_cache = 15,
+    serialize_pre_cache = 15,            // 未实现
     // 支持版本号标记 向前向后兼容 此标记表示后面是一个verion unit
     // 使用一个变长整数表示 递归结构 非完整databox 变长整数后面是完整的databox
-    serialize_version = 16,
+    serialize_version = 16,              // 已实现
     // 集束box标识 表示后面是一个异类型序列集合 递归结构  读取时批量读取
-    serialize_boxlist = 17, // boxlist_sign lstlen type1 type2 type3 type4 ... data1 data2 data3
+    serialize_boxlist = 17, // 未实现 boxlist_sign lstlen type1 type2 type3 type4 ... data1 data2 data3
     // 压缩树表示中的keysign使用变长int存储
-    serialize_zip_kvpairs = 18,        // 压缩树表示 不存储key 转而存储key 的keysign //需要msgpack的key(0)等标记
-    serialize_zip_kvpairs_boxkey = 19, // 压缩树表示 但key使用完整databox存储 这意味着key支持version或pointer等结构
+    serialize_zip_kvpairs = 18,        // 未实现 压缩树表示 不存储key 转而存储key 的keysign //需要msgpack的key(0)等标记
+    serialize_zip_kvpairs_boxkey = 19, // 未实现 压缩树表示 但key使用完整databox存储 这意味着key支持version或pointer等结构
     // 任何时候value都是完整box存储
     // 兼容机制 version列表 支持新版本兼容旧版本
 
-    serialize_version_list = 20,
+    serialize_version_list = 20,        // 已实现
     // 用于支持多part 每个part就是一个分区 用于支持并发读取每个分区拥有自己的长度
     // 分区指针指向分区头部位置 目标必然是一个part类型 type partlen data 其中 其中partlen为intdata
-    serialize_part = 21,
+    serialize_part = 21,                // 未实现
     // 用于支持并发读取
-    serialize_part_table = 22, // 分区表 后跟一个整数长度 加标准整数列表 非完整box 每个整数表示分区头指针
+    serialize_part_table = 22,          // 未实现 分区表 后跟一个整数长度 加标准整数列表 非完整box 每个整数表示分区头指针
 
     // 字符串池索引
-    serialize_str_index = 23,
+    serialize_str_index = 23,           // 已实现
     // 表示一个字符串池 可缩小体积
-    serialize_str_pool = 24,
+    serialize_str_pool = 24,            // 已实现（尾部池对象）
     // 用于支持把字符串池放在末尾
-    serialize_str_pool_table = 25, // 字符串池表 用于在文件开头确定字符串池的位置 如果有 则必须在开头
-    serialize_uri = 26,            // 可以是文件uri或其他 结构为 sign uritype otherdata 后面跟一个文件path str 再跟一个整数表示数据在文件中的位置
-    serialize_router_link = 27,    // 跟一个uribox
+    serialize_str_pool_table = 25,      // 已实现（头部池地址表）
+    serialize_uri = 26,            // 未实现 可以是文件uri或其他 结构为 sign uritype otherdata 后面跟一个文件path str 再跟一个整数表示数据在文件中的位置
+    serialize_router_link = 27,    // 未实现 跟一个uribox
     // 遇到文件链接 应跳转到另一个文件的指定位置继续读取 高层box 对数据透明
     // 与uri的区别是 uri只读取一个value并返回
-    serialize_text_ref = 28, // uri指向的文本文件引用 fileid 有编码说明
-    serialize_bin_ref = 29,  // 二进制文件引用 支持部分引用 fileid
-    serialize_embed_file=30,    // 内嵌文件 有fileid 文件名 文件mime等 支持strptr和str
-    serialize_file_range=31,    // 文件范围引用 基于已经有的fileid
-    serialize_with_metadata=32, // 元类型 表示一个带有metadata的box 透明
-    serialize_noseq_part=33,    // 表示一个无序区 遇到直接跳过 无序区用于保存孤立对象 这种对象只被某个指针引用 不存在于其他位置
+    serialize_text_ref = 28, // 未实现 uri指向的文本文件引用 fileid 有编码说明
+    serialize_bin_ref = 29,  // 未实现 二进制文件引用 支持部分引用 fileid
+    serialize_embed_file=30,    // 未实现 内嵌文件 有fileid 文件名 文件mime等 支持strptr和str
+    serialize_file_range=31,    // 未实现 文件范围引用 基于已经有的fileid
+    serialize_with_metadata=32, // 未实现 元类型 表示一个带有metadata的box 透明
+    serialize_noseq_part=33,    // 未实现 表示一个无序区 遇到直接跳过 无序区用于保存孤立对象 这种对象只被某个指针引用 不存在于其他位置
     // 空白区 遇到直接跳过 用于用fat在其中高性能删除已有数据 并留下一个空白区
-    serialize_empty_part=34, // sign len
+    serialize_empty_part=34, // 未实现 sign len
     // fs和fstable都支持多分块 元数据里会有指向下一个block和上一个block的指针 用于将space联成一片
-    serialize_fs=35,         // 表示一个文件系统块里面可以有目录结构
-    serialize_file_table=36, // 表示一个文件表 结构简单 没有目录结构
-    serialize_fs_file=37,    // 表示一个文件系统或文件表中的 文件 文件就是具名+具metadata的数据对象
-    serialize_fs_inode=38,   // 表示一个inode 一个fs节点 节点可以是目录 链接 或文件
-    serialize_flat_part=39,  // 通用连续空间快 支持相对寻址 平台空间第一优先 平坦空间支持指向下一个block或上一个block 使用指针类型
+    serialize_fs=35,         // 未实现 表示一个文件系统块里面可以有目录结构
+    serialize_file_table=36, // 未实现 表示一个文件表 结构简单 没有目录结构
+    serialize_fs_file=37,    // 未实现 表示一个文件系统或文件表中的 文件 文件就是具名+具metadata的数据对象
+    serialize_fs_inode=38,   // 未实现 表示一个inode 一个fs节点 节点可以是目录 链接 或文件
+    serialize_flat_part=39,  // 未实现 通用连续空间块 支持相对寻址 平坦空间支持指向下一个block或上一个block 使用指针类型
     // 可以是普通指针或高级指针
-    serialize_pointer_advance=40, // 先进指针 支持更丰富的寻址方式 例如flat空间寻址 block内部寻址 跨文件寻址等
-    serialize_empty_table=41,     // 空白空间表 用于配合平坦buf实现文件内连续子空间
+    serialize_pointer_advance=40, // 未实现 先进指针 支持更丰富的寻址方式 例如flat空间寻址 block内部寻址 跨文件寻址等
+    serialize_empty_table=41,     // 未实现 空白空间表 用于配合平坦buf实现文件内连续子空间
     // 子引用：后跟一个完整的指针box，读取时强制生成子引用节点（不透明）
-    serialize_sub_ref=42,
+    serialize_sub_ref=42,         // 已实现
     // 使用字符串池+索引index来表示额外类型 后跟整数 要求字符串池存在
     // 后面跟的是idx 直接就是idx后面不跟完整databox而是跟index整数
-    serialize_extern_str_idx = 253,
+    serialize_extern_str_idx = 253, // 未实现
     // str类型的extern类型表示 占空间较大 后面有一个完整的databox 可以是str或stridx
-    serialize_extern_str = 254,
+    serialize_extern_str = 254,     // 未实现
     // 扩展序列化类型 使用此类型 后面会跟一个变长正数（非完整box） 来表示更丰富的数据类型 用于支持插件系统
-    serialize_extern_int = 255
+    serialize_extern_int = 255      // 未实现
 } serialize_type;
 //---压缩boxlist数据集合的序列化
 static inline int boxlist_serialize()
@@ -712,17 +726,17 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
 
     case tinybuf_string:
     {
-        char type = serialize_string;
-        // string或bytes类型
-        buffer_append(out, &type, 1);
         int len = buffer_get_length_inline(value->_data._string);
-        if (len)
-        {
-            dump_string(len, buffer_get_data_inline(value->_data._string), out);
-        }
-        else
-        {
-            dump_int(0, out);
+        if(s_use_strpool){
+            int idx = strpool_add(buffer_get_data_inline(value->_data._string), len);
+            char type = serialize_str_index;
+            buffer_append(out, &type, 1);
+            dump_int((uint64_t)idx, out);
+        } else {
+            char type = serialize_string;
+            buffer_append(out, &type, 1);
+            if (len){ dump_string(len, buffer_get_data_inline(value->_data._string), out); }
+            else { dump_int(0, out); }
         }
     }
     break;
@@ -762,8 +776,12 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
     return 0;
 }
 
-typedef uint64_t QWORD;
-typedef int64_t SQWORD;
+/* strpool declarations are at the top of file */
+
+static inline void strpool_reset_write(const buffer *out){ s_strpool_count = 0; s_strpool_base = (const char*)out; }
+static inline int strpool_find(const char *data, int len){ for(int i=0;i<s_strpool_count;++i){ int l = buffer_get_length_inline(s_strpool[i].buf); if(l==len && memcmp(buffer_get_data_inline(s_strpool[i].buf), data, len)==0){ return i; } } return -1; }
+static inline int strpool_add(const char *data, int len){ int idx = strpool_find(data, len); if(idx>=0) return idx; if(s_strpool_count==s_strpool_capacity){ int newcap = s_strpool_capacity? s_strpool_capacity*2:16; s_strpool = (strpool_entry*)tinybuf_realloc(s_strpool, sizeof(strpool_entry)*newcap); s_strpool_capacity = newcap; } buffer *b = buffer_alloc(); buffer_assign(b, data, len); s_strpool[s_strpool_count].buf = b; return s_strpool_count++; }
+static inline int strpool_write_tail(buffer *out){ if(!s_use_strpool || s_strpool_count==0) return 0; int len = 0; len += try_write_type(out, serialize_str_pool); len += try_write_int_data(FALSE, out, (QWORD)s_strpool_count); for(int i=0;i<s_strpool_count;++i){ int sl = buffer_get_length_inline(s_strpool[i].buf); len += try_write_type(out, serialize_string); len += try_write_int_data(FALSE, out, (QWORD)sl); if(sl){ buffer_append(out, buffer_get_data_inline(s_strpool[i].buf), sl); } } return len; }
 
 // 裸整数操作读写函数 正整数做uint64 负数作为int64
 inline int try_read_int_tovar(BOOL isneg, const char *ptr, int size, QWORD *out_val)
@@ -892,6 +910,24 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
 
         // 消耗总字节数
         return 1 + len + bytes_len;
+    }
+    case serialize_str_index:
+    {
+        uint64_t idx;
+        int len = int_deserialize((uint8_t *)ptr, size, &idx);
+        if (len <= 0){ return len; }
+        if (s_strpool_offset_read < 0 || s_strpool_base_read == NULL){ return -1; }
+        const char *pool_start = s_strpool_base_read + s_strpool_offset_read;
+        const char *q = pool_start;
+        int64_t r = ((const char*)ptr + size) - pool_start; // remaining after pool start
+        if(r < 1){ return 0; }
+        if((uint8_t)q[0] != serialize_str_pool){ return -1; }
+        ++q; --r;
+        uint64_t cnt = 0; int l2 = int_deserialize((uint8_t *)q, (int)r, &cnt); if(l2 <= 0){ return -1; }
+        q += l2; r -= l2;
+        if(idx >= cnt){ return -1; }
+        for(uint64_t i=0;i<cnt;++i){ if(r < 1){ return 0; } if((uint8_t)q[0] != serialize_string){ return -1; } ++q; --r; uint64_t sl; int l3 = int_deserialize((uint8_t *)q, (int)r, &sl); if(l3 <= 0){ return l3; } q += l3; r -= l3; if(r < (int64_t)sl){ return 0; } if(i == idx){ tinybuf_value_init_string_l(out, q, (int)sl, 0); return 1 + len; } q += sl; r -= sl; }
+        return -1;
     }
 
     case serialize_map:
@@ -1873,9 +1909,41 @@ static inline int try_write_pointer(buffer *out, pointer_value pointer)
 // 写入总入口
 static inline int try_write_box(buffer *out, const tinybuf_value *value)
 {
+    if(!s_use_strpool){
+        int before = buffer_get_length_inline(out);
+        tinybuf_value_serialize(value, out);
+        int after = buffer_get_length_inline(out);
+        return after - before;
+    }
+    // strpool-enabled: write head table, body, then pool without linear scan
+    buffer *body = buffer_alloc();
+    buffer *pool = buffer_alloc();
+    strpool_reset_write(body);
+    tinybuf_value_serialize(value, body);
+    // write pool into separate buf
+    strpool_write_tail(pool);
+    int body_len = buffer_get_length_inline(body);
+    int pool_len = buffer_get_length_inline(pool);
+    // compute varint length of offset iteratively
+    uint64_t offset_guess_len = 1; // initial guess for varint
+    uint8_t tmp[16];
+    while(1){
+        uint64_t off = 1 + offset_guess_len + (uint64_t)body_len; // type(1) + varint + body
+        int l = int_serialize(off, tmp);
+        if((uint64_t)l == offset_guess_len){ break; }
+        offset_guess_len = (uint64_t)l;
+    }
+    uint64_t final_off = 1 + offset_guess_len + (uint64_t)body_len;
     int before = buffer_get_length_inline(out);
-    tinybuf_value_serialize(value, out);
+    // write table
+    try_write_type(out, serialize_str_pool_table);
+    try_write_int_data(FALSE, out, final_off);
+    // write body
+    buffer_append(out, buffer_get_data_inline(body), body_len);
+    // write pool
+    if(pool_len){ buffer_append(out, buffer_get_data_inline(pool), pool_len); }
     int after = buffer_get_length_inline(out);
+    buffer_free(body); buffer_free(pool);
     return after - before;
 }
 
@@ -1905,11 +1973,24 @@ static inline int try_write_version_list(buffer *out, const QWORD *versions, con
 int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     pool_reset(buf);
+    s_strpool_base_read = buf->base; s_strpool_offset_read = -1;
+    if (buf->ptr == buf->base && buf->size >= 1 && (uint8_t)buf->base[0] == serialize_str_pool_table)
+    {
+        buf_ref hb = *buf;
+        serialize_type t; int c = try_read_type(&hb, &t);
+        if (c > 0 && t == serialize_str_pool_table)
+        {
+            QWORD off; int c2 = try_read_int_data(FALSE, &hb, &off);
+            if (c2 > 0){ s_strpool_offset_read = (int64_t)off; buf_offset(buf, c + c2); }
+        }
+    }
     return try_read_box(buf, out, contain_handler);
 }
 
 void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode){ s_read_pointer_mode = mode; }
 int tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode){ s_read_pointer_mode = mode; return tinybuf_try_read_box(buf, out, contain_handler); }
+
+void tinybuf_set_use_strpool(int enable){ s_use_strpool = enable ? 1 : 0; }
 
 int tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
 {
@@ -2546,3 +2627,7 @@ void tinybuf_version_set(tinybuf_value *target, int64_t version, tinybuf_value *
 }
 // forward decl
 int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version);
+static inline int dump_int(uint64_t len, buffer *out);
+static inline int try_write_type(buffer *out, serialize_type type);
+static inline int try_write_int_data(BOOL isneg, buffer *out, QWORD val);
+static inline int try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset);

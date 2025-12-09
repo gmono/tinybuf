@@ -686,6 +686,154 @@ static void pointer_transparent_across_modes_tests(){
     tinybuf_value_free(base);
 }
 
+static void strpool_basic_tests(){
+    tinybuf_set_use_strpool(1);
+    tinybuf_value *v = tinybuf_value_alloc();
+    tinybuf_value *m = tinybuf_value_alloc();
+    tinybuf_value_init_string(v, "hello world string", (int)strlen("hello world string"));
+    tinybuf_value_map_set(m, "k1", tinybuf_value_clone(v));
+    tinybuf_value_map_set(m, "k2", tinybuf_value_clone(v));
+    buffer *buf = buffer_alloc();
+    tinybuf_try_write_box(buf, m);
+    tinybuf_value *out = tinybuf_value_alloc();
+    buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+    int r = tinybuf_try_read_box(&br, out, any_version);
+    assert(r > 0);
+    const tinybuf_value *c1 = tinybuf_value_get_map_child(out, "k1");
+    const tinybuf_value *c2 = tinybuf_value_get_map_child(out, "k2");
+    assert(c1 && c2);
+    assert(tinybuf_value_get_type(c1) == tinybuf_string);
+    assert(tinybuf_value_get_type(c2) == tinybuf_string);
+    buffer *s1 = tinybuf_value_get_string((tinybuf_value*)c1);
+    buffer *s2 = tinybuf_value_get_string((tinybuf_value*)c2);
+    assert(buffer_get_length(s1) == buffer_get_length(s2));
+    assert(memcmp(buffer_get_data(s1), buffer_get_data(s2), buffer_get_length(s1))==0);
+    tinybuf_value_free(out);
+    buffer_free(buf);
+    tinybuf_value_free(m);
+    tinybuf_value_free(v);
+}
+
+static void strpool_perf_tests(){
+    tinybuf_set_use_strpool(0);
+    {
+        LOGI("\r\nperf: small strings naive");
+        TimePrinter tp("[perf small naive] ");
+        for(int i=0;i<MAX_COUNT;i++){
+            tinybuf_value *m = tinybuf_value_alloc();
+            {
+                tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "x", 1);
+                tinybuf_value_map_set(m, "a", s);
+            }
+            {
+                tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "x", 1);
+                tinybuf_value_map_set(m, "b", s);
+            }
+            {
+                tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "x", 1);
+                tinybuf_value_map_set(m, "c", s);
+            }
+            buffer *b = buffer_alloc();
+            tinybuf_try_write_box(b, m);
+            tinybuf_value *out = tinybuf_value_alloc();
+            buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
+            tinybuf_try_read_box(&br, out, any_version);
+            tinybuf_value_free(out);
+            buffer_free(b);
+            tinybuf_value_free(m);
+        }
+    }
+    tinybuf_set_use_strpool(1);
+    {
+        LOGI("\r\nperf: small strings strpool");
+        TimePrinter tp("[perf small strpool] ");
+        for(int i=0;i<MAX_COUNT;i++){
+            tinybuf_value *m = tinybuf_value_alloc();
+            {
+                tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "x", 1);
+                tinybuf_value_map_set(m, "a", s);
+            }
+            {
+                tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "x", 1);
+                tinybuf_value_map_set(m, "b", s);
+            }
+            {
+                tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "x", 1);
+                tinybuf_value_map_set(m, "c", s);
+            }
+            buffer *b = buffer_alloc();
+            tinybuf_try_write_box(b, m);
+            tinybuf_value *out = tinybuf_value_alloc();
+            buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
+            tinybuf_try_read_box(&br, out, any_version);
+            tinybuf_value_free(out);
+            buffer_free(b);
+            tinybuf_value_free(m);
+        }
+        // RAII prints on destructor
+    }
+
+    // large object with many repeated strings
+    tinybuf_set_use_strpool(0);
+    {
+        LOGI("\r\nperf: large strings naive");
+        TimePrinter tp("[perf large naive] ");
+        for(int i=0;i<MAX_COUNT;i++){
+            tinybuf_value *arr = tinybuf_value_alloc_with_type(tinybuf_array);
+            for(int k=0;k<1000;k++){ tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "long-long-long-string", 22); tinybuf_value_array_append(arr, s); }
+            buffer *b = buffer_alloc(); tinybuf_try_write_box(b, arr);
+            tinybuf_value *out = tinybuf_value_alloc();
+            buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
+            tinybuf_try_read_box(&br, out, any_version);
+            tinybuf_value_free(out); buffer_free(b); tinybuf_value_free(arr);
+        }
+        
+    }
+    tinybuf_set_use_strpool(1);
+    {
+        LOGI("\r\nperf: large strings strpool");
+        TimePrinter tp("[perf large strpool] ");
+        for(int i=0;i<MAX_COUNT;i++){
+            tinybuf_value *arr = tinybuf_value_alloc_with_type(tinybuf_array);
+            for(int k=0;k<1000;k++){ tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "long-long-long-string", 22); tinybuf_value_array_append(arr, s); }
+            buffer *b = buffer_alloc(); tinybuf_try_write_box(b, arr);
+            tinybuf_value *out = tinybuf_value_alloc();
+            buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
+            tinybuf_try_read_box(&br, out, any_version);
+            tinybuf_value_free(out); buffer_free(b); tinybuf_value_free(arr);
+        }
+        
+    }
+}
+
+static void plugin_basic_tests(){
+    LOGI("\r\nplugin_basic_tests");
+    tinybuf_plugin_unregister_all();
+    tinybuf_register_builtin_plugins();
+    buffer *b = buffer_alloc();
+    tinybuf_try_write_array_header(b, 2);
+    tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "hello", 5);
+    tinybuf_plugins_try_write(200, s, b);
+    tinybuf_try_write_string_raw(b, "world", 5);
+    tinybuf_value_free(s);
+    tinybuf_value *out = tinybuf_value_alloc();
+    buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
+    int r = tinybuf_try_read_box_with_plugins(&br, out, any_version);
+    assert(r > 0);
+    assert(tinybuf_value_get_type(out) == tinybuf_array);
+    const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0);
+    const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
+    assert(tinybuf_value_get_type(c0) == tinybuf_string);
+    assert(tinybuf_value_get_type(c1) == tinybuf_string);
+    buffer *bs0 = tinybuf_value_get_string((tinybuf_value*)c0);
+    buffer *bs1 = tinybuf_value_get_string((tinybuf_value*)c1);
+    assert(memcmp(buffer_get_data(bs0), "HELLO", 5) == 0);
+    assert(memcmp(buffer_get_data(bs1), "world", 5) == 0);
+    tinybuf_value_free(out);
+    buffer_free(b);
+    LOGI("plugin_basic_tests done");
+}
+
 int main(int argc,char *argv[]){
     tinybuf_value_test();
     ring_self_pointer_test();
@@ -701,6 +849,9 @@ int main(int argc,char *argv[]){
     pointer_auto_mode_mixed_tests();
     pointer_subref_tests();
     pointer_transparent_across_modes_tests();
+    strpool_basic_tests();
+    strpool_perf_tests();
+    plugin_basic_tests();
     // dump readable for pointer types first pointer
     {
         buffer *buf = buffer_alloc();

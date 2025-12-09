@@ -28,6 +28,7 @@ int tinybuf_plugins_try_read_by_type(uint8_t type, buf_ref *buf, tinybuf_value *
 int tinybuf_plugins_try_write(uint8_t type, const tinybuf_value *in, buffer *out);
 
 int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
+int tinybuf_register_builtin_plugins(void);
 
 // pointer read mode API
 int tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode);

@@ -165,6 +165,8 @@ extern "C"
     } tinybuf_read_pointer_mode;
     void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode);
 
+    void tinybuf_set_use_strpool(int enable);
+
     void tinybuf_precache_reset(buffer *out);
     int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value);
     void tinybuf_precache_set_redirect(int enable);

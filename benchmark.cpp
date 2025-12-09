@@ -834,6 +834,53 @@ static void plugin_basic_tests(){
     LOGI("plugin_basic_tests done");
 }
 
+static void partition_basic_tests(){
+    LOGI("\r\npartition_basic_tests");
+    tinybuf_value *mainv = tinybuf_value_alloc(); tinybuf_value_init_string(mainv, "hello", 5);
+    tinybuf_value *s1 = tinybuf_value_alloc(); tinybuf_value_init_int(s1, 1);
+    tinybuf_value *s2 = tinybuf_value_alloc(); tinybuf_value_init_int(s2, 2);
+    tinybuf_value *s3 = tinybuf_value_alloc(); tinybuf_value_init_int(s3, 3);
+    const tinybuf_value *subs[3] = { s1, s2, s3 };
+    buffer *b = buffer_alloc();
+    {
+        buffer *single = buffer_alloc();
+        tinybuf_try_write_part(single, mainv);
+        {
+            buffer *text = buffer_alloc();
+            tinybuf_dump_buffer_as_text(buffer_get_data(single), buffer_get_length(single), text);
+            LOGI("\r\n%s", buffer_get_data(text));
+            buffer_free(text);
+        }
+        tinybuf_value *out1 = tinybuf_value_alloc();
+        buf_ref br1{buffer_get_data(single), (int64_t)buffer_get_length(single), buffer_get_data(single), (int64_t)buffer_get_length(single)};
+        int r1 = tinybuf_try_read_box(&br1, out1, any_version);
+        assert(r1 > 0);
+        assert(tinybuf_value_is_same(mainv, out1));
+        tinybuf_value_free(out1);
+        buffer_free(single);
+        LOGI("partition_single_part ok");
+    }
+    tinybuf_try_write_partitions(b, mainv, subs, 3);
+    {
+        buffer *text = buffer_alloc();
+        tinybuf_dump_buffer_as_text(buffer_get_data(b), buffer_get_length(b), text);
+        LOGI("\r\n%s", buffer_get_data(text));
+        buffer_free(text);
+    }
+    tinybuf_value *out = tinybuf_value_alloc();
+    buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
+    int r = tinybuf_try_read_box(&br, out, any_version);
+    assert(r > 0);
+    assert(tinybuf_value_is_same(mainv, out));
+    tinybuf_value_free(out);
+    buffer_free(b);
+    tinybuf_value_free(mainv);
+    tinybuf_value_free(s1);
+    tinybuf_value_free(s2);
+    tinybuf_value_free(s3);
+    LOGI("partition_basic_tests done");
+}
+
 int main(int argc,char *argv[]){
     tinybuf_value_test();
     ring_self_pointer_test();
@@ -852,6 +899,7 @@ int main(int argc,char *argv[]){
     strpool_basic_tests();
     strpool_perf_tests();
     plugin_basic_tests();
+    partition_basic_tests();
     // dump readable for pointer types first pointer
     {
         buffer *buf = buffer_alloc();

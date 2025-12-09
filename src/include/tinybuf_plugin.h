@@ -39,6 +39,9 @@ int tinybuf_try_write_box(buffer *out, const tinybuf_value *value);
 int tinybuf_try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box);
 int tinybuf_try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count);
 
+int tinybuf_try_write_part(buffer *out, const tinybuf_value *value);
+int tinybuf_try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count);
+
 int tinybuf_plugin_register_from_dll(const char *dll_path);
 
 typedef enum {

@@ -1570,6 +1570,63 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             }
         }
 
+        case serialize_part:
+        {
+            QWORD partlen;
+            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &partlen), &len))
+            {
+                if (OK_AND_ADDTO(try_read_box(buf, out, target_version), &len))
+                {
+                    pool_mark_complete(box_offset);
+                    SET_SUCCESS();
+                    break;
+                }
+                SET_FAILED("read part failed");
+                break;
+            }
+            SET_FAILED("read part header failed");
+            break;
+        }
+
+        case serialize_part_table:
+        {
+            QWORD cnt;
+            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &cnt), &len))
+            {
+                if (cnt == 0)
+                {
+                    SET_FAILED("empty part table");
+                    break;
+                }
+                QWORD *offs = (QWORD *)tinybuf_malloc((int)(cnt * sizeof(QWORD)));
+                for (QWORD i = 0; i < cnt; ++i)
+                {
+                    QWORD off = 0;
+                    if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &off), &len))
+                    {
+                        offs[i] = off;
+                    }
+                    else
+                    {
+                        tinybuf_free(offs);
+                        SET_FAILED("read part table offset failed");
+                        goto part_table_end;
+                    }
+                }
+                /* pre-read partitions optional: skip for minimal implementation */
+                if (_read_box_by_offset(buf, (int64_t)offs[0], out, target_version) > 0)
+                {
+                    pool_mark_complete(box_offset);
+                    SET_SUCCESS();
+                }
+                tinybuf_free(offs);
+            part_table_end:
+                break;
+            }
+            SET_FAILED("read part table header failed");
+            break;
+        }
+
         // 指针box 后接偏移整数
         case serialize_pointer_from_start_p:
         {
@@ -1969,6 +2026,71 @@ static inline int try_write_version_list(buffer *out, const QWORD *versions, con
     return len;
 }
 
+static inline int try_write_part(buffer *out, const tinybuf_value *value)
+{
+    buffer *body = buffer_alloc();
+    int body_len = try_write_box(body, value);
+    int before = buffer_get_length_inline(out);
+    try_write_type(out, serialize_part);
+    try_write_int_data(FALSE, out, (QWORD)body_len);
+    buffer_append(out, buffer_get_data_inline(body), body_len);
+    int after = buffer_get_length_inline(out);
+    buffer_free(body);
+    return after - before;
+}
+
+static inline int try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count)
+{
+    int total = 1 + count;
+    buffer **parts = (buffer **)tinybuf_malloc(sizeof(buffer *) * total);
+    int *lens = (int *)tinybuf_malloc(sizeof(int) * total);
+    for (int i = 0; i < total; ++i)
+    {
+        parts[i] = buffer_alloc();
+    }
+    lens[0] = try_write_part(parts[0], mainbox);
+    for (int i = 0; i < count; ++i)
+    {
+        lens[1 + i] = try_write_part(parts[1 + i], subs[i]);
+    }
+    uint64_t *offs = (uint64_t *)tinybuf_malloc(sizeof(uint64_t) * total);
+    uint64_t *vlen = (uint64_t *)tinybuf_malloc(sizeof(uint64_t) * total);
+    for (int i = 0; i < total; ++i) vlen[i] = 1;
+    uint8_t tmp[32];
+    while (1)
+    {
+        uint64_t table_len = 1 + (uint64_t)int_serialize((uint64_t)total, tmp);
+        for (int i = 0; i < total; ++i) table_len += vlen[i];
+        offs[0] = table_len;
+        for (int i = 1; i < total; ++i) offs[i] = offs[i - 1] + (uint64_t)lens[i - 1];
+        int stable = 1;
+        for (int i = 0; i < total; ++i)
+        {
+            int l = int_serialize(offs[i], tmp);
+            if ((uint64_t)l != vlen[i]) { vlen[i] = (uint64_t)l; stable = 0; }
+        }
+        if (stable) break;
+    }
+    int before = buffer_get_length_inline(out);
+    try_write_type(out, serialize_part_table);
+    try_write_int_data(FALSE, out, (QWORD)total);
+    for (int i = 0; i < total; ++i)
+    {
+        try_write_int_data(FALSE, out, (QWORD)offs[i]);
+    }
+    for (int i = 0; i < total; ++i)
+    {
+        buffer_append(out, buffer_get_data_inline(parts[i]), buffer_get_length_inline(parts[i]));
+    }
+    int after = buffer_get_length_inline(out);
+    for (int i = 0; i < total; ++i) buffer_free(parts[i]);
+    tinybuf_free(parts);
+    tinybuf_free(lens);
+    tinybuf_free(offs);
+    tinybuf_free(vlen);
+    return after - before;
+}
+
 // public wrappers
 int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
@@ -2005,6 +2127,16 @@ int tinybuf_try_write_version_box(buffer *out, QWORD version, const tinybuf_valu
 int tinybuf_try_write_version_list(buffer *out, const QWORD *versions, const tinybuf_value **boxes, int count)
 {
     return try_write_version_list(out, versions, boxes, count);
+}
+
+int tinybuf_try_write_part(buffer *out, const tinybuf_value *value)
+{
+    return try_write_part(out, value);
+}
+
+int tinybuf_try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count)
+{
+    return try_write_partitions(out, mainbox, subs, count);
 }
 
 int tinybuf_try_write_pointer(buffer *out, int t, SQWORD offset)

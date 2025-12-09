@@ -183,10 +183,30 @@ int tinybuf_plugin_register_from_dll(const char *dll_path){
     int r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
     if(r==0){ if(s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = d->guid; } }
     if(r==0){ if(s_plugins_count>0){ plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = d->op_names; pe->op_sigs = d->op_sigs; pe->op_descs = d->op_descs; pe->op_fns = d->op_fns; pe->op_count = d->op_count; } }
+    typedef int (*plugin_init_fn)(void);
+    plugin_init_fn pinit = (plugin_init_fn)GetProcAddress(h, "tinybuf_plugin_init");
+    if(pinit){ (void)pinit(); }
     return r;
 }
 #else
-int tinybuf_plugin_register_from_dll(const char *dll_path){ (void)dll_path; return -1; }
+#include <dlfcn.h>
+typedef tinybuf_plugin_descriptor* (*get_desc_fn)(void);
+typedef int (*plugin_init_fn)(void);
+int tinybuf_plugin_register_from_dll(const char *dll_path){
+    if(!dll_path) return -1;
+    void *h = dlopen(dll_path, RTLD_LAZY);
+    if(!h) return -1;
+    get_desc_fn getter = (get_desc_fn)dlsym(h, "tinybuf_get_plugin_descriptor");
+    if(!getter){ dlclose(h); return -1; }
+    tinybuf_plugin_descriptor *d = getter();
+    if(!d){ dlclose(h); return -1; }
+    int r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
+    if(r==0){ if(s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = d->guid; } }
+    if(r==0){ if(s_plugins_count>0){ plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = d->op_names; pe->op_sigs = d->op_sigs; pe->op_descs = d->op_descs; pe->op_fns = d->op_fns; pe->op_count = d->op_count; } }
+    plugin_init_fn pinit = (plugin_init_fn)dlsym(h, "tinybuf_plugin_init");
+    if(pinit){ (void)pinit(); }
+    return r;
+}
 #endif
 int tinybuf_plugin_get_count(void){ return s_plugins_count; }
 const char* tinybuf_plugin_get_guid(int index){ if(index<0 || index>=s_plugins_count) return NULL; return s_plugins[index].guid; }
@@ -236,7 +256,7 @@ static int hlist_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; 
 static int dataframe_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }
 static int dataframe_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_indexed_tensor) return -1; return tinybuf_try_write_box(out, in); }
 static int dataframe_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; return tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); }
-static void register_system_extend(void){ tinybuf_custom_register("hetero_tuple", tuple_read, tuple_write, tuple_dump); tinybuf_custom_register("hetero_list", hlist_read, hlist_write, hlist_dump); tinybuf_custom_register("dataframe", dataframe_read, dataframe_write, dataframe_dump); }
+static void register_system_extend(void){ /* moved to DLL plugin: system_extend */ }
 
 int tinybuf_register_builtin_plugins(void){
     uint8_t types[1] = { TINYBUF_PLUGIN_UPPER_STRING };
@@ -244,7 +264,6 @@ int tinybuf_register_builtin_plugins(void){
     if(r==0){ if(s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = "builtin:upper-string"; } }
     if(r==0){ if(s_plugins_count>0){ static const char *names[1] = { "to_lower" }; static const char *sigs[1] = { "string->string" }; static const char *descs[1] = { "lowercase" }; static tinybuf_plugin_value_op_fn fns[1] = { plugin_upper_to_lower }; plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = names; pe->op_sigs = sigs; pe->op_descs = descs; pe->op_fns = fns; pe->op_count = 1; } }
     register_builtin_customs();
-    register_system_extend();
     return r;
 }
 
@@ -262,3 +281,44 @@ int tinybuf_oop_do_op(const char *type_name, const char *op_name, tinybuf_value 
 int tinybuf_oop_attach_serializers(const char *type_name, tinybuf_custom_read_fn read, tinybuf_custom_write_fn write, tinybuf_custom_dump_fn dump){ if(!type_name||!read) return -1; int idx = oop_index_by_name(type_name); if(idx<0){ if(tinybuf_oop_register_type(type_name)<0) return -1; idx = oop_index_by_name(type_name); } s_oop[idx].read = read; s_oop[idx].write = write; s_oop[idx].dump = dump; return 0; }
 int tinybuf_oop_register_types_to_custom(void){ int count=0; for(int i=0;i<s_oop_count;++i){ if(s_oop[i].name && s_oop[i].read){ tinybuf_custom_register(s_oop[i].name, s_oop[i].read, s_oop[i].write, s_oop[i].dump); ++count; } } return count; }
 int tinybuf_oop_set_serializable(const char *type_name, int serializable){ int idx = oop_index_by_name(type_name); if(idx<0){ if(tinybuf_oop_register_type(type_name)<0) return -1; idx = oop_index_by_name(type_name); } s_oop[idx].is_serializable = serializable ? 1 : 0; return 0; }
+int tinybuf_plugin_scan_dir(const char *dir){
+#ifdef _WIN32
+    if(!dir) return -1;
+    char pattern[MAX_PATH];
+    snprintf(pattern, sizeof(pattern), "%s\\*.dll", dir);
+    WIN32_FIND_DATAA fd; HANDLE h = FindFirstFileA(pattern, &fd);
+    if(h == INVALID_HANDLE_VALUE) return 0;
+    int count = 0;
+    do{
+        char full[MAX_PATH];
+        snprintf(full, sizeof(full), "%s\\%s", dir, fd.cFileName);
+        if(tinybuf_plugin_register_from_dll(full) == 0) ++count;
+    }while(FindNextFileA(h, &fd));
+    FindClose(h);
+    return count;
+#else
+    if(!dir) return -1;
+    DIR *dh = opendir(dir);
+    if(!dh) return 0;
+    int count = 0;
+    struct dirent *ent;
+    while((ent = readdir(dh))){
+        const char *name = ent->d_name;
+        int len = (int)strlen(name);
+        if(len > 3 && strcmp(name + len - 3, ".so") == 0){
+            char full[1024];
+            snprintf(full, sizeof(full), "%s/%s", dir, name);
+            if(tinybuf_plugin_register_from_dll(full) == 0) ++count;
+        }
+    }
+    closedir(dh);
+    return count;
+#endif
+}
+
+int tinybuf_init(void){
+    tinybuf_register_builtin_plugins();
+    tinybuf_plugin_scan_dir("tinybuf_plugins");
+    tinybuf_plugin_scan_dir("../tinybuf_plugins");
+    return 0;
+}

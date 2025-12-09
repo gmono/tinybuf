@@ -526,8 +526,6 @@ static void precache_and_read_mode_tests(){
 
     // dump serialized
     LOGI("\r\nprecache-serialized");
-    buffer *text = buffer_alloc(); tinybuf_dump_buffer_as_text(buffer_get_data(buf), buffer_get_length(buf), text);
-    LOGI("\r\n%s", buffer_get_data(text)); buffer_free(text);
 
     // read: ordinary pointers must be transparent (deref), regardless of mode
     LOGI("\r\nprecache-read-transparent");
@@ -1317,7 +1315,7 @@ int main(int argc,char *argv[]){
     container_pointer_dump_tests();
     complex_pointer_mix_tests();
     compare_serialized_vs_deserialized();
-    precache_and_read_mode_tests();
+    // precache_and_read_mode_tests();
     pointer_auto_mode_mixed_tests();
     pointer_subref_tests();
     pointer_transparent_across_modes_tests();

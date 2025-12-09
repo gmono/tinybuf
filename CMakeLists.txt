@@ -32,6 +32,11 @@ add_library(tinybuf STATIC ${tinybuf_src_Root})
 add_library(jsoncpp STATIC ${json_src_Root})
 
 add_executable(benchmark benchmark.cpp)
+add_executable(sys_tests tests/system_extend_tests.cpp)
+add_executable(unit_tests tests/unit/system_extend_plugin_tests.cpp)
+
+add_library(upper_plugin SHARED ${Source_Root}/../src/plugins/upper_plugin.c)
+add_library(system_extend SHARED ${Source_Root}/../src/plugins/system_extend.c)
 
 set(LINK_LIST)
 find_package(JEMALLOC QUIET)
@@ -41,19 +46,29 @@ endif()
 
 if(MSVC)
     target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} ws2_32)
+    target_link_libraries(sys_tests jsoncpp tinybuf ${LINK_LIST} ws2_32)
+    target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain ws2_32)
+    target_link_libraries(upper_plugin tinybuf ws2_32)
+    target_link_libraries(system_extend tinybuf ws2_32)
 else()
     target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} pthread)
-endif()
-
-add_library(upper_plugin SHARED ${Source_Root}/../src/plugins/upper_plugin.c)
-if(MSVC)
-    target_link_libraries(upper_plugin tinybuf ws2_32)
-else()
+    target_link_libraries(sys_tests jsoncpp tinybuf ${LINK_LIST} pthread)
+    target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain pthread)
     target_link_libraries(upper_plugin tinybuf pthread)
+    target_link_libraries(system_extend tinybuf pthread)
 endif()
 
+add_custom_command(TARGET system_extend POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins/"
+)
 
 
 
 
 
+
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+    set(CMAKE_TOOLCHAIN_FILE "c:/vcpkg/scripts/buildsystems/vcpkg.cmake")
+endif()
+find_package(Catch2 CONFIG REQUIRED)

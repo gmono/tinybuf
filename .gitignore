@@ -4,7 +4,7 @@
 *.o
 *.obj
 *.d
-
+build-vcpkg
 # Precompiled Headers
 *.gch
 *.pch

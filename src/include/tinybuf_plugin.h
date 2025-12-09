@@ -46,6 +46,7 @@ int tinybuf_plugin_do_value_op_by_type(uint8_t type, const char *name, tinybuf_v
 int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 int tinybuf_register_builtin_plugins(void);
 int tinybuf_plugin_register_from_dll(const char *dll_path);
+int tinybuf_plugin_scan_dir(const char *dir);
 
 int tinybuf_try_write_plugin_map_table(buffer *out);
 
@@ -80,6 +81,7 @@ typedef enum {
 int tinybuf_try_write_pointer(buffer *out, tinybuf_offset_type t, int64_t offset);
 int tinybuf_try_write_sub_ref(buffer *out, tinybuf_offset_type t, int64_t offset);
 int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in);
+int tinybuf_init(void);
 
 int tinybuf_oop_register_type(const char *type_name);
 int tinybuf_oop_get_type_count(void);

@@ -16,6 +16,8 @@
 typedef int64_t ssize;
 typedef uint64_t usize;
 
+static tinybuf_read_pointer_mode s_read_pointer_mode = tinybuf_read_pointer_ref;
+
 // 是否含有子引用
 inline bool has_sub_ref(const tinybuf_value *value)
 {
@@ -158,21 +160,23 @@ typedef enum
     // 与uri的区别是 uri只读取一个value并返回
     serialize_text_ref = 28, // uri指向的文本文件引用 fileid 有编码说明
     serialize_bin_ref = 29,  // 二进制文件引用 支持部分引用 fileid
-    serialize_embed_file,    // 内嵌文件 有fileid 文件名 文件mime等 支持strptr和str
-    serialize_file_range,    // 文件范围引用 基于已经有的fileid
-    serialize_with_metadata, // 元类型 表示一个带有metadata的box 透明
-    serialize_noseq_part,    // 表示一个无序区 遇到直接跳过 无序区用于保存孤立对象 这种对象只被某个指针引用 不存在于其他位置
+    serialize_embed_file=30,    // 内嵌文件 有fileid 文件名 文件mime等 支持strptr和str
+    serialize_file_range=31,    // 文件范围引用 基于已经有的fileid
+    serialize_with_metadata=32, // 元类型 表示一个带有metadata的box 透明
+    serialize_noseq_part=33,    // 表示一个无序区 遇到直接跳过 无序区用于保存孤立对象 这种对象只被某个指针引用 不存在于其他位置
     // 空白区 遇到直接跳过 用于用fat在其中高性能删除已有数据 并留下一个空白区
-    serialize_empty_part, // sign len
+    serialize_empty_part=34, // sign len
     // fs和fstable都支持多分块 元数据里会有指向下一个block和上一个block的指针 用于将space联成一片
-    serialize_fs,         // 表示一个文件系统块里面可以有目录结构
-    serialize_file_table, // 表示一个文件表 结构简单 没有目录结构
-    serialize_fs_file,    // 表示一个文件系统或文件表中的 文件 文件就是具名+具metadata的数据对象
-    serialize_fs_inode,   // 表示一个inode 一个fs节点 节点可以是目录 链接 或文件
-    serialize_flat_part,  // 通用连续空间快 支持相对寻址 平台空间第一优先 平坦空间支持指向下一个block或上一个block 使用指针类型
+    serialize_fs=35,         // 表示一个文件系统块里面可以有目录结构
+    serialize_file_table=36, // 表示一个文件表 结构简单 没有目录结构
+    serialize_fs_file=37,    // 表示一个文件系统或文件表中的 文件 文件就是具名+具metadata的数据对象
+    serialize_fs_inode=38,   // 表示一个inode 一个fs节点 节点可以是目录 链接 或文件
+    serialize_flat_part=39,  // 通用连续空间快 支持相对寻址 平台空间第一优先 平坦空间支持指向下一个block或上一个block 使用指针类型
     // 可以是普通指针或高级指针
-    serialize_pointer_advance, // 先进指针 支持更丰富的寻址方式 例如flat空间寻址 block内部寻址 跨文件寻址等
-    serialize_empty_table,     // 空白空间表 用于配合平坦buf实现文件内连续子空间
+    serialize_pointer_advance=40, // 先进指针 支持更丰富的寻址方式 例如flat空间寻址 block内部寻址 跨文件寻址等
+    serialize_empty_table=41,     // 空白空间表 用于配合平坦buf实现文件内连续子空间
+    // 子引用：后跟一个完整的指针box，读取时强制生成子引用节点（不透明）
+    serialize_sub_ref=42,
     // 使用字符串池+索引index来表示额外类型 后跟整数 要求字符串池存在
     // 后面跟的是idx 直接就是idx后面不跟完整databox而是跟index整数
     serialize_extern_str_idx = 253,
@@ -662,11 +666,10 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
     // 如果开启了重定向，并且该对象已注册为预写，则输出指针到start位置
     if (s_precache_redirect && value)
     {
-        int64_t start = precache_find_start(out, value);
-        if (start >= 0)
+        int64_t start_pos = precache_find_start(out, value);
+        if (start_pos >= 0)
         {
-            // 使用 start 指针类型，指向预写位置
-            return try_write_pointer_value(out, start, start);
+            return try_write_pointer_value(out, (enum offset_type)0, start_pos);
         }
     }
     switch (value->_type)
@@ -1223,7 +1226,7 @@ static inline offset_pool_entry *pool_find(int64_t offset){
     return NULL;
 }
 
-static inline offset_pool_entry *pool_register(int64_t offset, tinybuf_value *value){
+static offset_pool_entry *pool_register(int64_t offset, tinybuf_value *value){
     offset_pool_entry *e = pool_find(offset);
     if(e){
         if(value){ e->value = value; }
@@ -1244,6 +1247,10 @@ static inline void pool_mark_complete(int64_t offset){
     offset_pool_entry *e = pool_find(offset);
     if(e){ e->complete = 1; }
 }
+
+static inline void set_out_ref(tinybuf_value *out, tinybuf_value *target){ out->_type = tinybuf_value_ref; out->_data._ref = target; }
+static inline void set_out_deref(tinybuf_value *out, const tinybuf_value *target){ tinybuf_value *clone = tinybuf_value_clone(target); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
+static inline void set_out_by_mode(tinybuf_value *out, tinybuf_value *target, int deref){ if(deref) set_out_deref(out, target); else set_out_ref(out, target); }
 // 从给定位置偏移一段距离 读取值
 int _read_box_by_offset(buf_ref *buf, int64_t offset, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
@@ -1535,19 +1542,13 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             {
                 pointer_value pointer = (pointer_value){start, offset};
                 offset_pool_entry *e = pool_find(pointer.offset);
-                if(e){
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = e->value; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(e->value); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
-                    SET_SUCCESS();
-                    break;
-                }
+                if(e){ set_out_deref(out, e->value); SET_SUCCESS(); break; }
                 tinybuf_value *target = tinybuf_value_alloc();
                 pool_register(pointer.offset, target);
                 if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, target, target_version), &len))
                 {
                     pool_mark_complete(pointer.offset);
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = target; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(target); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
+                    set_out_deref(out, target);
                     SET_SUCCESS();
                     break;
                 }
@@ -1565,19 +1566,13 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             {
                 pointer_value pointer = (pointer_value){start, offset};
                 offset_pool_entry *e = pool_find(pointer.offset);
-                if(e){
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = e->value; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(e->value); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
-                    SET_SUCCESS();
-                    break;
-                }
+                if(e){ set_out_deref(out, e->value); SET_SUCCESS(); break; }
                 tinybuf_value *target = tinybuf_value_alloc();
                 pool_register(pointer.offset, target);
                 if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, target, target_version), &len))
                 {
                     pool_mark_complete(pointer.offset);
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = target; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(target); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
+                    set_out_deref(out, target);
                     SET_SUCCESS();
                     break;
                 }
@@ -1585,6 +1580,128 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 break;
             }
             SET_FAILED("read version failed");
+            break;
+        }
+        // 子引用：后跟一个完整的指针box，读取时强制生成子引用节点
+        case serialize_sub_ref:
+        {
+            serialize_type subtype;
+            if (OK_AND_ADDTO(try_read_type(buf, &subtype), &len))
+            {
+                switch (subtype)
+                {
+                case serialize_pointer_from_start_p:
+                {
+                    QWORD offset;
+                    if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
+                    {
+                        pointer_value pointer = (pointer_value){start, offset};
+                        offset_pool_entry *e = pool_find(pointer.offset);
+                        if(e){ set_out_ref(out, e->value); SET_SUCCESS(); break; }
+                        tinybuf_value *target = tinybuf_value_alloc();
+                        pool_register(pointer.offset, target);
+                        if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, target, target_version), &len))
+                        { pool_mark_complete(pointer.offset); set_out_ref(out, target); SET_SUCCESS(); break; }
+                        SET_FAILED("read subref pointer->box failed"); break;
+                    }
+                    SET_FAILED("read subref version failed");
+                    break;
+                }
+                case serialize_pointer_from_start_n:
+                {
+                    SQWORD offset;
+                    if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
+                    {
+                        pointer_value pointer = (pointer_value){start, offset};
+                        offset_pool_entry *e = pool_find(pointer.offset);
+                        if(e){ set_out_ref(out, e->value); SET_SUCCESS(); break; }
+                        tinybuf_value *target = tinybuf_value_alloc();
+                        pool_register(pointer.offset, target);
+                        if (OK_AND_ADDTO(read_box_by_pointer(buf, pointer, target, target_version), &len))
+                        { pool_mark_complete(pointer.offset); set_out_ref(out, target); SET_SUCCESS(); break; }
+                        SET_FAILED("read subref pointer->box failed"); break;
+                    }
+                    SET_FAILED("read subref version failed");
+                    break;
+                }
+                case serialize_pointer_from_end_p:
+                {
+                    QWORD offset;
+                    if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
+                    {
+                        pointer_value pointer = (pointer_value){end, offset};
+                        pointer_to_start(buf, &pointer);
+                        offset_pool_entry *e = pool_find(pointer.offset);
+                        if(e){ set_out_ref(out, e->value); SET_SUCCESS(); break; }
+                        tinybuf_value *target = tinybuf_value_alloc();
+                        pool_register(pointer.offset, target);
+                        if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
+                        { pool_mark_complete(pointer.offset); set_out_ref(out, target); SET_SUCCESS(); break; }
+                        SET_FAILED("read subref pointer->box failed"); break;
+                    }
+                    SET_FAILED("read subref version failed");
+                    break;
+                }
+                case serialize_pointer_from_end_n:
+                {
+                    SQWORD offset;
+                    if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
+                    {
+                        pointer_value pointer = (pointer_value){end, offset};
+                        pointer_to_start(buf, &pointer);
+                        offset_pool_entry *e = pool_find(pointer.offset);
+                        if(e){ set_out_ref(out, e->value); SET_SUCCESS(); break; }
+                        tinybuf_value *target = tinybuf_value_alloc();
+                        pool_register(pointer.offset, target);
+                        if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
+                        { pool_mark_complete(pointer.offset); set_out_ref(out, target); SET_SUCCESS(); break; }
+                        SET_FAILED("read subref pointer->box failed"); break;
+                    }
+                    SET_FAILED("read subref version failed");
+                    break;
+                }
+                case serialize_pointer_from_current_p:
+                {
+                    QWORD offset;
+                    if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &offset), &len))
+                    {
+                        pointer_value pointer = (pointer_value){current, offset};
+                        pointer_to_start(buf, &pointer);
+                        offset_pool_entry *e = pool_find(pointer.offset);
+                        if(e){ set_out_ref(out, e->value); SET_SUCCESS(); break; }
+                        tinybuf_value *target = tinybuf_value_alloc();
+                        pool_register(pointer.offset, target);
+                        if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
+                        { pool_mark_complete(pointer.offset); set_out_ref(out, target); SET_SUCCESS(); break; }
+                        SET_FAILED("read subref pointer->box failed"); break;
+                    }
+                    SET_FAILED("read subref version failed");
+                    break;
+                }
+                case serialize_pointer_from_current_n:
+                {
+                    SQWORD offset;
+                    if (OK_AND_ADDTO(try_read_int_data(TRUE, buf, (QWORD *)&offset), &len))
+                    {
+                        pointer_value pointer = (pointer_value){current, offset};
+                        pointer_to_start(buf, &pointer);
+                        offset_pool_entry *e = pool_find(pointer.offset);
+                        if(e){ set_out_ref(out, e->value); SET_SUCCESS(); break; }
+                        tinybuf_value *target = tinybuf_value_alloc();
+                        pool_register(pointer.offset, target);
+                        if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
+                        { pool_mark_complete(pointer.offset); set_out_ref(out, target); SET_SUCCESS(); break; }
+                        SET_FAILED("read subref pointer->box failed"); break;
+                    }
+                    SET_FAILED("read subref version failed");
+                    break;
+                }
+                default:
+                    SET_FAILED("read subref subtype UNKNOWN");
+                    break;
+                }
+            }
+            else { SET_FAILED("read subref type failed"); }
             break;
         }
         case serialize_pointer_from_end_p:
@@ -1595,19 +1712,13 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 pointer_value pointer = (pointer_value){end, offset};
                 pointer_to_start(buf, &pointer);
                 offset_pool_entry *e = pool_find(pointer.offset);
-                if(e){
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = e->value; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(e->value); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
-                    SET_SUCCESS();
-                    break;
-                }
+                if(e){ set_out_deref(out, e->value); SET_SUCCESS(); break; }
                 tinybuf_value *target = tinybuf_value_alloc();
                 pool_register(pointer.offset, target);
                 if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
                 {
                     pool_mark_complete(pointer.offset);
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = target; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(target); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
+                    set_out_deref(out, target);
                     SET_SUCCESS();
                     break;
                 }
@@ -1626,19 +1737,13 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 pointer_value pointer = (pointer_value){end, offset};
                 pointer_to_start(buf, &pointer);
                 offset_pool_entry *e = pool_find(pointer.offset);
-                if(e){
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = e->value; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(e->value); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
-                    SET_SUCCESS();
-                    break;
-                }
+                if(e){ set_out_deref(out, e->value); SET_SUCCESS(); break; }
                 tinybuf_value *target = tinybuf_value_alloc();
                 pool_register(pointer.offset, target);
                 if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
                 {
                     pool_mark_complete(pointer.offset);
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = target; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(target); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
+                    set_out_deref(out, target);
                     SET_SUCCESS();
                     break;
                 }
@@ -1657,19 +1762,13 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 pointer_value pointer = (pointer_value){current, offset};
                 pointer_to_start(buf, &pointer);
                 offset_pool_entry *e = pool_find(pointer.offset);
-                if(e){
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = e->value; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(e->value); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
-                    SET_SUCCESS();
-                    break;
-                }
+                if(e){ set_out_deref(out, e->value); SET_SUCCESS(); break; }
                 tinybuf_value *target = tinybuf_value_alloc();
                 pool_register(pointer.offset, target);
                 if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
                 {
                     pool_mark_complete(pointer.offset);
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = target; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(target); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
+                    set_out_deref(out, target);
                     SET_SUCCESS();
                     break;
                 }
@@ -1688,19 +1787,13 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 pointer_value pointer = (pointer_value){current, offset};
                 pointer_to_start(buf, &pointer);
                 offset_pool_entry *e = pool_find(pointer.offset);
-                if(e){
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = e->value; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(e->value); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
-                    SET_SUCCESS();
-                    break;
-                }
+                if(e){ set_out_deref(out, e->value); SET_SUCCESS(); break; }
                 tinybuf_value *target = tinybuf_value_alloc();
                 pool_register(pointer.offset, target);
                 if (OK_AND_ADDTO(_read_box_by_offset(buf, pointer.offset, target, target_version), &len))
                 {
                     pool_mark_complete(pointer.offset);
-                    if (s_read_pointer_mode == tinybuf_read_pointer_ref) { out->_type = tinybuf_value_ref; out->_data._ref = target; }
-                    else { tinybuf_value *clone = tinybuf_value_clone(target); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
+                    set_out_deref(out, target);
                     SET_SUCCESS();
                     break;
                 }
@@ -1815,7 +1908,6 @@ int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER conta
     return try_read_box(buf, out, contain_handler);
 }
 
-static tinybuf_read_pointer_mode s_read_pointer_mode = tinybuf_read_pointer_ref;
 void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode){ s_read_pointer_mode = mode; }
 int tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode){ s_read_pointer_mode = mode; return tinybuf_try_read_box(buf, out, contain_handler); }
 
@@ -1840,6 +1932,14 @@ int tinybuf_try_write_pointer(buffer *out, int t, SQWORD offset)
     if (t == 1) et = end;
     else if (t == 2) et = current;
     return try_write_pointer_value(out, et, offset);
+}
+
+int tinybuf_try_write_sub_ref(buffer *out, int t, SQWORD offset)
+{
+    int len = 0;
+    len += try_write_type(out, serialize_sub_ref);
+    len += tinybuf_try_write_pointer(out, t, offset);
+    return len;
 }
 
 int tinybuf_try_write_array_header(buffer *out, int count){

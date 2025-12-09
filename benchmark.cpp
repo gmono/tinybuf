@@ -378,6 +378,7 @@ static void container_pointer_dump_tests(){
         LOGI("\r\n%s", buffer_get_data(text));
         buffer_free(text); buffer_free(buf);
     }
+
 }
 
 static void complex_pointer_mix_tests(){
@@ -509,8 +510,8 @@ static void precache_and_read_mode_tests(){
     buffer *text = buffer_alloc(); tinybuf_dump_buffer_as_text(buffer_get_data(buf), buffer_get_length(buf), text);
     LOGI("\r\n%s", buffer_get_data(text)); buffer_free(text);
 
-    // read in ref mode
-    LOGI("\r\nprecache-read-ref");
+    // read: ordinary pointers must be transparent (deref), regardless of mode
+    LOGI("\r\nprecache-read-transparent");
     {
         tinybuf_set_read_pointer_mode(tinybuf_read_pointer_ref);
         tinybuf_value *out = tinybuf_value_alloc();
@@ -523,11 +524,11 @@ static void precache_and_read_mode_tests(){
         const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0);
         const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
         const tinybuf_value *c2 = tinybuf_value_get_array_child(out, 2);
-        assert(tinybuf_value_get_type(c0) == tinybuf_value_ref);
-        assert(tinybuf_value_get_type(c1) == tinybuf_value_ref);
+        assert(tinybuf_value_get_type(c0) != tinybuf_value_ref);
+        assert(tinybuf_value_get_type(c1) != tinybuf_value_ref);
         assert(tinybuf_value_get_type(c2) == tinybuf_map);
         buffer *k = NULL; const tinybuf_value *mchild = tinybuf_value_get_map_child_and_key(c2, 0, &k);
-        assert(mchild && tinybuf_value_get_type(mchild) == tinybuf_value_ref);
+        assert(mchild && tinybuf_value_get_type(mchild) != tinybuf_value_ref);
         tinybuf_value_free(out);
     }
 
@@ -556,6 +557,135 @@ static void precache_and_read_mode_tests(){
     buffer_free(buf);
 }
 
+static void pointer_auto_mode_mixed_tests(){
+    tinybuf_value *big = tinybuf_make_test_value();
+    buffer *mixed = buffer_alloc();
+    tinybuf_precache_reset(mixed);
+    int64_t start = tinybuf_precache_register(mixed, big);
+    assert(start >= 0);
+    tinybuf_precache_set_redirect(1);
+
+    tinybuf_try_write_array_header(mixed, 2);
+    tinybuf_try_write_box(mixed, big); // backward pointer (precache)
+
+    tinybuf_value *later = tinybuf_make_test_value();
+    buffer *tmp = buffer_alloc(); tinybuf_try_write_box(tmp, later); int fwd = buffer_get_length(tmp); buffer_free(tmp);
+    tinybuf_try_write_pointer(mixed, tinybuf_offset_current, fwd); // forward pointer to later value
+    tinybuf_try_write_box(mixed, later);
+
+    tinybuf_set_read_pointer_mode(tinybuf_read_pointer_auto);
+    tinybuf_value *out = tinybuf_value_alloc();
+    buf_ref br{buffer_get_data(mixed), (int64_t)buffer_get_length(mixed), buffer_get_data(mixed), (int64_t)buffer_get_length(mixed)};
+    int r = tinybuf_try_read_box_with_mode(&br, out, any_version, tinybuf_read_pointer_auto);
+    assert(r > 0);
+    assert(tinybuf_value_get_type(out) == tinybuf_array);
+    assert(tinybuf_value_get_child_size(out) == 2);
+    const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0);
+    const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
+    // ordinary pointers are always deref (transparent)
+    assert(tinybuf_value_get_type(c0) != tinybuf_value_ref);
+    assert(tinybuf_value_get_type(c1) != tinybuf_value_ref);
+
+    tinybuf_value_free(out);
+    tinybuf_value_free(later);
+    buffer_free(mixed);
+    tinybuf_value_free(big);
+}
+
+static void pointer_subref_tests(){
+    tinybuf_value *later = tinybuf_make_test_value();
+    buffer *tmp = buffer_alloc();
+    tinybuf_try_write_box(tmp, later);
+    int fwd = buffer_get_length(tmp);
+    buffer_free(tmp);
+
+    buffer *buf = buffer_alloc();
+    tinybuf_try_write_array_header(buf, 2);
+    // forward subref to later element
+    tinybuf_try_write_sub_ref(buf, tinybuf_offset_current, fwd);
+    int pos_before_later = buffer_get_length(buf);
+    tinybuf_try_write_box(buf, later);
+    int pos_later = pos_before_later;
+    // backward subref to earlier 'later'
+    tinybuf_try_write_sub_ref(buf, tinybuf_offset_start, pos_later);
+
+    // verify in ref mode
+    tinybuf_set_read_pointer_mode(tinybuf_read_pointer_ref);
+    tinybuf_value *out = tinybuf_value_alloc();
+    buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+    int r = tinybuf_try_read_box_with_mode(&br, out, any_version, tinybuf_read_pointer_ref);
+    assert(r > 0);
+    assert(tinybuf_value_get_type(out) == tinybuf_array);
+    assert(tinybuf_value_get_child_size(out) == 2);
+    const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0);
+    const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
+    assert(tinybuf_value_get_type(c0) == tinybuf_value_ref);
+    assert(tinybuf_value_get_type(c1) == tinybuf_value_ref);
+    tinybuf_value_free(out);
+
+    // verify in deref mode (subref must still be ref)
+    tinybuf_set_read_pointer_mode(tinybuf_read_pointer_deref);
+    out = tinybuf_value_alloc();
+    br = buf_ref{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+    r = tinybuf_try_read_box_with_mode(&br, out, any_version, tinybuf_read_pointer_deref);
+    assert(r > 0);
+    assert(tinybuf_value_get_type(out) == tinybuf_array);
+    assert(tinybuf_value_get_type(tinybuf_value_get_array_child(out, 0)) == tinybuf_value_ref);
+    assert(tinybuf_value_get_type(tinybuf_value_get_array_child(out, 1)) == tinybuf_value_ref);
+    tinybuf_value_free(out);
+
+    // verify in auto mode (subref must still be ref)
+    tinybuf_set_read_pointer_mode(tinybuf_read_pointer_auto);
+    out = tinybuf_value_alloc();
+    br = buf_ref{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+    r = tinybuf_try_read_box_with_mode(&br, out, any_version, tinybuf_read_pointer_auto);
+    assert(r > 0);
+    assert(tinybuf_value_get_type(out) == tinybuf_array);
+    assert(tinybuf_value_get_type(tinybuf_value_get_array_child(out, 0)) == tinybuf_value_ref);
+    assert(tinybuf_value_get_type(tinybuf_value_get_array_child(out, 1)) == tinybuf_value_ref);
+    tinybuf_value_free(out);
+
+    tinybuf_value_free(later);
+    buffer_free(buf);
+}
+
+static void pointer_transparent_across_modes_tests(){
+    tinybuf_value *base = tinybuf_value_alloc(); tinybuf_value_init_int(base, 42);
+    buffer *buf = buffer_alloc();
+    tinybuf_try_write_array_header(buf, 2);
+    tinybuf_try_write_box(buf, base);
+    tinybuf_try_write_pointer(buf, tinybuf_offset_start, 0);
+
+    // default read (no mode): ordinary pointer must be deref
+    {
+        tinybuf_value *out = tinybuf_value_alloc();
+        buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+        int r = tinybuf_try_read_box(&br, out, any_version);
+        assert(r > 0);
+        assert(tinybuf_value_get_type(out) == tinybuf_array);
+        assert(tinybuf_value_get_child_size(out) == 2);
+        const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
+        assert(tinybuf_value_get_type(c1) != tinybuf_value_ref);
+        tinybuf_value_free(out);
+    }
+
+    // explicit modes: still deref for ordinary pointers
+    for(int m=0;m<3;++m){
+        tinybuf_read_pointer_mode mode = (m==0)?tinybuf_read_pointer_ref:((m==1)?tinybuf_read_pointer_deref:tinybuf_read_pointer_auto);
+        tinybuf_value *out = tinybuf_value_alloc();
+        buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
+        int r = tinybuf_try_read_box_with_mode(&br, out, any_version, mode);
+        assert(r > 0);
+        assert(tinybuf_value_get_type(out) == tinybuf_array);
+        const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
+        assert(tinybuf_value_get_type(c1) != tinybuf_value_ref);
+        tinybuf_value_free(out);
+    }
+
+    buffer_free(buf);
+    tinybuf_value_free(base);
+}
+
 int main(int argc,char *argv[]){
     tinybuf_value_test();
     ring_self_pointer_test();
@@ -568,6 +698,9 @@ int main(int argc,char *argv[]){
     complex_pointer_mix_tests();
     compare_serialized_vs_deserialized();
     precache_and_read_mode_tests();
+    pointer_auto_mode_mixed_tests();
+    pointer_subref_tests();
+    pointer_transparent_across_modes_tests();
     // dump readable for pointer types first pointer
     {
         buffer *buf = buffer_alloc();

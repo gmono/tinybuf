@@ -45,6 +45,7 @@ static strpool_entry *s_strpool = NULL;
 static int s_strpool_count = 0;
 static int s_strpool_capacity = 0;
 static const char *s_strpool_base = NULL;
+static const char *s_last_error_msg = NULL;
 
  
 
@@ -1267,7 +1268,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         uint64_t idx;
         int len = int_deserialize((uint8_t *)ptr, size, &idx);
         if (len <= 0){ return len; }
-        if (s_strpool_offset_read < 0 || s_strpool_base_read == NULL){ return -1; }
+        if (s_strpool_offset_read < 0 || s_strpool_base_read == NULL){ s_last_error_msg = "strpool not initialized"; return -1; }
         const char *pool_start = s_strpool_base_read + s_strpool_offset_read;
         const char *q = pool_start;
         int64_t r = ((const char*)ptr + size) - pool_start; // remaining after pool start
@@ -1473,7 +1474,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         uint64_t idx=0; int a=int_deserialize((uint8_t*)ptr, size, &idx); if(a<=0) return a; ptr+=a; size-=a;
         uint64_t blen=0; int b=int_deserialize((uint8_t*)ptr, size, &blen); if(b<=0) return b; ptr+=b; size-=b;
         if(size < (int64_t)blen) return 0;
-        if (s_strpool_offset_read < 0 || s_strpool_base_read == NULL) return -1;
+        if (s_strpool_offset_read < 0 || s_strpool_base_read == NULL){ s_last_error_msg = "strpool not initialized"; return -1; }
         const char *pool_start = s_strpool_base_read + s_strpool_offset_read;
         const char *q = pool_start; int64_t r = ((const char*)ptr + size) - pool_start;
         if(r < 1) return 0;
@@ -1488,11 +1489,16 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         if(!name_out) return -1;
         int rr = tinybuf_custom_try_read(name_out, (const uint8_t*)ptr, (int)blen, out, contain_any);
         tinybuf_free(name_out);
-        if(rr < 0) return rr;
+        if(rr < 0){
+            buf_ref br3 = (buf_ref){ (char*)ptr, (int64_t)blen, (char*)ptr, (int64_t)blen };
+            int ir = try_read_box(&br3, out, contain_any);
+            if(ir > 0){ return 1 + a + b + ir; }
+            return rr;
+        }
         return 1 + a + b + (int)blen;
     }
     default:
-        // 解析失败
+        s_last_error_msg = "deserialize type unknown";
         return -1;
     }
 }
@@ -1643,8 +1649,8 @@ BOOL RESULT_OK_AND_ADDTO(read_result x, int *s)
 // 高级序列化read入口
 // 二级版本 可处理二级格式 readbox标准 成功则修改buf指针 返回>0 否则不修改并返回<=0
 
-#define SET_FAILED(s) (reason = s, failed = TRUE)
-#define SET_SUCCESS() (failed = FALSE, reason = NULL)
+#define SET_FAILED(s) (reason = s, s_last_error_msg = s, failed = TRUE)
+#define SET_SUCCESS() (failed = FALSE, reason = NULL, s_last_error_msg = NULL)
 #define CHECK_FAILED (failed && buf_offset(buf, -len));
 #define INIT_STATE       \
     int len = 0;         \
@@ -1675,6 +1681,8 @@ static inline void pool_reset(const buf_ref *buf){
     }
     s_pool_count = 0;
 }
+
+const char *tinybuf_last_error_message(void){ return s_last_error_msg; }
 
 static inline offset_pool_entry *pool_find(int64_t offset){
     pool_lock();
@@ -2566,9 +2574,9 @@ static inline int try_write_partitions(buffer *out, const tinybuf_value *mainbox
 int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     pool_reset(buf);
-    s_strpool_base_read = buf->base; s_strpool_offset_read = -1;
     if (buf->ptr == buf->base && buf->size >= 1 && (uint8_t)buf->base[0] == serialize_str_pool_table)
     {
+        s_strpool_base_read = buf->base; s_strpool_offset_read = -1;
         buf_ref hb = *buf;
         serialize_type t; int c = try_read_type(&hb, &t);
         if (c > 0 && t == serialize_str_pool_table)
@@ -2588,6 +2596,26 @@ void tinybuf_set_use_strpool(int enable){ s_use_strpool = enable ? 1 : 0; }
 int tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
 {
     return try_write_box(out, value);
+}
+
+tinybuf_result tinybuf_try_read_box_r(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
+{
+    int r = tinybuf_try_read_box(buf, out, contain_handler);
+    if (r > 0) { return tinybuf_result_ok(r); }
+    const char *msg = tinybuf_last_error_message();
+    if(!msg) msg = (r == 0) ? "buffer too small" : "read failed";
+    tinybuf_result rr = tinybuf_result_err(r, msg, NULL);
+    /* add context */ tinybuf_result_add_msg_const(&rr, "tinybuf_try_read_box failed");
+    return rr;
+}
+
+tinybuf_result tinybuf_try_write_box_r(buffer *out, const tinybuf_value *value)
+{
+    int r = tinybuf_try_write_box(out, value);
+    if (r > 0) { return tinybuf_result_ok(r); }
+    tinybuf_result rr = tinybuf_result_err(r, "write failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_box failed");
+    return rr;
 }
 
 int tinybuf_try_write_version_box(buffer *out, QWORD version, const tinybuf_value *box)

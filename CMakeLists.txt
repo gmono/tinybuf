@@ -71,4 +71,12 @@ add_custom_command(TARGET system_extend POST_BUILD
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
     set(CMAKE_TOOLCHAIN_FILE "c:/vcpkg/scripts/buildsystems/vcpkg.cmake")
 endif()
-find_package(Catch2 CONFIG REQUIRED)
+find_package(Catch2 CONFIG QUIET)
+if(NOT Catch2_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(Catch2
+        GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+        GIT_TAG v3.6.0
+    )
+    FetchContent_MakeAvailable(Catch2)
+endif()

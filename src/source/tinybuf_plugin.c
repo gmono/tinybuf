@@ -12,6 +12,10 @@ typedef struct {
     tinybuf_plugin_write_fn write;
     tinybuf_plugin_dump_fn dump;
     tinybuf_plugin_show_value_fn show_value;
+    tinybuf_plugin_read_fn_r read_r;
+    tinybuf_plugin_write_fn_r write_r;
+    tinybuf_plugin_dump_fn_r dump_r;
+    tinybuf_plugin_show_value_fn_r show_value_r;
     const char **op_names; const char **op_sigs; const char **op_descs; tinybuf_plugin_value_op_fn *op_fns; int op_count;
 } plugin_entry;
 
@@ -44,10 +48,24 @@ int tinybuf_plugin_register(const uint8_t *types, int type_count, tinybuf_plugin
     e.write = write;
     e.dump = dump;
     e.show_value = show_value;
+    e.read_r = NULL; e.write_r = NULL; e.dump_r = NULL; e.show_value_r = NULL;
     e.op_names = NULL; e.op_sigs = NULL; e.op_descs = NULL; e.op_fns = NULL; e.op_count = 0;
     s_plugins[s_plugins_count++] = e;
     return 0;
 }
+
+static tinybuf_strlist* strlist_new(void){ tinybuf_strlist *l=(tinybuf_strlist*)tinybuf_malloc(sizeof(tinybuf_strlist)); l->items=NULL; l->count=0; l->capacity=0; return l; }
+static void strlist_ensure(tinybuf_strlist *l){ if(!l) return; if(l->count==l->capacity){ int nc = l->capacity? l->capacity*2 : 4; l->items=(tinybuf_str*)tinybuf_realloc(l->items, sizeof(tinybuf_str)*nc); l->capacity=nc; } }
+static void strlist_add_owned(tinybuf_strlist *l, const char *msg, tinybuf_deleter_fn d){ if(!l||!msg) return; strlist_ensure(l); l->items[l->count].ptr=msg; l->items[l->count].deleter=d; l->count++; }
+static void strlist_free(tinybuf_strlist *l){ if(!l) return; for(int i=0;i<l->count;++i){ if(l->items[i].ptr && l->items[i].deleter){ l->items[i].deleter(l->items[i].ptr); } } tinybuf_free(l->items); tinybuf_free(l); }
+tinybuf_result tinybuf_result_ok(int res){ tinybuf_result r; r.res=res; r.msgs=NULL; return r; }
+tinybuf_result tinybuf_result_err(int res, const char *msg, tinybuf_deleter_fn deleter){ tinybuf_result r; r.res=res; r.msgs=strlist_new(); if(msg) strlist_add_owned(r.msgs,msg,deleter); return r; }
+int tinybuf_result_add_msg(tinybuf_result *r, const char *msg, tinybuf_deleter_fn deleter){ if(!r||!msg) return -1; if(!r->msgs) r->msgs=strlist_new(); strlist_add_owned(r->msgs,msg,deleter); return r->msgs->count; }
+int tinybuf_result_add_msg_const(tinybuf_result *r, const char *msg){ return tinybuf_result_add_msg(r,msg,NULL); }
+int tinybuf_result_msg_count(const tinybuf_result *r){ return (r && r->msgs)? r->msgs->count : 0; }
+const char *tinybuf_result_msg_at(const tinybuf_result *r, int idx){ if(!r||!r->msgs||idx<0||idx>=r->msgs->count) return NULL; return r->msgs->items[idx].ptr; }
+int tinybuf_result_format_msgs(const tinybuf_result *r, char *dst, int dst_len){ if(!dst||dst_len<=0) return 0; int n=tinybuf_result_msg_count(r); int off=0; for(int i=0;i<n;++i){ const char *s=tinybuf_result_msg_at(r,i); if(!s) continue; int sl=(int)strlen(s); if(off+sl+ (i+1<n?2:0) >= dst_len) break; memcpy(dst+off,s,(size_t)sl); off+=sl; if(i+1<n){ dst[off++]=';'; dst[off++]=' '; } } if(off<dst_len) dst[off]='\0'; return off; }
+void tinybuf_result_dispose(tinybuf_result *r){ if(!r) return; if(r->msgs){ strlist_free(r->msgs); r->msgs=NULL; } }
 
 int tinybuf_plugin_unregister_all(void){
     for(int i=0;i<s_plugins_count;++i){ tinybuf_free(s_plugins[i].types); }
@@ -62,11 +80,35 @@ int tinybuf_plugins_try_read_by_type(uint8_t type, buf_ref *buf, tinybuf_value *
     return -1;
 }
 
+tinybuf_result tinybuf_plugins_try_read_by_type_r(uint8_t type, buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler){
+    (void)contain_handler;
+    for(int i=0;i<s_plugins_count;++i){
+        for(int k=0;k<s_plugins[i].type_count;++k){
+            if(s_plugins[i].types[k] == type){
+                if(s_plugins[i].read_r){ return s_plugins[i].read_r(type, buf, out, contain_handler); }
+                int ir = s_plugins[i].read(type, buf, out, contain_handler);
+                if(ir>0) return tinybuf_result_ok(ir);
+                tinybuf_result rr = tinybuf_result_err(ir, "plugin read failed", NULL);
+                if(s_plugins[i].guid) tinybuf_result_add_msg_const(&rr, s_plugins[i].guid);
+                return rr;
+            }
+        }
+    }
+    return tinybuf_result_err(-1, "plugin type not found", NULL);
+}
+
 int tinybuf_plugins_try_write(uint8_t type, const tinybuf_value *in, buffer *out){
     for(int i=0;i<s_plugins_count;++i){
         for(int k=0;k<s_plugins[i].type_count;++k){ if(s_plugins[i].types[k] == type && s_plugins[i].write){ return s_plugins[i].write(type, in, out); } }
     }
     return -1;
+}
+
+tinybuf_result tinybuf_plugins_try_write_r(uint8_t type, const tinybuf_value *in, buffer *out){
+    for(int i=0;i<s_plugins_count;++i){
+        for(int k=0;k<s_plugins[i].type_count;++k){ if(s_plugins[i].types[k] == type){ if(s_plugins[i].write_r) return s_plugins[i].write_r(type, in, out); int ir = s_plugins[i].write? s_plugins[i].write(type, in, out) : -1; if(ir>0) return tinybuf_result_ok(ir); tinybuf_result rr = tinybuf_result_err(ir, "plugin write failed", NULL); if(s_plugins[i].guid) tinybuf_result_add_msg_const(&rr, s_plugins[i].guid); return rr; } }
+    }
+    return tinybuf_result_err(-1, "plugin type not found", NULL);
 }
 
 int tinybuf_plugins_try_dump_by_type(uint8_t type, buf_ref *buf, buffer *out){
@@ -76,11 +118,25 @@ int tinybuf_plugins_try_dump_by_type(uint8_t type, buf_ref *buf, buffer *out){
     return 0;
 }
 
+tinybuf_result tinybuf_plugins_try_dump_by_type_r(uint8_t type, buf_ref *buf, buffer *out){
+    for(int i=0;i<s_plugins_count;++i){
+        for(int k=0;k<s_plugins[i].type_count;++k){ if(s_plugins[i].types[k] == type){ if(s_plugins[i].dump_r) return s_plugins[i].dump_r(type, buf, out); int ir = s_plugins[i].dump? s_plugins[i].dump(type, buf, out) : -1; if(ir>0) return tinybuf_result_ok(ir); tinybuf_result rr = tinybuf_result_err(ir, "plugin dump failed", NULL); if(s_plugins[i].guid) tinybuf_result_add_msg_const(&rr, s_plugins[i].guid); return rr; } }
+    }
+    return tinybuf_result_err(-1, "plugin type not found", NULL);
+}
+
 int tinybuf_plugins_try_show_value(uint8_t type, const tinybuf_value *in, buffer *out){
     for(int i=0;i<s_plugins_count;++i){
         for(int k=0;k<s_plugins[i].type_count;++k){ if(s_plugins[i].types[k] == type && s_plugins[i].show_value){ return s_plugins[i].show_value(type, in, out); } }
     }
     return 0;
+}
+
+tinybuf_result tinybuf_plugins_try_show_value_r(uint8_t type, const tinybuf_value *in, buffer *out){
+    for(int i=0;i<s_plugins_count;++i){
+        for(int k=0;k<s_plugins[i].type_count;++k){ if(s_plugins[i].types[k] == type){ if(s_plugins[i].show_value_r) return s_plugins[i].show_value_r(type, in, out); int ir = s_plugins[i].show_value? s_plugins[i].show_value(type, in, out) : -1; if(ir>0) return tinybuf_result_ok(ir); tinybuf_result rr = tinybuf_result_err(ir, "plugin show_value failed", NULL); if(s_plugins[i].guid) tinybuf_result_add_msg_const(&rr, s_plugins[i].guid); return rr; } }
+    }
+    return tinybuf_result_err(-1, "plugin type not found", NULL);
 }
 
 int tinybuf_plugin_set_runtime_map(const char **guids, int count){
@@ -177,15 +233,23 @@ int tinybuf_plugin_register_from_dll(const char *dll_path){
     HMODULE h = LoadLibraryA(dll_path);
     if(!h) return -1;
     get_desc_fn getter = (get_desc_fn)GetProcAddress(h, "tinybuf_get_plugin_descriptor");
-    if(!getter){ FreeLibrary(h); return -1; }
-    tinybuf_plugin_descriptor *d = getter();
-    if(!d){ FreeLibrary(h); return -1; }
-    int r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
-    if(r==0){ if(s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = d->guid; } }
-    if(r==0){ if(s_plugins_count>0){ plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = d->op_names; pe->op_sigs = d->op_sigs; pe->op_descs = d->op_descs; pe->op_fns = d->op_fns; pe->op_count = d->op_count; } }
+    int r = 0;
+    if(getter){
+        tinybuf_plugin_descriptor *d = getter();
+        if(d){
+            if(d->types && d->type_count > 0 && d->read){
+                r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
+                if(r==0 && s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = d->guid; }
+                if(r==0 && s_plugins_count>0){ plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = d->op_names; pe->op_sigs = d->op_sigs; pe->op_descs = d->op_descs; pe->op_fns = d->op_fns; pe->op_count = d->op_count; pe->read_r = d->read_r; pe->write_r = d->write_r; pe->dump_r = d->dump_r; pe->show_value_r = d->show_value_r; }
+            }
+        }
+    }
+    typedef int (*plugin_init_host_fn)(int (*host_custom_register)(const char*, tinybuf_custom_read_fn, tinybuf_custom_write_fn, tinybuf_custom_dump_fn));
+    plugin_init_host_fn phost = (plugin_init_host_fn)GetProcAddress(h, "tinybuf_plugin_init_with_host");
+    if(phost){ (void)phost(&tinybuf_custom_register); r = 0; }
     typedef int (*plugin_init_fn)(void);
     plugin_init_fn pinit = (plugin_init_fn)GetProcAddress(h, "tinybuf_plugin_init");
-    if(pinit){ (void)pinit(); }
+    if(!phost && pinit){ (void)pinit(); r = 0; }
     return r;
 }
 #else
@@ -197,14 +261,22 @@ int tinybuf_plugin_register_from_dll(const char *dll_path){
     void *h = dlopen(dll_path, RTLD_LAZY);
     if(!h) return -1;
     get_desc_fn getter = (get_desc_fn)dlsym(h, "tinybuf_get_plugin_descriptor");
-    if(!getter){ dlclose(h); return -1; }
-    tinybuf_plugin_descriptor *d = getter();
-    if(!d){ dlclose(h); return -1; }
-    int r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
-    if(r==0){ if(s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = d->guid; } }
-    if(r==0){ if(s_plugins_count>0){ plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = d->op_names; pe->op_sigs = d->op_sigs; pe->op_descs = d->op_descs; pe->op_fns = d->op_fns; pe->op_count = d->op_count; } }
+    int r = 0;
+    if(getter){
+        tinybuf_plugin_descriptor *d = getter();
+        if(d){
+            if(d->types && d->type_count > 0 && d->read){
+                r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
+                if(r==0 && s_plugins_count>0){ s_plugins[s_plugins_count-1].guid = d->guid; }
+                if(r==0 && s_plugins_count>0){ plugin_entry *pe = &s_plugins[s_plugins_count-1]; pe->op_names = d->op_names; pe->op_sigs = d->op_sigs; pe->op_descs = d->op_descs; pe->op_fns = d->op_fns; pe->op_count = d->op_count; pe->read_r = d->read_r; pe->write_r = d->write_r; pe->dump_r = d->dump_r; pe->show_value_r = d->show_value_r; }
+            }
+        }
+    }
+    typedef int (*plugin_init_host_fn)(int (*host_custom_register)(const char*, tinybuf_custom_read_fn, tinybuf_custom_write_fn, tinybuf_custom_dump_fn));
+    plugin_init_host_fn phost = (plugin_init_host_fn)dlsym(h, "tinybuf_plugin_init_with_host");
+    if(phost){ (void)phost(&tinybuf_custom_register); r = 0; }
     plugin_init_fn pinit = (plugin_init_fn)dlsym(h, "tinybuf_plugin_init");
-    if(pinit){ (void)pinit(); }
+    if(!phost && pinit){ (void)pinit(); r = 0; }
     return r;
 }
 #endif
@@ -217,6 +289,9 @@ typedef struct {
     tinybuf_custom_read_fn read;
     tinybuf_custom_write_fn write;
     tinybuf_custom_dump_fn dump;
+    tinybuf_custom_read_fn_r read_r;
+    tinybuf_custom_write_fn_r write_r;
+    tinybuf_custom_dump_fn_r dump_r;
 } custom_entry;
 
 static custom_entry *s_customs = NULL;
@@ -229,9 +304,20 @@ static int oop_index_by_name(const char *name);
 
 static int custom_index_by_name(const char *name){ if(!name) return -1; for(int i=0;i<s_customs_count;++i){ if(s_customs[i].name && strcmp(s_customs[i].name, name)==0) return i; } return -1; }
 
-int tinybuf_custom_register(const char *name, tinybuf_custom_read_fn read, tinybuf_custom_write_fn write, tinybuf_custom_dump_fn dump){ if(!name || !read) return -1; int idx = custom_index_by_name(name); if(idx >= 0){ s_customs[idx].read = read; s_customs[idx].write = write; s_customs[idx].dump = dump; return 0; } if(s_customs_count == s_customs_capacity){ int newcap = s_customs_capacity ? s_customs_capacity * 2 : 8; s_customs = (custom_entry*)tinybuf_realloc(s_customs, sizeof(custom_entry) * newcap); s_customs_capacity = newcap; } custom_entry e; int nlen = (int)strlen(name); e.name = (char*)tinybuf_malloc(nlen+1); memcpy(e.name, name, nlen); e.name[nlen] = '\0'; e.read = read; e.write = write; e.dump = dump; s_customs[s_customs_count++] = e; return 0; }
+int tinybuf_custom_register(const char *name, tinybuf_custom_read_fn read, tinybuf_custom_write_fn write, tinybuf_custom_dump_fn dump){ if(!name || !read) return -1; int idx = custom_index_by_name(name); if(idx >= 0){ s_customs[idx].read = read; s_customs[idx].write = write; s_customs[idx].dump = dump; return 0; } if(s_customs_count == s_customs_capacity){ int newcap = s_customs_capacity ? s_customs_capacity * 2 : 8; s_customs = (custom_entry*)tinybuf_realloc(s_customs, sizeof(custom_entry) * newcap); s_customs_capacity = newcap; } custom_entry e; int nlen = (int)strlen(name); e.name = (char*)tinybuf_malloc(nlen+1); memcpy(e.name, name, nlen); e.name[nlen] = '\0'; e.read = read; e.write = write; e.dump = dump; e.read_r = NULL; e.write_r = NULL; e.dump_r = NULL; s_customs[s_customs_count++] = e; return 0; }
+
+int tinybuf_custom_register_r(const char *name, tinybuf_custom_read_fn_r read, tinybuf_custom_write_fn_r write, tinybuf_custom_dump_fn_r dump){ if(!name || !read) return -1; int idx = custom_index_by_name(name); if(idx >= 0){ s_customs[idx].read_r = read; s_customs[idx].write_r = write; s_customs[idx].dump_r = dump; return 0; } if(s_customs_count == s_customs_capacity){ int newcap = s_customs_capacity ? s_customs_capacity * 2 : 8; s_customs = (custom_entry*)tinybuf_realloc(s_customs, sizeof(custom_entry) * newcap); s_customs_capacity = newcap; } custom_entry e; int nlen = (int)strlen(name); e.name = (char*)tinybuf_malloc(nlen+1); memcpy(e.name, name, nlen); e.name[nlen] = '\0'; e.read = NULL; e.write = NULL; e.dump = NULL; e.read_r = read; e.write_r = write; e.dump_r = dump; s_customs[s_customs_count++] = e; return 0; }
 
 int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ int idx = custom_index_by_name(name); if(idx >= 0 && s_customs[idx].read) return s_customs[idx].read(name, data, len, out, contain_handler); int oi = oop_index_by_name(name); if(oi>=0 && s_oop[oi].is_serializable && s_oop[oi].read) return s_oop[oi].read(name, data, len, out, contain_handler); return -1; }
+
+static inline tinybuf_result _make_ok(int res){ return tinybuf_result_ok(res); }
+static inline tinybuf_result _make_err(const char *msg, int res){ return tinybuf_result_err(res, msg, NULL); }
+
+tinybuf_result tinybuf_custom_try_read_r(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ int idx = custom_index_by_name(name); if(idx >= 0 && s_customs[idx].read_r) return s_customs[idx].read_r(name, data, len, out, contain_handler); int oi = oop_index_by_name(name); if(oi>=0 && s_oop[oi].is_serializable && s_oop[oi].read){ int ir = s_oop[oi].read(name, data, len, out, contain_handler); if(ir>0) return _make_ok(ir); const char *msg = tinybuf_last_error_message(); if(!msg) msg = "custom read failed"; return _make_err(msg, ir); } if(idx >= 0 && s_customs[idx].read){ int ir = s_customs[idx].read(name, data, len, out, contain_handler); if(ir>0) return _make_ok(ir); const char *msg = tinybuf_last_error_message(); if(!msg) msg = "custom read failed"; return _make_err(msg, ir); } return _make_err("custom type not found", -1); }
+
+tinybuf_result tinybuf_custom_try_write_r(const char *name, const tinybuf_value *in, buffer *out){ int idx = custom_index_by_name(name); if(idx >= 0 && s_customs[idx].write_r) return s_customs[idx].write_r(name, in, out); int oi = oop_index_by_name(name); if(oi>=0 && s_oop[oi].is_serializable && s_oop[oi].write){ int ir = s_oop[oi].write(name, in, out); if(ir>0) return _make_ok(ir); tinybuf_result rr = _make_err("custom write failed", ir); tinybuf_result_add_msg_const(&rr, name); return rr; } if(idx >= 0 && s_customs[idx].write){ int ir = s_customs[idx].write(name, in, out); if(ir>0) return _make_ok(ir); tinybuf_result rr = _make_err("custom write failed", ir); tinybuf_result_add_msg_const(&rr, name); return rr; } return _make_err("custom type not found", -1); }
+
+tinybuf_result tinybuf_custom_try_dump_r(const char *name, buf_ref *buf, buffer *out){ int idx = custom_index_by_name(name); if(idx >= 0 && s_customs[idx].dump_r) return s_customs[idx].dump_r(name, buf, out); int oi = oop_index_by_name(name); if(oi>=0 && s_oop[oi].is_serializable && s_oop[oi].dump){ int ir = s_oop[oi].dump(name, buf, out); if(ir>0) return _make_ok(ir); tinybuf_result rr = _make_err("custom dump failed", ir); tinybuf_result_add_msg_const(&rr, name); return rr; } if(idx >= 0 && s_customs[idx].dump){ int ir = s_customs[idx].dump(name, buf, out); if(ir>0) return _make_ok(ir); tinybuf_result rr = _make_err("custom dump failed", ir); tinybuf_result_add_msg_const(&rr, name); return rr; } return _make_err("custom type not found", -1); }
 
 int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *out){ int idx = custom_index_by_name(name); if(idx >= 0 && s_customs[idx].write) return s_customs[idx].write(name, in, out); int oi = oop_index_by_name(name); if(oi>=0 && s_oop[oi].is_serializable && s_oop[oi].write) return s_oop[oi].write(name, in, out); return -1; }
 

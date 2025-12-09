@@ -37,8 +37,11 @@ TEST_CASE("custom string via type_idx", "[custom]")
 
     buf_ref br{ buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf) };
     tinybuf_value *out = tinybuf_value_alloc();
-    int r = tinybuf_try_read_box(&br, out, NULL);
-    REQUIRE(r > 0);
+    tinybuf_result rr = tinybuf_try_read_box_r(&br, out, NULL);
+    char msgs[128]; tinybuf_result_format_msgs(&rr, msgs, sizeof(msgs));
+    CAPTURE(rr.res, msgs);
+    REQUIRE(rr.res > 0);
+    REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     buffer *sv = tinybuf_value_get_string(out);
     REQUIRE(sv != NULL);
@@ -53,7 +56,7 @@ TEST_CASE("custom string via type_idx", "[custom]")
 TEST_CASE("hetero_list concatenated boxes", "[custom]")
 {
     tinybuf_set_use_strpool(1);
-    tinybuf_init();
+    tinybuf_register_builtin_plugins();
     tinybuf_plugin_register_from_dll("build-vcpkg/lib/Debug/system_extend.dll");
 
     tinybuf_value *arr = tinybuf_value_alloc();
@@ -73,8 +76,11 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
 
     buf_ref br{ buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf) };
     tinybuf_value *out = tinybuf_value_alloc();
-    int r = tinybuf_try_read_box(&br, out, NULL);
-    REQUIRE(r > 0);
+    tinybuf_result rr2 = tinybuf_try_read_box_r(&br, out, NULL);
+    char msgs2[128]; tinybuf_result_format_msgs(&rr2, msgs2, sizeof(msgs2));
+    CAPTURE(rr2.res, msgs2);
+    REQUIRE(rr2.res > 0);
+    REQUIRE(tinybuf_result_msg_count(&rr2) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
     REQUIRE(tinybuf_value_get_child_size(out) == 6);
     const tinybuf_value *last = tinybuf_value_get_array_child(out, 5);
@@ -85,4 +91,3 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     tinybuf_value_free(arr);
     tinybuf_set_use_strpool(0);
 }
-

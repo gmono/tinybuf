@@ -62,7 +62,7 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
 {
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
-    tinybuf_plugin_register_from_dll("build-vcpkg/lib/Debug/system_extend.dll");
+    tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
 
     tinybuf_value *arr = tinybuf_value_alloc();
     for (int k = 0; k < 5; ++k)

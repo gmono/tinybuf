@@ -8,7 +8,7 @@ TEST_CASE("system.extend plugin loads and handles hetero_tuple", "[plugin]")
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    REQUIRE(tinybuf_plugin_register_from_dll("build/lib/Debug/system_extend.dll") == 0);
+    REQUIRE(tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll") == 0);
 #endif
     tinybuf_value *arr = tinybuf_value_alloc();
     tinybuf_value *i = tinybuf_value_alloc();
@@ -50,7 +50,7 @@ TEST_CASE("system.extend plugin handles dataframe", "[plugin]")
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    REQUIRE(tinybuf_plugin_register_from_dll("build/lib/Debug/system_extend.dll") == 0);
+    REQUIRE(tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll") == 0);
 #endif
     int64_t shape[2] = {2, 2};
     double data[4] = {1.0, 2.0, 3.0, 4.0};

@@ -9,6 +9,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: openeuler/openeuler:24.03
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-linux
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,13 +27,13 @@ jobs:
 
       - name: 安装vcpkg
         run: |
-          git clone https://github.com/microsoft/vcpkg
-          ./vcpkg/bootstrap-vcpkg.sh
-          ./vcpkg/vcpkg install catch2
+          git clone https://github.com/microsoft/vcpkg "$VCPKG_ROOT"
+          "$VCPKG_ROOT"/bootstrap-vcpkg.sh
+          "$VCPKG_ROOT"/vcpkg install catch2
 
       - name: Configure
         run: |
-          cmake -G Ninja -S . -B build -DCMAKE_TOOLCHAIN_FILE=$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug
+          cmake -G Ninja -S . -B build -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT"/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
         run: |

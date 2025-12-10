@@ -2,9 +2,19 @@ cmake_minimum_required(VERSION 3.10)
 project(tinybuf)
 
 
-set(CMAKE_TOOLCHAIN_FILE "C:/vcpkg/scripts/buildsystems/vcpkg.cmake")
+if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+endif()
 # find_package(Catch2 CONFIG REQUIRED)
 
+if(DEFINED ENV{VCPKG_ROOT})
+    if(DEFINED ENV{VCPKG_DEFAULT_TRIPLET})
+        list(APPEND CMAKE_PREFIX_PATH "$ENV{VCPKG_ROOT}/installed/$ENV{VCPKG_DEFAULT_TRIPLET}")
+    else()
+        list(APPEND CMAKE_PREFIX_PATH "$ENV{VCPKG_ROOT}/installed/x64-windows")
+    endif()
+endif()
+find_package(Catch2 REQUIRED)
 
 
 #使能c++11
@@ -19,8 +29,6 @@ endif()
 
 
 
-set(CMAKE_PREFIX_PATH "C:/vcpkg/installed/x64-windows")
-find_package(Catch2 REQUIRED)
 
 #加载自定义模块
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

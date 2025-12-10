@@ -130,11 +130,24 @@ int dump_int(uint64_t len, buffer *out);
 int buf_offset(buf_ref *buf, int64_t offset);
 int try_read_type(buf_ref *buf, serialize_type *type);
 int try_read_int_tovar(BOOL isneg, const char *ptr, int size, QWORD *out_val);
+int int_deserialize(const uint8_t *in, int in_size, uint64_t *out);
+int optional_add(int x, int addx);
 int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version);
 
 // shared strpool read state for dumping
 extern int64_t s_strpool_offset_read;
 extern const char *s_strpool_base_read;
+extern const char *s_last_error_msg;
+void _tb_push_err_msg(const char *msg);
+
+#define SET_FAILED(s) (reason = s, s_last_error_msg = s, failed = TRUE, _tb_push_err_msg(s))
+#define SET_SUCCESS() (failed = FALSE, reason = NULL, s_last_error_msg = NULL)
+#define CHECK_FAILED (failed && buf_offset(buf, -len));
+#define INIT_STATE       \
+    int len = 0;         \
+    BOOL failed = FALSE; \
+    const char *reason = NULL;
+#define READ_RETURN return (failed ? -1 : len);
 
 // minimal plugin runtime APIs used by writer
 int tinybuf_plugin_get_count(void);

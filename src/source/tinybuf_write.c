@@ -156,3 +156,28 @@ int try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybu
 }
 
 /* removed duplicate tinybuf_value_serialize; keep single definition in tinybuf.c */
+static inline serialize_type make_pointer_type(enum offset_type t, int neg)
+{
+    switch (t)
+    {
+    case current:
+        return neg ? serialize_pointer_from_current_n : serialize_pointer_from_current_p;
+    case start:
+        return neg ? serialize_pointer_from_start_n : serialize_pointer_from_start_p;
+    case end:
+        return neg ? serialize_pointer_from_end_n : serialize_pointer_from_end_p;
+    default:
+        return serialize_null;
+    }
+}
+
+int try_write_pointer_value(buffer *out, enum offset_type t, int64_t offset)
+{
+    int neg = offset < 0;
+    serialize_type pt = make_pointer_type(t, neg);
+    int len = 0;
+    len += try_write_type(out, pt);
+    uint64_t mag = neg ? (uint64_t)(-offset) : (uint64_t)offset;
+    len += try_write_int_data(0, out, mag);
+    return len;
+}

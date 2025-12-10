@@ -55,6 +55,7 @@ add_library(jsoncpp STATIC ${json_src_Root})
 add_executable(benchmark benchmark.cpp)
 add_executable(sys_tests tests/system_extend_tests.cpp)
 add_executable(unit_tests tests/unit/system_extend_plugin_tests.cpp)
+add_executable(all_tests tests/system_extend_tests.cpp tests/unit/system_extend_plugin_tests.cpp benchmark.cpp)
 
 add_library(upper_plugin SHARED ${Source_Root}/../src/plugins/upper_plugin.c)
 add_library(system_extend SHARED ${Source_Root}/../src/plugins/system_extend.c)
@@ -69,15 +70,17 @@ endif()
 
 
 if(MSVC)
-    target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} ws2_32)
+    target_link_libraries(benchmark jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
     target_link_libraries(sys_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
     target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain ws2_32)
+    target_link_libraries(all_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
     target_link_libraries(upper_plugin tinybuf ws2_32)
     target_link_libraries(system_extend tinybuf ws2_32)
 else()
-    target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} pthread)
+    target_link_libraries(benchmark jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} pthread)
     target_link_libraries(sys_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} pthread)
 target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain pthread)
+    target_link_libraries(all_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} pthread)
     target_link_libraries(upper_plugin tinybuf pthread)
     target_link_libraries(system_extend tinybuf pthread)
 endif()
@@ -85,13 +88,23 @@ endif()
 add_custom_command(TARGET system_extend POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins"
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins/"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:all_tests>/../tinybuf_plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:all_tests>/../tinybuf_plugins/"
 )
 
 enable_testing()
 add_test(NAME unit_tests COMMAND $<TARGET_FILE:unit_tests>)
-set_tests_properties(unit_tests PROPERTIES TIMEOUT 8)
+set_tests_properties(unit_tests PROPERTIES TIMEOUT 8 LABELS "unit")
 add_test(NAME sys_tests COMMAND $<TARGET_FILE:sys_tests>)
-set_tests_properties(sys_tests PROPERTIES TIMEOUT 8)
+set_tests_properties(sys_tests PROPERTIES TIMEOUT 8 LABELS "system")
+
+# 注册 benchmark 测试为 CTest，但默认禁用，仅编译不运行
+add_test(NAME benchmark COMMAND $<TARGET_FILE:benchmark>)
+set_tests_properties(benchmark PROPERTIES LABELS "benchmark;performance" DISABLED TRUE TIMEOUT 120)
+
+# 汇总所有测试一次性运行
+add_test(NAME all_tests COMMAND $<TARGET_FILE:all_tests>)
+set_tests_properties(all_tests PROPERTIES TIMEOUT 120 LABELS "all")
 
 
 

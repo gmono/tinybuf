@@ -12,6 +12,7 @@ build
 # Compiled Dynamic libraries
 #*.dylib
 #*.dll
+3rdpart/dyncall*
 
 # Fortran module files
 *.mod

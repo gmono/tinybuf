@@ -3,10 +3,12 @@
 #include "tinybuf_plugin.h"
 #ifdef _WIN32
 #include <windows.h>
+static volatile LONG s_pool_lock_var = 0;
 #else
 #include <stdatomic.h>
 #include <time.h>
 #include <sched.h>
+static atomic_flag s_pool_lock_var = ATOMIC_FLAG_INIT;
 #endif
 
 static inline void pool_lock(void);
@@ -839,7 +841,6 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
 static inline void pool_lock(void)
 {
 #ifdef _WIN32
-    static volatile LONG s_pool_lock_var = 0;
     int spins = 0;
     while (InterlockedCompareExchange(&s_pool_lock_var, 1, 0) != 0)
     {
@@ -848,7 +849,6 @@ static inline void pool_lock(void)
         else { Sleep(1); }
     }
 #else
-    static atomic_flag s_pool_lock_var = ATOMIC_FLAG_INIT;
     int spins = 0;
     while (atomic_flag_test_and_set(&s_pool_lock_var))
     {
@@ -861,10 +861,8 @@ static inline void pool_lock(void)
 static inline void pool_unlock(void)
 {
 #ifdef _WIN32
-    static volatile LONG s_pool_lock_var = 0;
     InterlockedExchange(&s_pool_lock_var, 0);
 #else
-    static atomic_flag s_pool_lock_var = ATOMIC_FLAG_INIT;
     atomic_flag_clear(&s_pool_lock_var);
 #endif
 }

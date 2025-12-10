@@ -50,8 +50,8 @@ TEST_CASE("custom string via type_idx", "[custom]")
     REQUIRE(sv != NULL);
     REQUIRE(buffer_get_length(sv) == 5);
 
-    tinybuf_result_dispose(&rr);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&rr);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     tinybuf_value_free(s);
     buffer_free(buf);
@@ -92,8 +92,8 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     const tinybuf_value *last = tinybuf_value_get_array_child(out, 5);
     REQUIRE(tinybuf_value_get_type(last) == tinybuf_string);
 
-    tinybuf_result_dispose(&rr2);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&rr2);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     buffer_free(buf);
     tinybuf_value_free(arr);

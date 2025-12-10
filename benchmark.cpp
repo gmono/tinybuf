@@ -519,11 +519,11 @@ static void precache_and_read_mode_tests(){
 
     // write array with two references to big; second is nested map with big again
     tinybuf_try_write_array_header(buf, 3);
-    { tinybuf_result wr = tinybuf_try_write_box(buf, big); assert(wr.res>0); tinybuf_result_dispose(&wr); }
-    { tinybuf_result wr = tinybuf_try_write_box(buf, big); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(buf, big); assert(wr.res>0); tinybuf_result_unref(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(buf, big); assert(wr.res>0); tinybuf_result_unref(&wr); }
     tinybuf_try_write_map_header(buf, 1);
     tinybuf_try_write_string_raw(buf, "again", 5);
-    { tinybuf_result wr = tinybuf_try_write_box(buf, big); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(buf, big); assert(wr.res>0); tinybuf_result_unref(&wr); }
 
     // dump serialized
     LOGI("\r\nprecache-serialized");
@@ -584,12 +584,12 @@ static void pointer_auto_mode_mixed_tests(){
     tinybuf_precache_set_redirect(1);
 
     tinybuf_try_write_array_header(mixed, 2);
-    { tinybuf_result wr = tinybuf_try_write_box(mixed, big); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(mixed, big); assert(wr.res>0); tinybuf_result_unref(&wr); }
 
     tinybuf_value *later = tinybuf_make_test_value();
-    buffer *tmp = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(tmp, later); assert(wr.res>0); tinybuf_result_dispose(&wr); } int fwd = buffer_get_length(tmp); buffer_free(tmp);
+    buffer *tmp = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(tmp, later); assert(wr.res>0); tinybuf_result_unref(&wr); } int fwd = buffer_get_length(tmp); buffer_free(tmp);
     tinybuf_try_write_pointer(mixed, tinybuf_offset_current, fwd);
-    { tinybuf_result wr = tinybuf_try_write_box(mixed, later); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(mixed, later); assert(wr.res>0); tinybuf_result_unref(&wr); }
 
     tinybuf_set_read_pointer_mode(tinybuf_read_pointer_auto);
     tinybuf_value *out = tinybuf_value_alloc();
@@ -613,7 +613,7 @@ static void pointer_auto_mode_mixed_tests(){
 static void pointer_subref_tests(){
     tinybuf_value *later = tinybuf_make_test_value();
     buffer *tmp = buffer_alloc();
-    { tinybuf_result wr = tinybuf_try_write_box(tmp, later); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(tmp, later); assert(wr.res>0); tinybuf_result_unref(&wr); }
     int fwd = buffer_get_length(tmp);
     buffer_free(tmp);
 
@@ -622,7 +622,7 @@ static void pointer_subref_tests(){
     // forward subref to later element
     tinybuf_try_write_sub_ref(buf, tinybuf_offset_current, fwd);
     int pos_before_later = buffer_get_length(buf);
-    { tinybuf_result wr = tinybuf_try_write_box(buf, later); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(buf, later); assert(wr.res>0); tinybuf_result_unref(&wr); }
     int pos_later = pos_before_later;
     // backward subref to earlier 'later'
     tinybuf_try_write_sub_ref(buf, tinybuf_offset_start, pos_later);
@@ -717,7 +717,7 @@ static void custom_type_idx_string_tests(){
     buffer *buf = buffer_alloc();
     tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "hello", 5);
     tinybuf_register_builtin_plugins();
-    tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "string", s); assert(w.res > 0); tinybuf_result_dispose(&w);
+    tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "string", s); assert(w.res > 0); tinybuf_result_unref(&w);
     tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_result r = tinybuf_try_read_box(&br, out, any_version); assert(r.res > 0);
     assert(tinybuf_value_get_type(out) == tinybuf_string);
@@ -732,7 +732,7 @@ static void oop_serializable_fallback_tests(){
     tinybuf_oop_set_serializable("xjson", 1);
     tinybuf_register_builtin_plugins();
     tinybuf_value *m = tinybuf_make_test_value(); buffer *buf = buffer_alloc(); buffer *text = buffer_alloc();
-    tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "xjson", m); assert(w.res > 0); tinybuf_result_dispose(&w);
+    tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "xjson", m); assert(w.res > 0); tinybuf_result_unref(&w);
     tinybuf_dump_buffer_as_text(buffer_get_data(buf), buffer_get_length(buf), text);
     LOGI("\r\n%s", buffer_get_data(text));
     tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
@@ -748,7 +748,7 @@ static void custom_vs_oop_override_tests(){
     tinybuf_oop_set_serializable("mytype", 1);
     tinybuf_custom_register("mytype", custstr_read, custstr_write, custstr_dump);
     tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "override", 8);
-    buffer *buf = buffer_alloc(); tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "mytype", s); assert(w.res > 0); tinybuf_result_dispose(&w);
+    buffer *buf = buffer_alloc(); tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "mytype", s); assert(w.res > 0); tinybuf_result_unref(&w);
     tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_result r = tinybuf_try_read_box(&br, out, any_version); assert(r.res > 0);
     assert(tinybuf_value_get_type(out) == tinybuf_string);
@@ -763,7 +763,7 @@ static void strpool_efficiency_tests(){
     buffer *b1 = buffer_alloc(); buffer *b2 = buffer_alloc();
     tinybuf_result w1 = tinybuf_try_write_custom_id_box(b1, "xjson", val); assert(w1.res > 0);
     tinybuf_result w2 = tinybuf_try_write_custom_id_box(b2, "xjson", val); assert(w2.res > 0);
-    tinybuf_result_dispose(&w1); tinybuf_result_dispose(&w2);
+    tinybuf_result_unref(&w1); tinybuf_result_unref(&w2);
     int len1 = buffer_get_length(b1); int len2 = buffer_get_length(b2);
     assert(len1 > 0 && len2 > 0);
     tinybuf_value_free(val); buffer_free(b1); buffer_free(b2);
@@ -778,7 +778,7 @@ static void strpool_basic_tests(){
     tinybuf_value_map_set(m, "k1", tinybuf_value_clone(v));
     tinybuf_value_map_set(m, "k2", tinybuf_value_clone(v));
     buffer *buf = buffer_alloc();
-    { tinybuf_result wr = tinybuf_try_write_box(buf, m); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(buf, m); assert(wr.res>0); tinybuf_result_unref(&wr); }
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_result r = tinybuf_try_read_box(&br, out, any_version);
@@ -818,7 +818,7 @@ static void strpool_perf_tests(){
                 tinybuf_value_map_set(m, "c", s);
             }
             buffer *b = buffer_alloc();
-    { tinybuf_result wr = tinybuf_try_write_box(b, m); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(b, m); assert(wr.res>0); tinybuf_result_unref(&wr); }
             tinybuf_value *out = tinybuf_value_alloc();
             buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
             { tinybuf_result rr = tinybuf_try_read_box(&br, out, any_version); }
@@ -846,7 +846,7 @@ static void strpool_perf_tests(){
                 tinybuf_value_map_set(m, "c", s);
             }
             buffer *b = buffer_alloc();
-            { tinybuf_result wr = tinybuf_try_write_box(b, m); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+            { tinybuf_result wr = tinybuf_try_write_box(b, m); assert(wr.res>0); tinybuf_result_unref(&wr); }
             tinybuf_value *out = tinybuf_value_alloc();
             buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
             { tinybuf_result rr = tinybuf_try_read_box(&br, out, any_version); }
@@ -865,7 +865,7 @@ static void strpool_perf_tests(){
         for(int i=0;i<MAX_COUNT;i++){
             tinybuf_value *arr = tinybuf_value_alloc_with_type(tinybuf_array);
             for(int k=0;k<1000;k++){ tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "long-long-long-string", 22); tinybuf_value_array_append(arr, s); }
-            buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, arr); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+            buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, arr); assert(wr.res>0); tinybuf_result_unref(&wr); }
             tinybuf_value *out = tinybuf_value_alloc();
             buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
             { tinybuf_result rr = tinybuf_try_read_box(&br, out, any_version); }
@@ -880,7 +880,7 @@ static void strpool_perf_tests(){
         for(int i=0;i<MAX_COUNT;i++){
             tinybuf_value *arr = tinybuf_value_alloc_with_type(tinybuf_array);
             for(int k=0;k<1000;k++){ tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "long-long-long-string", 22); tinybuf_value_array_append(arr, s); }
-            buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, arr); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+            buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, arr); assert(wr.res>0); tinybuf_result_unref(&wr); }
             tinybuf_value *out = tinybuf_value_alloc();
             buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
             { tinybuf_result rr = tinybuf_try_read_box(&br, out, any_version); }
@@ -897,7 +897,7 @@ static void plugin_basic_tests(){
     buffer *b = buffer_alloc();
     tinybuf_try_write_array_header(b, 2);
     tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "hello", 5);
-    { tinybuf_result pr = tinybuf_plugins_try_write(200, s, b); assert(pr.res>0); tinybuf_result_dispose(&pr); }
+    { tinybuf_result pr = tinybuf_plugins_try_write(200, s, b); assert(pr.res>0); tinybuf_result_unref(&pr); }
     tinybuf_try_write_string_raw(b, "world", 5);
     tinybuf_value_free(s);
     tinybuf_value *out = tinybuf_value_alloc();
@@ -927,7 +927,7 @@ static void partition_basic_tests(){
     buffer *b = buffer_alloc();
     {
         buffer *single = buffer_alloc();
-        { tinybuf_result rr = tinybuf_try_write_part(single, mainv); assert(rr.res>0); tinybuf_result_dispose(&rr); }
+        { tinybuf_result rr = tinybuf_try_write_part(single, mainv); assert(rr.res>0); tinybuf_result_unref(&rr); }
         {
             buffer *text = buffer_alloc();
             tinybuf_dump_buffer_as_text(buffer_get_data(single), buffer_get_length(single), text);
@@ -943,7 +943,7 @@ static void partition_basic_tests(){
         buffer_free(single);
         LOGI("partition_single_part ok");
     }
-    { tinybuf_result rr = tinybuf_try_write_partitions(b, mainv, subs, 3); assert(rr.res>0); tinybuf_result_dispose(&rr); }
+    { tinybuf_result rr = tinybuf_try_write_partitions(b, mainv, subs, 3); assert(rr.res>0); tinybuf_result_unref(&rr); }
     {
         buffer *text = buffer_alloc();
         tinybuf_dump_buffer_as_text(buffer_get_data(b), buffer_get_length(b), text);
@@ -974,7 +974,7 @@ static void partition_concurrent_read_tests(){
     tinybuf_value *s3 = tinybuf_value_alloc(); tinybuf_value_init_int(s3, 3);
     const tinybuf_value *subs[3] = { s1, s2, s3 };
     buffer *b = buffer_alloc();
-    { tinybuf_result rr = tinybuf_try_write_partitions(b, mainv, subs, 3); assert(rr.res>0); tinybuf_result_dispose(&rr); }
+    { tinybuf_result rr = tinybuf_try_write_partitions(b, mainv, subs, 3); assert(rr.res>0); tinybuf_result_unref(&rr); }
     const uint8_t *base = (const uint8_t*)buffer_get_data(b);
     int64_t all = (int64_t)buffer_get_length(b);
     int pos = 0; assert(base[0] == 22); pos++;
@@ -1019,11 +1019,11 @@ static void plugin_dll_tests(){
     buffer *b = buffer_alloc();
     tinybuf_try_write_array_header(b, 3);
     tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "hello", 5);
-    { tinybuf_result pr = tinybuf_plugins_try_write(201, s, b); assert(pr.res>0); tinybuf_result_dispose(&pr); }
+    { tinybuf_result pr = tinybuf_plugins_try_write(201, s, b); assert(pr.res>0); tinybuf_result_unref(&pr); }
     tinybuf_try_write_string_raw(b, "world", 5);
     tinybuf_value *sv = tinybuf_value_alloc(); tinybuf_value_init_string(sv, "AbCd", 4);
     tinybuf_plugin_do_value_op_by_type(201, "to_lower", sv, NULL, sv);
-    { tinybuf_result wr = tinybuf_try_write_box(b, sv); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(b, sv); assert(wr.res>0); tinybuf_result_unref(&wr); }
     tinybuf_value_free(s);
     tinybuf_value_free(sv);
     buffer *text = buffer_alloc(); tinybuf_dump_buffer_as_text(buffer_get_data(b), buffer_get_length(b), text); LOGI("\r\n%s", buffer_get_data(text)); buffer_free(text);
@@ -1047,7 +1047,7 @@ static void plugin_custom_box_tests(){
 #endif
     tinybuf_value *v = tinybuf_value_alloc(); tinybuf_value_init_string(v, "hello", 5);
     tinybuf_value_set_custom_box_type(v, 201);
-    buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_unref(&wr); }
     buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)};
     tinybuf_value *out = tinybuf_value_alloc(); tinybuf_result r = tinybuf_try_read_box_with_plugins(&br, out, any_version); assert(r.res>0);
     buffer *bs = tinybuf_value_get_string(out); assert(buffer_get_length(bs)==5); assert(memcmp(buffer_get_data(bs), "HELLO", 5)==0);
@@ -1062,7 +1062,7 @@ static void tensor_tests(){
     tinybuf_value *v1 = tinybuf_value_alloc();
     tinybuf_value_init_tensor(v1, 1, shape1, 1, data1, 3);
     buffer *b1 = buffer_alloc();
-    { tinybuf_result wr = tinybuf_try_write_box(b1, v1); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(b1, v1); assert(wr.res>0); tinybuf_result_unref(&wr); }
     buf_ref br1{buffer_get_data(b1), (int64_t)buffer_get_length(b1), buffer_get_data(b1), (int64_t)buffer_get_length(b1)};
     tinybuf_value *o1 = tinybuf_value_alloc();
     tinybuf_result r1 = tinybuf_try_read_box(&br1, o1, any_version);
@@ -1083,7 +1083,7 @@ static void tensor_tests(){
     tinybuf_value *v2 = tinybuf_value_alloc();
     tinybuf_value_init_tensor(v2, 8, shape2, 2, data2, 4);
     buffer *b2 = buffer_alloc();
-    { tinybuf_result wr = tinybuf_try_write_box(b2, v2); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(b2, v2); assert(wr.res>0); tinybuf_result_unref(&wr); }
     buf_ref br2{buffer_get_data(b2), (int64_t)buffer_get_length(b2), buffer_get_data(b2), (int64_t)buffer_get_length(b2)};
     tinybuf_value *o2 = tinybuf_value_alloc();
     tinybuf_result r2 = tinybuf_try_read_box(&br2, o2, any_version);
@@ -1112,7 +1112,7 @@ static void tensor_storage_tests(){
         tinybuf_value *v = tinybuf_value_alloc();
         tinybuf_value_init_tensor(v, 11, shape, 1, data, 4);
         buffer *b = buffer_alloc();
-        { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_unref(&wr); }
         const uint8_t *ptr = (const uint8_t*)buffer_get_data(b);
         int len = buffer_get_length(b);
         assert(len > 0 && ptr[0] == 43);
@@ -1131,7 +1131,7 @@ static void tensor_storage_tests(){
         for(int i=0;i<N;++i) data[i] = (uint8_t)((i*37) % 2);
         int64_t shape[1] = {N}; tinybuf_value *v = tinybuf_value_alloc();
         tinybuf_value_init_tensor(v, 11, shape, 1, data.data(), N);
-        buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+        buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_unref(&wr); }
         const uint8_t *ptr = (const uint8_t*)buffer_get_data(b); int len = buffer_get_length(b);
         assert(ptr[0]==43); int pos=1; uint64_t cnt=0, dt=0; int a = varint_deserialize_local(ptr+pos, len-pos, &cnt); assert(a>0 && cnt==N); pos+=a; int bsz = varint_deserialize_local(ptr+pos, len-pos, &dt); assert(bsz>0 && dt==11); pos+=bsz;
         int need = (int)((cnt + 7) / 8); assert(len - pos >= need);
@@ -1144,7 +1144,7 @@ static void tensor_storage_tests(){
         int64_t shape[2] = {2,2};
         double data[4] = {1.25, -2.5, 0.0, 3.0};
         tinybuf_value *v = tinybuf_value_alloc(); tinybuf_value_init_tensor(v, 8, shape, 2, data, 4);
-        buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+        buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_unref(&wr); }
         const uint8_t *ptr = (const uint8_t*)buffer_get_data(b); int len = buffer_get_length(b);
         assert(len >= 37 && ptr[0] == 44); int pos=1; uint64_t dims=0; int a = varint_deserialize_local(ptr+pos, len-pos, &dims); assert(a>0 && dims==2); pos+=a; uint64_t s0=0,s1=0; int c0 = varint_deserialize_local(ptr+pos, len-pos, &s0); assert(c0>0 && s0==2); pos+=c0; int c1 = varint_deserialize_local(ptr+pos, len-pos, &s1); assert(c1>0 && s1==2); pos+=c1; uint64_t dt=0; int bsz = varint_deserialize_local(ptr+pos, len-pos, &dt); assert(bsz>0 && dt==8); pos+=bsz; assert(len-pos >= 32);
         double r0 = read_double_be_local(ptr+pos+0); double r1 = read_double_be_local(ptr+pos+8); double r2 = read_double_be_local(ptr+pos+16); double r3 = read_double_be_local(ptr+pos+24);
@@ -1161,7 +1161,7 @@ static void bool_map_tests(){
         auto setbit=[&](int i,int v){ int b=i/8, bit=7-(i%8); if(v) bits[b] |= (uint8_t)(1<<bit); else bits[b] &= (uint8_t)~(1<<bit); };
         for(int i=0;i<N;++i) setbit(i, (i%3)==0);
         tinybuf_value *v = tinybuf_value_alloc(); tinybuf_value_init_bool_map(v, bits.data(), N);
-        buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+        buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, v); assert(wr.res>0); tinybuf_result_unref(&wr); }
         const uint8_t *ptr = (const uint8_t*)buffer_get_data(b); int len = buffer_get_length(b);
         assert(ptr[0] == 46); int pos=1; uint64_t cnt=0; int a = varint_deserialize_local(ptr+pos, len-pos, &cnt); assert(a>0 && (int)cnt==N); pos+=a; int need = (int)((cnt+7)/8); assert(len-pos >= need);
         tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b)}; tinybuf_result r = tinybuf_try_read_box(&br, out, any_version); assert(r.res>0); assert(tinybuf_value_get_type(out)==tinybuf_bool_map); assert(tinybuf_bool_map_get_count(out)==N);
@@ -1179,7 +1179,7 @@ static void hetero_tuple_tests(){
     tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "abc", 3);
     tinybuf_value *b = tinybuf_value_alloc(); tinybuf_value_init_bool(b, 1);
     tinybuf_value_array_append(arr, i); tinybuf_value_array_append(arr, s); tinybuf_value_array_append(arr, b);
-    buffer *buf = buffer_alloc(); tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "hetero_tuple", arr); assert(w.res>0); tinybuf_result_dispose(&w);
+    buffer *buf = buffer_alloc(); tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "hetero_tuple", arr); assert(w.res>0); tinybuf_result_unref(&w);
     tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)}; tinybuf_result r = tinybuf_try_read_box(&br, out, any_version); assert(r.res>0);
     assert(tinybuf_value_get_type(out)==tinybuf_array);
     assert(tinybuf_value_get_child_size(out)==3);
@@ -1196,7 +1196,7 @@ static void hetero_list_tests(){
     tinybuf_register_builtin_plugins();
     tinybuf_value *arr = tinybuf_value_alloc();
     for(int k=0;k<5;++k){ tinybuf_value *i = tinybuf_value_alloc(); tinybuf_value_init_int(i, k); tinybuf_value_array_append(arr, i);} tinybuf_value *s = tinybuf_value_alloc(); tinybuf_value_init_string(s, "z", 1); tinybuf_value_array_append(arr, s);
-    buffer *buf = buffer_alloc(); tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "hetero_list", arr); assert(w.res>0); tinybuf_result_dispose(&w);
+    buffer *buf = buffer_alloc(); tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "hetero_list", arr); assert(w.res>0); tinybuf_result_unref(&w);
     tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)}; tinybuf_result r = tinybuf_try_read_box(&br, out, any_version); assert(r.res>0);
     assert(tinybuf_value_get_type(out)==tinybuf_array);
     assert(tinybuf_value_get_child_size(out)==6);
@@ -1214,7 +1214,7 @@ static void dataframe_extend_tests(){
     tinybuf_value *cols = tinybuf_value_alloc(); tinybuf_value *c0 = tinybuf_value_alloc(); tinybuf_value_init_string(c0, "c0", 2); tinybuf_value *c1 = tinybuf_value_alloc(); tinybuf_value_init_string(c1, "c1", 2); tinybuf_value_array_append(cols, c0); tinybuf_value_array_append(cols, c1);
     const tinybuf_value *idxs[2] = { rows, cols };
     tinybuf_value *df = tinybuf_value_alloc(); tinybuf_value_init_indexed_tensor(df, ten, idxs, 2);
-    buffer *buf = buffer_alloc(); tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "dataframe", df); assert(w.res>0); tinybuf_result_dispose(&w);
+    buffer *buf = buffer_alloc(); tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "dataframe", df); assert(w.res>0); tinybuf_result_unref(&w);
     tinybuf_value *out = tinybuf_value_alloc(); buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)}; tinybuf_result r = tinybuf_try_read_box(&br, out, any_version); assert(r.res>0);
     assert(tinybuf_value_get_type(out)==tinybuf_indexed_tensor);
     assert(tinybuf_tensor_get_ndim(out)==2 && tinybuf_tensor_get_count(out)==4);
@@ -1240,7 +1240,7 @@ static void indexed_tensor_tests(){
     tinybuf_value *cols = tinybuf_value_alloc(); tinybuf_value *c0 = tinybuf_value_alloc(); tinybuf_value_init_string(c0, "c0", 2); tinybuf_value *c1 = tinybuf_value_alloc(); tinybuf_value_init_string(c1, "c1", 2); tinybuf_value_array_append(cols, c0); tinybuf_value_array_append(cols, c1);
     const tinybuf_value *idxs[2] = { rows, cols };
     tinybuf_value *boxed = tinybuf_value_alloc(); tinybuf_value_init_indexed_tensor(boxed, ten, idxs, 2);
-    buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, boxed); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    buffer *b = buffer_alloc(); { tinybuf_result wr = tinybuf_try_write_box(b, boxed); assert(wr.res>0); tinybuf_result_unref(&wr); }
     // header check
     const uint8_t *ptr = (const uint8_t*)buffer_get_data(b); int len = buffer_get_length(b); assert(len>0 && ptr[0]==47);
     // decode
@@ -1343,7 +1343,7 @@ int main(int argc,char *argv[]){
     {
         buffer *buf = buffer_alloc();
         tinybuf_value *base = tinybuf_value_alloc(); tinybuf_value_init_int(base, 42);
-        { tinybuf_result wr = tinybuf_try_write_box(buf, base); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+        { tinybuf_result wr = tinybuf_try_write_box(buf, base); assert(wr.res>0); tinybuf_result_unref(&wr); }
         tinybuf_try_write_pointer(buf, tinybuf_offset_start, 0);
         buffer *text = buffer_alloc();
         tinybuf_dump_buffer_as_text(buffer_get_data(buf), buffer_get_length(buf), text);
@@ -1360,7 +1360,7 @@ int main(int argc,char *argv[]){
     buffer *buf_json = buffer_alloc();
 
     //trywrite 序列化
-    { tinybuf_result wr = tinybuf_try_write_box(buf_binary, value); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+    { tinybuf_result wr = tinybuf_try_write_box(buf_binary, value); assert(wr.res>0); tinybuf_result_unref(&wr); }
     //json序列化用于对比
     tinybuf_value_serialize_as_json(value,buf_json,JSON_COMPACT);
 
@@ -1371,7 +1371,7 @@ int main(int argc,char *argv[]){
         buffer *buf = buffer_alloc();
         for(int i = 0 ; i < MAX_COUNT; ++i ){
             buffer_set_length(buf,0);
-            { tinybuf_result wr = tinybuf_try_write_box(buf,value); assert(wr.res>0); tinybuf_result_dispose(&wr); }
+            { tinybuf_result wr = tinybuf_try_write_box(buf,value); assert(wr.res>0); tinybuf_result_unref(&wr); }
         }
         buffer_free(buf);
     }

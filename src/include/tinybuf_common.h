@@ -28,12 +28,14 @@ typedef struct {
 } tinybuf_result;
 tinybuf_result tinybuf_result_ok(int res);
 tinybuf_result tinybuf_result_err(int res, const char *msg, tinybuf_deleter_fn deleter);
+tinybuf_result tinybuf_result_create(int res, const char *msg, tinybuf_deleter_fn deleter);
+tinybuf_result tinybuf_result_create_ok(int res);
+tinybuf_result tinybuf_result_create_err(int res, const char *msg, tinybuf_deleter_fn deleter);
 int tinybuf_result_add_msg(tinybuf_result *r, const char *msg, tinybuf_deleter_fn deleter);
 int tinybuf_result_add_msg_const(tinybuf_result *r, const char *msg);
 int tinybuf_result_msg_count(const tinybuf_result *r);
 const char *tinybuf_result_msg_at(const tinybuf_result *r, int idx);
 int tinybuf_result_format_msgs(const tinybuf_result *r, char *dst, int dst_len);
-void tinybuf_result_dispose(tinybuf_result *r);
 const char *tinybuf_last_error_message(void);
 
 int tinybuf_result_ref(tinybuf_result *r);

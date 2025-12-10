@@ -34,8 +34,8 @@ TEST_CASE("custom string", "[system]"){
     buffer *sv = tinybuf_value_get_string(out);
     REQUIRE(sv != NULL);
     REQUIRE(buffer_get_length(sv) == 5);
-    tinybuf_result_dispose(&r);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&r);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     tinybuf_value_free(s);
     buffer_free(buf);
@@ -68,8 +68,8 @@ TEST_CASE("oop fallback", "[system]"){
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_int);
     REQUIRE(tinybuf_value_get_int(out) == 42);
-    tinybuf_result_dispose(&r);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&r);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     tinybuf_value_free(m);
     buffer_free(buf);
@@ -110,8 +110,8 @@ TEST_CASE("custom vs oop priority", "[system]"){
     buffer *sv = tinybuf_value_get_string(out);
     REQUIRE(sv != NULL);
     REQUIRE(buffer_get_length(sv) == 8);
-    tinybuf_result_dispose(&r);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&r);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     tinybuf_value_free(s);
     buffer_free(buf);
@@ -163,8 +163,8 @@ TEST_CASE("hetero tuple", "[system]"){
     REQUIRE(buffer_get_length(sv) == 3);
     REQUIRE(tinybuf_value_get_type(c2) == tinybuf_bool);
     REQUIRE(tinybuf_value_get_bool(c2) == 1);
-    tinybuf_result_dispose(&r);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&r);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     buffer_free(buf);
     tinybuf_value_free(arr);
@@ -203,8 +203,8 @@ TEST_CASE("hetero list", "[system]"){
     REQUIRE(tinybuf_value_get_child_size(out) == 6);
     const tinybuf_value *last = tinybuf_value_get_array_child(out, 5);
     REQUIRE(tinybuf_value_get_type(last) == tinybuf_string);
-    tinybuf_result_dispose(&r);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&r);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     buffer_free(buf);
     tinybuf_value_free(arr);
@@ -254,8 +254,8 @@ TEST_CASE("dataframe", "[system]"){
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_indexed_tensor);
     REQUIRE(tinybuf_tensor_get_ndim(out) == 2);
     REQUIRE(tinybuf_tensor_get_count(out) == 4);
-    tinybuf_result_dispose(&r);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&r);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     buffer_free(buf);
     tinybuf_value_free(df);

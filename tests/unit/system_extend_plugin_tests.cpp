@@ -37,8 +37,8 @@ TEST_CASE("system.extend plugin loads and handles hetero_tuple", "[plugin]")
     REQUIRE(tinybuf_value_get_type(c1) == tinybuf_string);
     buffer *sv = tinybuf_value_get_string((tinybuf_value *)c1);
     REQUIRE(buffer_get_length(sv) == 1);
-    tinybuf_result_dispose(&rr);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&rr);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     buffer_free(buf);
     tinybuf_value_free(arr);
@@ -87,8 +87,8 @@ TEST_CASE("system.extend plugin handles dataframe", "[plugin]")
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_indexed_tensor);
     REQUIRE(tinybuf_tensor_get_ndim(out) == 2);
     REQUIRE(tinybuf_tensor_get_count(out) == 4);
-    tinybuf_result_dispose(&rr);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&rr);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     buffer_free(payload);
     tinybuf_value_free(df);
@@ -143,8 +143,8 @@ TEST_CASE("indexed_tensor roundtrip", "[tensor]")
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_indexed_tensor);
     REQUIRE(tinybuf_tensor_get_ndim(out) == 2);
     REQUIRE(tinybuf_tensor_get_count(out) == 9);
-    tinybuf_result_dispose(&rr);
-    tinybuf_result_dispose(&w);
+    tinybuf_result_unref(&rr);
+    tinybuf_result_unref(&w);
     tinybuf_value_free(out);
     buffer_free(payload);
     tinybuf_value_free(df);
@@ -169,8 +169,8 @@ TEST_CASE("custom result wrappers", "[result]")
     CAPTURE(rf.res, msgs3);
     REQUIRE(rf.res < 0);
     REQUIRE(tinybuf_result_msg_count(&rf) > 0);
-    tinybuf_result_dispose(&rr);
-    tinybuf_result_dispose(&rf);
+    tinybuf_result_unref(&rr);
+    tinybuf_result_unref(&rf);
     tinybuf_value_free(out);
     tinybuf_set_use_strpool(0);
 }

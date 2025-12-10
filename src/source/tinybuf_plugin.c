@@ -124,6 +124,22 @@ tinybuf_result tinybuf_result_err(int res, const char *msg, tinybuf_deleter_fn d
     return r;
 }
 
+tinybuf_result tinybuf_result_create(int res, const char *msg, tinybuf_deleter_fn deleter)
+{
+    if(res > 0) return tinybuf_result_ok(res);
+    return tinybuf_result_err(res, msg, deleter);
+}
+
+tinybuf_result tinybuf_result_create_ok(int res)
+{
+    return tinybuf_result_ok(res);
+}
+
+tinybuf_result tinybuf_result_create_err(int res, const char *msg, tinybuf_deleter_fn deleter)
+{
+    return tinybuf_result_err(res, msg, deleter);
+}
+
 int tinybuf_result_add_msg(tinybuf_result *r, const char *msg, tinybuf_deleter_fn deleter)
 {
     if(!r || !msg) return -1;
@@ -183,11 +199,6 @@ int tinybuf_result_unref(tinybuf_result *r)
         tinybuf_free(r->refcnt); r->refcnt = NULL;
     }
     return v;
-}
-
-void tinybuf_result_dispose(tinybuf_result *r)
-{
-    (void)tinybuf_result_unref(r);
 }
 
 static tinybuf_result *s_current_result = NULL;

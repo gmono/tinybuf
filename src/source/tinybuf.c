@@ -361,7 +361,6 @@ typedef struct
 static precache_entry *s_precache = NULL;
 static int s_precache_count = 0;
 static int s_precache_capacity = 0;
-#if 0
 
 /* strpool declarations are at the top of file */
 
@@ -3087,7 +3086,6 @@ static tinybuf_result tinybuf_try_read_box_old(buf_ref *buf, tinybuf_value *out,
     tinybuf_result_set_current(NULL);
     return rr;
 }
-static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
 static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
 {
     AVLTree *tree2 = (AVLTree *)user_data;

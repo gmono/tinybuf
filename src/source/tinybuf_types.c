@@ -4,44 +4,50 @@
 #include "tinybuf_private.h"
 
 // 张量接口
-int tinybuf_tensor_get_dtype(const tinybuf_value *value)
+int tinybuf_tensor_get_dtype(const tinybuf_value *value, tinybuf_result *r)
 {
-    if(!value || value->_type != tinybuf_tensor) return -1;
+    assert(r);
+    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: not tensor"); return -1; }
     tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->dtype : -1;
 }
 
-int tinybuf_tensor_get_ndim(const tinybuf_value *value)
+int tinybuf_tensor_get_ndim(const tinybuf_value *value, tinybuf_result *r)
 {
-    if(!value || value->_type != tinybuf_tensor) return -1;
+    assert(r);
+    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: not tensor"); return -1; }
     tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->dims : -1;
 }
 
-const int64_t* tinybuf_tensor_get_shape(const tinybuf_value *value)
+const int64_t* tinybuf_tensor_get_shape(const tinybuf_value *value, tinybuf_result *r)
 {
-    if(!value || value->_type != tinybuf_tensor) return NULL;
+    assert(r);
+    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: not tensor"); return NULL; }
     tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->shape : NULL;
 }
 
-int64_t tinybuf_tensor_get_count(const tinybuf_value *value)
+int64_t tinybuf_tensor_get_count(const tinybuf_value *value, tinybuf_result *r)
 {
-    if(!value || value->_type != tinybuf_tensor) return -1;
+    assert(r);
+    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: not tensor"); return -1; }
     tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->count : -1;
 }
 
-void* tinybuf_tensor_get_data(tinybuf_value *value)
+void* tinybuf_tensor_get_data(tinybuf_value *value, tinybuf_result *r)
 {
-    if(!value || value->_type != tinybuf_tensor) return NULL;
+    assert(r);
+    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_data: not tensor"); return NULL; }
     tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->data : NULL;
 }
 
-const void* tinybuf_tensor_get_data_const(const tinybuf_value *value)
+const void* tinybuf_tensor_get_data_const(const tinybuf_value *value, tinybuf_result *r)
 {
-    if(!value || value->_type != tinybuf_tensor) return NULL;
+    assert(r);
+    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_data_const: not tensor"); return NULL; }
     tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->data : NULL;
 }
@@ -72,16 +78,18 @@ int tinybuf_value_init_tensor(tinybuf_value *value, int dtype, const int64_t *sh
 }
 
 // 布尔位图接口
-int64_t tinybuf_bool_map_get_count(const tinybuf_value *value)
+int64_t tinybuf_bool_map_get_count(const tinybuf_value *value, tinybuf_result *r)
 {
-    if(!value || value->_type != tinybuf_bool_map) return -1;
+    assert(r);
+    if(!value || value->_type != tinybuf_bool_map){ tinybuf_result_add_msg_const(r, "tinybuf_bool_map_get_count: not bool_map"); return -1; }
     tinybuf_bool_map_t *bm = (tinybuf_bool_map_t*)value->_data._custom;
     return bm ? bm->count : -1;
 }
 
-const uint8_t* tinybuf_bool_map_get_bits_const(const tinybuf_value *value)
+const uint8_t* tinybuf_bool_map_get_bits_const(const tinybuf_value *value, tinybuf_result *r)
 {
-    if(!value || value->_type != tinybuf_bool_map) return NULL;
+    assert(r);
+    if(!value || value->_type != tinybuf_bool_map){ tinybuf_result_add_msg_const(r, "tinybuf_bool_map_get_bits_const: not bool_map"); return NULL; }
     tinybuf_bool_map_t *bm = (tinybuf_bool_map_t*)value->_data._custom;
     return bm ? bm->bits : NULL;
 }

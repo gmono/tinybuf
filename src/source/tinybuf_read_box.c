@@ -349,13 +349,18 @@ inline tinybuf_result try_read_pointer(buf_ref *buf, pointer_value *pointer)
 
 tinybuf_result tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode)
 {
-    return tinybuf_try_read_box(buf, out, contain_handler);
+    (void)mode;
+    tinybuf_result r = try_read_box(buf, out, contain_handler);
+    if (r.res <= 0){ tinybuf_result_add_msg_const(&r, "tinybuf_try_read_box_with_mode_r"); }
+    return r;
 }
 
 tinybuf_result tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     s_strpool_base_read = buf->base;
-    return try_read_box(buf, out, contain_handler);
+    tinybuf_result r = try_read_box(buf, out, contain_handler);
+    if (r.res <= 0){ tinybuf_result_add_msg_const(&r, "tinybuf_try_read_box_r"); }
+    return r;
 }
 
 tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
@@ -363,9 +368,6 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
     INIT_STATE
     tinybuf_result rr = tinybuf_result_err(-1, "try_read_box failed", NULL);
     tinybuf_result_add_msg_const(&rr, "try_read_box");
-    tinybuf_result *cur = tinybuf_result_get_current();
-    int owns_current = (cur == NULL);
-    if (owns_current) tinybuf_result_set_current(&rr);
     if (!s_strpool_base_read) s_strpool_base_read = buf->base;
     if (buf->size >= 1 && (uint8_t)buf->ptr[0] == serialize_str_pool_table)
     {
@@ -381,19 +383,17 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
     }
     int64_t box_offset = buf_current_offset(buf);
     pool_register(box_offset, out);
-    len = tinybuf_value_deserialize(buf->ptr, (int)buf->size, out);
+    tinybuf_result *curptr = tinybuf_result_get_current();
+    if (!curptr) { tinybuf_result_set_current(&rr); curptr = &rr; }
+    len = tinybuf_value_deserialize(buf->ptr, (int)buf->size, out, &rr);
     if (len == 0)
     {
-        if (owns_current) tinybuf_result_set_current(NULL);
-        (void)tinybuf_result_unref(&rr);
         return tinybuf_result_ok(0);
     }
     if (len > 0)
     {
         buf_offset(buf, len);
         pool_mark_complete(box_offset);
-        if (owns_current) tinybuf_result_set_current(NULL);
-        (void)tinybuf_result_unref(&rr);
         return tinybuf_result_ok(len);
     }
     len = 0;
@@ -553,7 +553,7 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
         case serialize_indexed_tensor:
         {
             tinybuf_value *ten = tinybuf_value_alloc();
-            int r1 = tinybuf_value_deserialize(buf->ptr, (int)buf->size, ten);
+            int r1 = tinybuf_value_deserialize(buf->ptr, (int)buf->size, ten, &rr);
             if (r1 <= 0)
             {
                 buf_ref br_fallback = *buf;
@@ -606,7 +606,7 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                 if (has)
                 {
                     tinybuf_value *idx = tinybuf_value_alloc();
-                    int r2 = tinybuf_value_deserialize(buf->ptr, (int)buf->size, idx);
+                    int r2 = tinybuf_value_deserialize(buf->ptr, (int)buf->size, idx, &rr);
                     if (r2 <= 0)
                     {
                         buf_ref br2 = *buf;

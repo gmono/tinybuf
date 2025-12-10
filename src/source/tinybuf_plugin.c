@@ -202,10 +202,6 @@ int tinybuf_result_unref(tinybuf_result *r)
     return v;
 }
 
-static tinybuf_result *s_current_result = NULL;
-void tinybuf_result_set_current(tinybuf_result *r){ s_current_result = r; }
-tinybuf_result *tinybuf_result_get_current(void){ return s_current_result; }
-
 static inline char* _dup_str(const char *s){ if(!s) return NULL; int n=(int)strlen(s); char *p=(char*)tinybuf_malloc(n+1); memcpy(p,s,(size_t)n); p[n]='\0'; return p; }
 int tinybuf_result_append_merge(tinybuf_result *dst, tinybuf_result *src, int (*mergeres)(int,int))
 {
@@ -312,7 +308,15 @@ static int plugin_list_index_by_runtime_index(int runtime_index){ if(runtime_ind
 int tinybuf_plugin_do_value_op(int plugin_runtime_index, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ int li = plugin_list_index_by_runtime_index(plugin_runtime_index); if(li<0) return -1; plugin_entry *pe = &s_plugins[li]; if(!name || pe->op_count<=0) return -1; for(int i=0;i<pe->op_count;++i){ if(pe->op_names[i] && strcmp(pe->op_names[i], name)==0){ return pe->op_fns[i](value, args, out); } } return -1; }
 int tinybuf_plugin_do_value_op_by_type(uint8_t type, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ int li = plugin_list_index_by_type(type); if(li<0) return -1; plugin_entry *pe = &s_plugins[li]; if(!name || pe->op_count<=0) return -1; for(int i=0;i<pe->op_count;++i){ if(pe->op_names[i] && strcmp(pe->op_names[i], name)==0){ return pe->op_fns[i](value, args, out); } } return -1; }
 
-tinybuf_result tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ if(buf->size <= 0) return tinybuf_result_err(0, "buffer too small", NULL); uint8_t t = (uint8_t)buf->ptr[0]; tinybuf_result pr = tinybuf_plugins_try_read_by_type(t, buf, out, contain_handler); if(pr.res != -1) return pr; return tinybuf_try_read_box(buf, out, contain_handler); }
+tinybuf_result tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler){
+    if(buf->size <= 0) return tinybuf_result_err(0, "buffer too small", NULL);
+    uint8_t t = (uint8_t)buf->ptr[0];
+    tinybuf_result pr = tinybuf_plugins_try_read_by_type(t, buf, out, contain_handler);
+    if(pr.res != -1) return pr;
+    tinybuf_result r = tinybuf_try_read_box(buf, out, contain_handler);
+    if(r.res <= 0){ tinybuf_result_add_msg_const(&r, "tinybuf_try_read_box_with_plugins_r"); }
+    return r;
+}
 
 // builtin sample plugin: type 200 -> upper-string
 #define TINYBUF_PLUGIN_UPPER_STRING 200
@@ -339,7 +343,9 @@ static tinybuf_result plugin_upper_read(uint8_t type, buf_ref *buf, tinybuf_valu
 
 static tinybuf_result plugin_upper_write(uint8_t type, const tinybuf_value *in, buffer *out){
     if(type != TINYBUF_PLUGIN_UPPER_STRING) return tinybuf_result_err(-1, "type mismatch", NULL);
-    buffer *s = tinybuf_value_get_string(in);
+    tinybuf_result gr = tinybuf_result_ok(0);
+    buffer *s = tinybuf_value_get_string(in, &gr);
+    if(!s){ tinybuf_result er = tinybuf_result_err(-1, "upper write: not string", NULL); tinybuf_result_append_merge(&er, &gr, tinybuf_merger_left); return er; }
     int len = buffer_get_length(s);
     if(len > 255) len = 255;
     uint8_t t = TINYBUF_PLUGIN_UPPER_STRING;
@@ -366,8 +372,9 @@ static tinybuf_result plugin_upper_dump(uint8_t type, buf_ref *buf, buffer *out)
 
 static tinybuf_result plugin_upper_show_value(uint8_t type, const tinybuf_value *in, buffer *out){
     if(type != TINYBUF_PLUGIN_UPPER_STRING) return tinybuf_result_err(-1, "type mismatch", NULL);
-    buffer *s = tinybuf_value_get_string(in);
-    if(!s) return tinybuf_result_err(-1, "null string", NULL);
+    tinybuf_result gr = tinybuf_result_ok(0);
+    buffer *s = tinybuf_value_get_string(in, &gr);
+    if(!s){ tinybuf_result er = tinybuf_result_err(-1, "null string", NULL); tinybuf_result_append_merge(&er, &gr, tinybuf_merger_left); return er; }
     buffer_append(out, "upper(", 6);
     buffer_append(out, buffer_get_data(s), buffer_get_length(s));
     buffer_append(out, ")", 1);
@@ -443,7 +450,9 @@ const char* tinybuf_plugin_get_guid(int index)
 static int plugin_upper_to_lower(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out)
 {
     (void)args;
-    buffer *s = tinybuf_value_get_string(value);
+    tinybuf_result gr = tinybuf_result_ok(0);
+    buffer *s = tinybuf_value_get_string(value, &gr);
+    if(!s) return -1;
     int len = buffer_get_length(s);
     char *tmp = (char*)tinybuf_malloc(len);
     const char *p = buffer_get_data(s);
@@ -575,7 +584,7 @@ static tinybuf_result custom_string_dump(const char *name, buf_ref *buf, buffer 
 /* removed tinybuf_custom_register_int */
 
 static tinybuf_result custom_string_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; (void)contain_handler; tinybuf_value_init_string(out, (const char*)data, len); return tinybuf_result_ok(len); }
-static tinybuf_result custom_string_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; buffer *s = tinybuf_value_get_string(in); if(!s) return tinybuf_result_err(-1, "string write: not string", NULL); int len = buffer_get_length(s); if(len>0){ buffer_append(out, buffer_get_data(s), len); } return tinybuf_result_ok(len); }
+static tinybuf_result custom_string_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; tinybuf_result gr = tinybuf_result_ok(0); buffer *s = tinybuf_value_get_string(in, &gr); if(!s){ tinybuf_result er = tinybuf_result_err(-1, "string write: not string", NULL); tinybuf_result_append_merge(&er, &gr, tinybuf_merger_left); return er; } int len = buffer_get_length(s); if(len>0){ buffer_append(out, buffer_get_data(s), len); } return tinybuf_result_ok(len); }
 static tinybuf_result custom_string_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int64_t len = buf->size; buffer_append(out, "\"", 1); if(len>0){ buffer_append(out, buf->ptr, (int)len); } buffer_append(out, "\"", 1); return tinybuf_result_ok((int)len); }
 
 static void register_builtin_customs(void){ tinybuf_custom_register("string", custom_string_read, custom_string_write, custom_string_dump); }
@@ -585,7 +594,7 @@ static tinybuf_result tuple_write(const char *name, const tinybuf_value *in, buf
 static tinybuf_result tuple_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int r = tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); return r>0 ? tinybuf_result_ok(r) : tinybuf_result_err(r, "tuple dump failed", NULL); }
 
 static tinybuf_result hlist_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; const char *ptr = (const char*)data; int size = len; tinybuf_value_clear(out); for(;;){ if(size<=0) break; buf_ref br = (buf_ref){ (const char*)ptr, (int64_t)size, (const char*)ptr, (int64_t)size }; tinybuf_value *item = tinybuf_value_alloc(); tinybuf_result rr = tinybuf_try_read_box(&br, item, contain_handler); if(rr.res<=0){ tinybuf_value_free(item); return rr; } if(tinybuf_value_get_type(out) != tinybuf_array){ tinybuf_value_clear(out); } tinybuf_value_array_append(out, item); ptr += rr.res; size -= rr.res; } return tinybuf_result_ok(len); }
-static tinybuf_result hlist_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_array) return tinybuf_result_err(-1, "hlist write: not array", NULL); int before = buffer_get_length(out); int n = tinybuf_value_get_child_size(in); for(int i=0;i<n;++i){ const tinybuf_value *ch = tinybuf_value_get_array_child(in, i); if(!ch) return tinybuf_result_err(-1, "hlist write: null child", NULL); tinybuf_result wr = tinybuf_try_write_box(out, ch); if(wr.res<=0) return wr; } int after = buffer_get_length(out); return tinybuf_result_ok(after - before); }
+static tinybuf_result hlist_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_array) return tinybuf_result_err(-1, "hlist write: not array", NULL); int before = buffer_get_length(out); tinybuf_result cr = tinybuf_result_ok(0); int n = tinybuf_value_get_child_size(in, &cr); if(tinybuf_result_msg_count(&cr)>0){ tinybuf_result er = tinybuf_result_err(-1, "hlist write: bad container", NULL); tinybuf_result_append_merge(&er, &cr, tinybuf_merger_left); return er; } for(int i=0;i<n;++i){ tinybuf_result rr = tinybuf_result_ok(0); const tinybuf_value *ch = tinybuf_value_get_array_child(in, i, &rr); if(!ch){ tinybuf_result er = tinybuf_result_err(-1, "hlist write: null child", NULL); tinybuf_result_append_merge(&er, &rr, tinybuf_merger_left); return er; } tinybuf_result wr = tinybuf_try_write_box(out, ch); if(wr.res<=0) return wr; } int after = buffer_get_length(out); return tinybuf_result_ok(after - before); }
 static tinybuf_result hlist_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int r = tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); return r>0 ? tinybuf_result_ok(r) : tinybuf_result_err(r, "hlist dump failed", NULL); }
 
 static tinybuf_result dataframe_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }

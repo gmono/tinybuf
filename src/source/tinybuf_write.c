@@ -267,55 +267,180 @@ tinybuf_result tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
 
 tinybuf_result tinybuf_try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box)
 {
-    return try_write_version_box(out, version, box);
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_version_box failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_version_box_r");
+    tinybuf_result_set_current(&rr);
+    tinybuf_result r = try_write_version_box(out, version, box);
+    if (r.res > 0)
+    {
+        tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return r;
+    }
+    tinybuf_result_add_msg_const(&r, "tinybuf_try_write_version_box_r");
+    tinybuf_result_set_current(NULL);
+    return r;
 }
 
 tinybuf_result tinybuf_try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count)
 {
-    return try_write_version_list(out, versions, boxes, count);
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_version_list failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_version_list_r");
+    tinybuf_result_set_current(&rr);
+    tinybuf_result r = try_write_version_list(out, versions, boxes, count);
+    if (r.res > 0)
+    {
+        tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return r;
+    }
+    tinybuf_result_add_msg_const(&r, "tinybuf_try_write_version_list_r");
+    tinybuf_result_set_current(NULL);
+    return r;
 }
 
 tinybuf_result tinybuf_try_write_plugin_map_table(buffer *out)
 {
-    return try_write_plugin_map_table(out);
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_plugin_map_table failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_plugin_map_table_r");
+    tinybuf_result_set_current(&rr);
+    tinybuf_result r = try_write_plugin_map_table(out);
+    if (r.res > 0)
+    {
+        tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return r;
+    }
+    tinybuf_result_add_msg_const(&r, "tinybuf_try_write_plugin_map_table_r");
+    tinybuf_result_set_current(NULL);
+    return r;
 }
 
 tinybuf_result tinybuf_try_write_part(buffer *out, const tinybuf_value *value)
 {
-    return try_write_part(out, value);
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_part failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_part_r");
+    tinybuf_result_set_current(&rr);
+    tinybuf_result r = try_write_part(out, value);
+    if (r.res > 0)
+    {
+        tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return r;
+    }
+    tinybuf_result_add_msg_const(&r, "tinybuf_try_write_part_r");
+    tinybuf_result_set_current(NULL);
+    return r;
 }
 
 tinybuf_result tinybuf_try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count)
 {
-    return try_write_partitions(out, mainbox, subs, count);
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_partitions failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_partitions_r");
+    tinybuf_result_set_current(&rr);
+    tinybuf_result r = try_write_partitions(out, mainbox, subs, count);
+    if (r.res > 0)
+    {
+        tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return r;
+    }
+    tinybuf_result_add_msg_const(&r, "tinybuf_try_write_partitions_r");
+    tinybuf_result_set_current(NULL);
+    return r;
 }
 
 tinybuf_result tinybuf_try_write_pointer(buffer *out, int t, int64_t offset)
 {
     enum offset_type et = start; if (t == 1) et = end; else if (t == 2) et = current;
-    return try_write_pointer_value(out, et, offset);
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_pointer failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_pointer_r");
+    tinybuf_result_set_current(&rr);
+    tinybuf_result r = try_write_pointer_value(out, et, offset);
+    if (r.res > 0)
+    {
+        tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return r;
+    }
+    tinybuf_result_add_msg_const(&r, "tinybuf_try_write_pointer_r");
+    tinybuf_result_set_current(NULL);
+    return r;
 }
 
 tinybuf_result tinybuf_try_write_sub_ref(buffer *out, int t, int64_t offset)
 {
-    tinybuf_result acc = tinybuf_result_ok(0); tinybuf_result r0 = try_write_type(out, serialize_sub_ref); if (r0.res <= 0) return r0; tinybuf_result_append_merge(&acc, &r0, tinybuf_merger_sum);
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_sub_ref failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_sub_ref_r");
+    tinybuf_result_set_current(&rr);
+    tinybuf_result acc = tinybuf_result_ok(0);
+    tinybuf_result r0 = try_write_type(out, serialize_sub_ref);
+    if (r0.res <= 0)
+    {
+        tinybuf_result_add_msg_const(&r0, "tinybuf_try_write_sub_ref_r");
+        tinybuf_result_set_current(NULL);
+        return r0;
+    }
+    tinybuf_result_append_merge(&acc, &r0, tinybuf_merger_sum);
     enum offset_type et = (t == 1 ? end : (t == 2 ? current : start));
-    tinybuf_result r = try_write_pointer_value(out, et, offset); if (r.res <= 0) return r;
-    tinybuf_result_append_merge(&acc, &r, tinybuf_merger_sum); return acc;
+    tinybuf_result r = try_write_pointer_value(out, et, offset);
+    if (r.res <= 0)
+    {
+        tinybuf_result_add_msg_const(&r, "tinybuf_try_write_sub_ref_r");
+        tinybuf_result_set_current(NULL);
+        return r;
+    }
+    tinybuf_result_append_merge(&acc, &r, tinybuf_merger_sum);
+    tinybuf_result_set_current(NULL);
+    (void)tinybuf_result_unref(&rr);
+    return acc;
 }
 
 tinybuf_result tinybuf_try_write_array_header(buffer *out, int count)
 {
-    tinybuf_result acc = tinybuf_result_ok(0); tinybuf_result r1 = try_write_type(out, serialize_array); if (r1.res <= 0) return r1; tinybuf_result_append_merge(&acc, &r1, tinybuf_merger_sum); tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)count); if (r2.res <= 0) return r2; tinybuf_result_append_merge(&acc, &r2, tinybuf_merger_sum); return acc;
+    tinybuf_result acc = tinybuf_result_ok(0);
+    tinybuf_result r1 = try_write_type(out, serialize_array);
+    if (r1.res <= 0)
+    {
+        tinybuf_result_add_msg_const(&r1, "tinybuf_try_write_array_header_r");
+        return r1;
+    }
+    tinybuf_result_append_merge(&acc, &r1, tinybuf_merger_sum);
+    tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)count);
+    if (r2.res <= 0)
+    {
+        tinybuf_result_add_msg_const(&r2, "tinybuf_try_write_array_header_r");
+        return r2;
+    }
+    tinybuf_result_append_merge(&acc, &r2, tinybuf_merger_sum);
+    return acc;
 }
 tinybuf_result tinybuf_try_write_map_header(buffer *out, int count)
 {
-    tinybuf_result acc = tinybuf_result_ok(0); tinybuf_result r1 = try_write_type(out, serialize_map); if (r1.res <= 0) return r1; tinybuf_result_append_merge(&acc, &r1, tinybuf_merger_sum); tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)count); if (r2.res <= 0) return r2; tinybuf_result_append_merge(&acc, &r2, tinybuf_merger_sum); return acc;
+    tinybuf_result acc = tinybuf_result_ok(0);
+    tinybuf_result r1 = try_write_type(out, serialize_map);
+    if (r1.res <= 0)
+    {
+        tinybuf_result_add_msg_const(&r1, "tinybuf_try_write_map_header_r");
+        return r1;
+    }
+    tinybuf_result_append_merge(&acc, &r1, tinybuf_merger_sum);
+    tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)count);
+    if (r2.res <= 0)
+    {
+        tinybuf_result_add_msg_const(&r2, "tinybuf_try_write_map_header_r");
+        return r2;
+    }
+    tinybuf_result_append_merge(&acc, &r2, tinybuf_merger_sum);
+    return acc;
 }
 tinybuf_result tinybuf_try_write_string_raw(buffer *out, const char *str, int len)
 {
     int ret = dump_string(len, str, out);
-    return tinybuf_result_ok(ret);
+    tinybuf_result r = ret > 0 ? tinybuf_result_ok(ret) : tinybuf_result_err(ret, "dump_string failed", NULL);
+    if (r.res > 0) { return r; }
+    tinybuf_result_add_msg_const(&r, "tinybuf_try_write_string_raw_r");
+    return r;
 }
 
 tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in)
@@ -334,6 +459,6 @@ tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, co
     buffer_append(out, buffer_get_data_inline(body), (int)body_len);
     int pool_len = buffer_get_length_inline(pool); if (pool_len){ buffer_append(out, buffer_get_data_inline(pool), pool_len); }
     buffer_free(payload); buffer_free(body); buffer_free(pool);
-    if (wr.res < 0){ tinybuf_result_add_msg_const(&wr, "write custom payload failed"); char *m = (char *)tinybuf_malloc(64); snprintf(m, 64, "name=%s", name ? name : "(null)"); tinybuf_result_add_msg(&wr, m, (tinybuf_deleter_fn)tinybuf_free); return wr; }
+    if (wr.res < 0){ tinybuf_result_add_msg_const(&wr, "write custom payload failed"); char *m = (char *)tinybuf_malloc(64); snprintf(m, 64, "name=%s", name ? name : "(null)"); tinybuf_result_add_msg(&wr, m, (tinybuf_deleter_fn)tinybuf_free); tinybuf_result_add_msg_const(&wr, "tinybuf_try_write_custom_id_box_r"); return wr; }
     int total = 1 + (int)offset_guess_len + (int)body_len + pool_len; tinybuf_result rt = tinybuf_result_ok(total); tinybuf_result_append_merge(&rt, &acc, tinybuf_merger_left); return rt;
 }

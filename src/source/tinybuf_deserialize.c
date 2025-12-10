@@ -328,13 +328,15 @@ int int_deserialize(const uint8_t *in, int in_size, uint64_t *out)
 
 int optional_add(int x, int addx){ if(x<0) return x; return x+addx; }
 
-int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
+int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tinybuf_result *r)
 {
+    assert(r);
     assert(out);
     assert(ptr);
     assert(out->_type == tinybuf_null);
     if (size < 1)
     {
+        tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: no more bytes left");
         return 0;
     }
 
@@ -573,6 +575,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         int len = int_deserialize((uint8_t *)ptr, size, &map_size);
         if (len <= 0)
         {
+            tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: map size decode failed");
             return len;
         }
         ptr += len;
@@ -601,11 +604,12 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
             size -= key_len;
             consumed += key_len;
             tinybuf_value *value = tinybuf_value_alloc();
-            int value_len = tinybuf_value_deserialize(ptr, size, value);
+            int value_len = tinybuf_value_deserialize(ptr, size, value, r);
             if (value_len <= 0)
             {
                 tinybuf_value_free(value);
                 tinybuf_value_clear(out);
+                tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: map value decode failed");
                 return value_len;
             }
             buffer *key = buffer_alloc();
@@ -624,6 +628,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         int len = int_deserialize((uint8_t *)ptr, size, &array_size);
         if (len <= 0)
         {
+            tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: array size decode failed");
             return len;
         }
         ptr += len;
@@ -633,11 +638,12 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         for (int i = 0; i < (int)array_size; ++i)
         {
             tinybuf_value *value = tinybuf_value_alloc();
-            int value_len = tinybuf_value_deserialize(ptr, size, value);
+            int value_len = tinybuf_value_deserialize(ptr, size, value, r);
             if (value_len <= 0)
             {
                 tinybuf_value_free(value);
                 tinybuf_value_clear(out);
+                tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: array value decode failed");
                 return value_len;
             }
             tinybuf_value_array_append(out, value);
@@ -674,7 +680,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
     {
         const char *p0 = ptr;
         tinybuf_value *ten = tinybuf_value_alloc();
-        int r1 = tinybuf_value_deserialize(ptr, size, ten);
+        int r1 = tinybuf_value_deserialize(ptr, size, ten, r);
         if (r1 <= 0)
         {
             buf_ref br_fallback = (buf_ref){(char *)ptr, (int64_t)size, (char *)ptr, (int64_t)size};
@@ -682,6 +688,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
             if (r1b.res <= 0)
             {
                 tinybuf_value_free(ten);
+                tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: indexed tensor tensor decode failed");
                 return r1b.res;
             }
             r1 = r1b.res;
@@ -715,7 +722,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
             if (has)
             {
                 tinybuf_value *idx = tinybuf_value_alloc();
-                int r2 = tinybuf_value_deserialize(ptr, size, idx);
+                int r2 = tinybuf_value_deserialize(ptr, size, idx, r);
                 if (r2 <= 0)
                 {
                     buf_ref br2 = (buf_ref){(char *)ptr, (int64_t)size, (char *)ptr, (int64_t)size};
@@ -727,7 +734,9 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
                             for (int k = 0; k < i; ++k) if (it->indices[k]) tinybuf_value_free(it->indices[k]);
                             tinybuf_free(it->indices);
                         }
-                        tinybuf_value_free(ten); tinybuf_free(it); return rr3.res;
+                        tinybuf_value_free(ten); tinybuf_free(it);
+                        tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: indexed tensor index decode failed");
+                        return rr3.res;
                     }
                     r2 = rr3.res;
                 }
@@ -742,6 +751,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
     }
     default:
         s_last_error_msg = "deserialize type unknown";
+        tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: type unknown");
         return -1;
     }
 }

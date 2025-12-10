@@ -19,50 +19,57 @@ static tinybuf_value* clone_box(const tinybuf_value *in)
 
 static int op_hlist_insert(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
-    int n = tinybuf_value_get_child_size(value);
+    tinybuf_result cr0 = tinybuf_result_ok(0);
+    int n = tinybuf_value_get_child_size(value, &cr0);
     int idx = n;
     const tinybuf_value *ins = NULL;
     if(args && tinybuf_value_get_type(args) == tinybuf_array){
-        const tinybuf_value *a0 = tinybuf_value_get_array_child(args, 0);
-        const tinybuf_value *a1 = tinybuf_value_get_array_child(args, 1);
-        if(a0 && tinybuf_value_get_type(a0) == tinybuf_int){ idx = (int)tinybuf_value_get_int(a0); }
+        tinybuf_result rr0 = tinybuf_result_ok(0);
+        tinybuf_result rr1 = tinybuf_result_ok(0);
+        const tinybuf_value *a0 = tinybuf_value_get_array_child(args, 0, &rr0);
+        const tinybuf_value *a1 = tinybuf_value_get_array_child(args, 1, &rr1);
+        if(a0 && tinybuf_value_get_type(a0) == tinybuf_int){ tinybuf_result gri = tinybuf_result_ok(0); idx = (int)tinybuf_value_get_int(a0, &gri); }
         if(a1){ ins = a1; }
     }
     if(!ins){ return -1; }
     tinybuf_value_clear(out);
-    int before = tinybuf_value_get_child_size(value);
+    tinybuf_result cr1 = tinybuf_result_ok(0);
+    int before = tinybuf_value_get_child_size(value, &cr1);
     for(int i=0;i<=before;i++){
         if(i == idx){ tinybuf_value *cpins = clone_box(ins); if(!cpins) return -1; tinybuf_value_array_append(out, cpins); }
-        if(i < before){ const tinybuf_value *ch = tinybuf_value_get_array_child(value, i); tinybuf_value *cp = clone_box(ch); if(!cp) return -1; tinybuf_value_array_append(out, cp); }
+        if(i < before){ tinybuf_result rr2 = tinybuf_result_ok(0); const tinybuf_value *ch = tinybuf_value_get_array_child(value, i, &rr2); tinybuf_value *cp = clone_box(ch); if(!cp) return -1; tinybuf_value_array_append(out, cp); }
     }
     return 0;
 }
 
 static int op_hlist_delete(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
-    int n = tinybuf_value_get_child_size(value);
+    tinybuf_result cr2 = tinybuf_result_ok(0);
+    int n = tinybuf_value_get_child_size(value, &cr2);
     int idx = -1;
-    if(args && tinybuf_value_get_type(args) == tinybuf_array){ const tinybuf_value *a0 = tinybuf_value_get_array_child(args, 0); if(a0 && tinybuf_value_get_type(a0) == tinybuf_int){ idx = (int)tinybuf_value_get_int(a0); } }
+    if(args && tinybuf_value_get_type(args) == tinybuf_array){ tinybuf_result rrA = tinybuf_result_ok(0); const tinybuf_value *a0 = tinybuf_value_get_array_child(args, 0, &rrA); if(a0 && tinybuf_value_get_type(a0) == tinybuf_int){ tinybuf_result gri2 = tinybuf_result_ok(0); idx = (int)tinybuf_value_get_int(a0, &gri2); } }
     if(idx < 0 || idx >= n){ return -1; }
     tinybuf_value_clear(out);
-    for(int i=0;i<n;i++){ if(i==idx) continue; const tinybuf_value *ch = tinybuf_value_get_array_child(value, i); tinybuf_value *cp = clone_box(ch); if(!cp) return -1; tinybuf_value_array_append(out, cp); }
+    for(int i=0;i<n;i++){ if(i==idx) continue; tinybuf_result rr3 = tinybuf_result_ok(0); const tinybuf_value *ch = tinybuf_value_get_array_child(value, i, &rr3); tinybuf_value *cp = clone_box(ch); if(!cp) return -1; tinybuf_value_array_append(out, cp); }
     return 0;
 }
 
 static int op_hlist_concat(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
     const tinybuf_value *other = NULL;
-    if(args && tinybuf_value_get_type(args) == tinybuf_array){ other = tinybuf_value_get_array_child(args, 0); }
+    if(args && tinybuf_value_get_type(args) == tinybuf_array){ tinybuf_result rr4 = tinybuf_result_ok(0); other = tinybuf_value_get_array_child(args, 0, &rr4); }
     if(!other || tinybuf_value_get_type(other) != tinybuf_array){ return -1; }
     tinybuf_value_clear(out);
-    int n = tinybuf_value_get_child_size(value);
-    for(int i=0;i<n;i++){ const tinybuf_value *ch = tinybuf_value_get_array_child(value, i); tinybuf_value *cp = clone_box(ch); if(!cp) return -1; tinybuf_value_array_append(out, cp); }
-    int m = tinybuf_value_get_child_size(other);
-    for(int j=0;j<m;j++){ const tinybuf_value *ch2 = tinybuf_value_get_array_child(other, j); tinybuf_value *cp2 = clone_box(ch2); if(!cp2) return -1; tinybuf_value_array_append(out, cp2); }
+    tinybuf_result cr3 = tinybuf_result_ok(0);
+    int n = tinybuf_value_get_child_size(value, &cr3);
+    for(int i=0;i<n;i++){ tinybuf_result rr5 = tinybuf_result_ok(0); const tinybuf_value *ch = tinybuf_value_get_array_child(value, i, &rr5); tinybuf_value *cp = clone_box(ch); if(!cp) return -1; tinybuf_value_array_append(out, cp); }
+    tinybuf_result cr4 = tinybuf_result_ok(0);
+    int m = tinybuf_value_get_child_size(other, &cr4);
+    for(int j=0;j<m;j++){ tinybuf_result rr6 = tinybuf_result_ok(0); const tinybuf_value *ch2 = tinybuf_value_get_array_child(other, j, &rr6); tinybuf_value *cp2 = clone_box(ch2); if(!cp2) return -1; tinybuf_value_array_append(out, cp2); }
     return 0;
 }
 
-static int op_str(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ (void)args; char buf[64]; int n = tinybuf_value_get_child_size(value); int len = snprintf(buf, sizeof(buf), "hetero_list[%d]", n); if(len<0) len=0; tinybuf_value_init_string(out, buf, len); return 0; }
+static int op_str(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ (void)args; char buf[64]; tinybuf_result cr5 = tinybuf_result_ok(0); int n = tinybuf_value_get_child_size(value, &cr5); int len = snprintf(buf, sizeof(buf), "hetero_list[%d]", n); if(len<0) len=0; tinybuf_value_init_string(out, buf, len); return 0; }
 static int op_desc(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ (void)args; const char *s = "system.extend hetero_list"; tinybuf_value_init_string(out, s, (int)strlen(s)); return 0; }
 
 static tinybuf_result tuple_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }
@@ -70,7 +77,7 @@ static tinybuf_result tuple_write(const char *name, const tinybuf_value *in, buf
 static tinybuf_result tuple_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int r = tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); return r>0 ? tinybuf_result_ok(r) : tinybuf_result_err(r, "tuple_dump failed", NULL); }
 
 static tinybuf_result hlist_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; const char *ptr = (const char*)data; int size = len; tinybuf_value_clear(out); for(;;){ if(size<=0) break; buf_ref br = (buf_ref){ (const char*)ptr, (int64_t)size, (const char*)ptr, (int64_t)size }; tinybuf_value *item = tinybuf_value_alloc(); tinybuf_result rr = tinybuf_try_read_box(&br, item, contain_handler); if(rr.res<=0){ tinybuf_value_free(item); tinybuf_result_add_msg_const(&rr, "hlist_read item failed"); return rr; } if(tinybuf_value_get_type(out) != tinybuf_array){ tinybuf_value_clear(out); } tinybuf_value_array_append(out, item); ptr += rr.res; size -= rr.res; } return tinybuf_result_ok(len); }
-static tinybuf_result hlist_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_array) return tinybuf_result_err(-1, "hlist_write type mismatch", NULL); int before = buffer_get_length(out); int n = tinybuf_value_get_child_size(in); for(int i=0;i<n;++i){ const tinybuf_value *ch = tinybuf_value_get_array_child(in, i); if(!ch) return tinybuf_result_err(-1, "hlist_write null child", NULL); tinybuf_result wr = tinybuf_try_write_box(out, ch); if(wr.res<=0){ tinybuf_result_add_msg_const(&wr, "hlist_write child failed"); return wr; } } int after = buffer_get_length(out); return tinybuf_result_ok(after - before); }
+static tinybuf_result hlist_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_array) return tinybuf_result_err(-1, "hlist_write type mismatch", NULL); int before = buffer_get_length(out); tinybuf_result cr6 = tinybuf_result_ok(0); int n = tinybuf_value_get_child_size(in, &cr6); if(tinybuf_result_msg_count(&cr6)>0){ tinybuf_result er = tinybuf_result_err(-1, "hlist_write container error", NULL); tinybuf_result_append_merge(&er, &cr6, tinybuf_merger_left); return er; } for(int i=0;i<n;++i){ tinybuf_result rr7 = tinybuf_result_ok(0); const tinybuf_value *ch = tinybuf_value_get_array_child(in, i, &rr7); if(!ch) { tinybuf_result er = tinybuf_result_err(-1, "hlist_write null child", NULL); tinybuf_result_append_merge(&er, &rr7, tinybuf_merger_left); return er; } tinybuf_result wr = tinybuf_try_write_box(out, ch); if(wr.res<=0){ tinybuf_result_add_msg_const(&wr, "hlist_write child failed"); return wr; } } int after = buffer_get_length(out); return tinybuf_result_ok(after - before); }
 static tinybuf_result hlist_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int r = tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); return r>0 ? tinybuf_result_ok(r) : tinybuf_result_err(r, "hlist_dump failed", NULL); }
 
 static tinybuf_result dataframe_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }

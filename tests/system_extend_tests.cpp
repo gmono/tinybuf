@@ -25,7 +25,8 @@ TEST_CASE("custom string", "[system]"){
     INFO(tb_fmt(r));
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
-    buffer *sv = tinybuf_value_get_string(out);
+    tinybuf_result gr = tinybuf_result_ok(0);
+    buffer *sv = tinybuf_value_get_string(out, &gr);
     REQUIRE(sv != NULL);
     REQUIRE(buffer_get_length(sv) == 5);
     tinybuf_result_unref(&r);
@@ -53,7 +54,8 @@ TEST_CASE("oop fallback", "[system]"){
     INFO(tb_fmt(r));
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_int);
-    REQUIRE(tinybuf_value_get_int(out) == 42);
+    tinybuf_result gr2 = tinybuf_result_ok(0);
+    REQUIRE(tinybuf_value_get_int(out, &gr2) == 42);
     tinybuf_result_unref(&r);
     tinybuf_result_unref(&w);
     tinybuf_value_free(out);
@@ -69,7 +71,7 @@ TEST_CASE("custom vs oop priority", "[system]"){
     auto custstr_read = [](const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler) -> tinybuf_result
     { (void)name; (void)contain_handler; tinybuf_value_init_string(out, (const char*)data, len); return tinybuf_result_ok(len); };
     auto custstr_write = [](const char *name, const tinybuf_value *in, buffer *out) -> tinybuf_result
-    { (void)name; buffer *s = tinybuf_value_get_string(in); if(!s) return tinybuf_result_err(-1, "string write: not string", NULL); int sl = buffer_get_length(s); if(sl>0){ buffer_append(out, buffer_get_data(s), sl);} return tinybuf_result_ok(sl); };
+    { (void)name; tinybuf_result grx = tinybuf_result_ok(0); buffer *s = tinybuf_value_get_string(in, &grx); if(!s) return tinybuf_result_err(-1, "string write: not string", NULL); int sl = buffer_get_length(s); if(sl>0){ buffer_append(out, buffer_get_data(s), sl);} return tinybuf_result_ok(sl); };
     auto custstr_dump = [](const char *name, buf_ref *buf, buffer *out) -> tinybuf_result
     { (void)name; int64_t len = buf->size; buffer_append(out, "\"", 1); if(len>0){ buffer_append(out, buf->ptr, (int)len);} buffer_append(out, "\"", 1); return tinybuf_result_ok((int)len); };
     tinybuf_custom_register("mytype", custstr_read, custstr_write, custstr_dump);
@@ -85,7 +87,8 @@ TEST_CASE("custom vs oop priority", "[system]"){
     INFO(tb_fmt(r));
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
-    buffer *sv = tinybuf_value_get_string(out);
+    tinybuf_result gr3 = tinybuf_result_ok(0);
+    buffer *sv = tinybuf_value_get_string(out, &gr3);
     REQUIRE(sv != NULL);
     REQUIRE(buffer_get_length(sv) == 8);
     tinybuf_result_unref(&r);
@@ -130,17 +133,23 @@ TEST_CASE("hetero tuple", "[system]"){
     }
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
-    REQUIRE(tinybuf_value_get_child_size(out) == 3);
-    const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0);
-    const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1);
-    const tinybuf_value *c2 = tinybuf_value_get_array_child(out, 2);
+    tinybuf_result csr1 = tinybuf_result_ok(0);
+    REQUIRE(tinybuf_value_get_child_size(out, &csr1) == 3);
+    tinybuf_result ar0 = tinybuf_result_ok(0);
+    tinybuf_result ar1 = tinybuf_result_ok(0);
+    tinybuf_result ar2 = tinybuf_result_ok(0);
+    const tinybuf_value *c0 = tinybuf_value_get_array_child(out, 0, &ar0);
+    const tinybuf_value *c1 = tinybuf_value_get_array_child(out, 1, &ar1);
+    const tinybuf_value *c2 = tinybuf_value_get_array_child(out, 2, &ar2);
     REQUIRE(tinybuf_value_get_type(c0) == tinybuf_int);
-    REQUIRE(tinybuf_value_get_int(c0) == 123);
+    tinybuf_result gri = tinybuf_result_ok(0);
+    REQUIRE(tinybuf_value_get_int(c0, &gri) == 123);
     REQUIRE(tinybuf_value_get_type(c1) == tinybuf_string);
-    buffer *sv = tinybuf_value_get_string((tinybuf_value *)c1);
+    buffer *sv = tinybuf_value_get_string((tinybuf_value *)c1, NULL);
     REQUIRE(buffer_get_length(sv) == 3);
     REQUIRE(tinybuf_value_get_type(c2) == tinybuf_bool);
-    REQUIRE(tinybuf_value_get_bool(c2) == 1);
+    tinybuf_result grb = tinybuf_result_ok(0);
+    REQUIRE(tinybuf_value_get_bool(c2, &grb) == 1);
     tinybuf_result_unref(&r);
     tinybuf_result_unref(&w);
     tinybuf_value_free(out);
@@ -178,8 +187,10 @@ TEST_CASE("hetero list", "[system]"){
     }
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
-    REQUIRE(tinybuf_value_get_child_size(out) == 6);
-    const tinybuf_value *last = tinybuf_value_get_array_child(out, 5);
+    tinybuf_result csr2 = tinybuf_result_ok(0);
+    REQUIRE(tinybuf_value_get_child_size(out, &csr2) == 6);
+    tinybuf_result lr0 = tinybuf_result_ok(0);
+    const tinybuf_value *last = tinybuf_value_get_array_child(out, 5, &lr0);
     REQUIRE(tinybuf_value_get_type(last) == tinybuf_string);
     tinybuf_result_unref(&r);
     tinybuf_result_unref(&w);
@@ -230,8 +241,10 @@ TEST_CASE("dataframe", "[system]"){
     }
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_indexed_tensor);
-    REQUIRE(tinybuf_tensor_get_ndim(out) == 2);
-    REQUIRE(tinybuf_tensor_get_count(out) == 4);
+    tinybuf_result tr1 = tinybuf_result_ok(0);
+    tinybuf_result tr2 = tinybuf_result_ok(0);
+    REQUIRE(tinybuf_tensor_get_ndim(out, &tr1) == 2);
+    REQUIRE(tinybuf_tensor_get_count(out, &tr2) == 4);
     tinybuf_result_unref(&r);
     tinybuf_result_unref(&w);
     tinybuf_value_free(out);

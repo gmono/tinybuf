@@ -305,7 +305,9 @@ static int tinybuf_value_serialize_as_json_level(int level,int compact, const ti
     return 0;
 }
 
-int tinybuf_value_serialize_as_json(const tinybuf_value *value, buffer *out,int compact){
+int tinybuf_value_serialize_as_json(const tinybuf_value *value, buffer *out,int compact, tinybuf_result *r){
+    assert(r);
+    // current json serializer does not produce errors; keep for API consistency
     return tinybuf_value_serialize_as_json_level(0,compact,value, out);
 }
 
@@ -994,8 +996,11 @@ static inline int tinybuf_json_load_for_number(const char *ptr, int size, tinybu
  * @param out vlue值输出
  * @return 消耗的字节数
  */
-int tinybuf_value_deserialize_from_json(const char *ptr, int size, tinybuf_value *out){
-    return tinybuf_value_deserialize_from_json_l(ptr,size,out,1);
+int tinybuf_value_deserialize_from_json(const char *ptr, int size, tinybuf_value *out, tinybuf_result *r){
+    assert(r);
+    int consumed = tinybuf_value_deserialize_from_json_l(ptr,size,out,1);
+    if(consumed <= 0){ tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize_from_json failed"); }
+    return consumed;
 }
 
 static int tinybuf_value_deserialize_from_json_l(const char *ptr, int size, tinybuf_value *out,int show_waring){

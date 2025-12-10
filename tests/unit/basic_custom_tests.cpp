@@ -46,7 +46,8 @@ TEST_CASE("custom string via type_idx", "[custom]")
     REQUIRE(rr.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
-    buffer *sv = tinybuf_value_get_string(out);
+    tinybuf_result gr = tinybuf_result_ok(0);
+    buffer *sv = tinybuf_value_get_string(out, &gr);
     REQUIRE(sv != NULL);
     REQUIRE(buffer_get_length(sv) == 5);
 
@@ -88,8 +89,10 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     REQUIRE(rr2.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr2) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
-    REQUIRE(tinybuf_value_get_child_size(out) == 6);
-    const tinybuf_value *last = tinybuf_value_get_array_child(out, 5);
+    tinybuf_result csr0 = tinybuf_result_ok(0);
+    REQUIRE(tinybuf_value_get_child_size(out, &csr0) == 6);
+    tinybuf_result ar0 = tinybuf_result_ok(0);
+    const tinybuf_value *last = tinybuf_value_get_array_child(out, 5, &ar0);
     REQUIRE(tinybuf_value_get_type(last) == tinybuf_string);
 
     tinybuf_result_unref(&rr2);

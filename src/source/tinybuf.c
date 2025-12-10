@@ -163,24 +163,6 @@ BOOL RESULT_OK_AND_ADDTO(read_result x, int *s)
 // 高级序列化read入口
 // 二级版本 可处理二级格式 readbox标准 成功则修改buf指针 返回>0 否则不修改并返回<=0
 
-#include "tinybuf_plugin.h"
-void _tb_push_err_msg(const char *msg)
-{
-    tinybuf_result *cr = tinybuf_result_get_current();
-    if (cr && msg)
-    {
-        tinybuf_result_add_msg_const(cr, msg);
-    }
-}
-
- 
-
-
-
- 
-
- 
-
 
 // 写入总入口由 tinybuf_write.c 提供实现
  

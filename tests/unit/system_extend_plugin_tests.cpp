@@ -2,17 +2,23 @@
 #include "tinybuf.h"
 #include "tinybuf_plugin.h"
 #include "tinybuf_buffer.h"
+#include "tinybuf_log.h"
 #include <sstream>
 #include <string>
+#include <chrono>
 static std::string tb_fmt(const tinybuf_error &r){ char msgs[512]; tinybuf_result_format_msgs(&r, msgs, sizeof(msgs)); std::ostringstream os; os << "res=" << r.res << " last=" << (tinybuf_last_error_message()? tinybuf_last_error_message(): "") << " msgs=" << msgs; return os.str(); }
+
+static void tb_log(const char* tag, const tinybuf_error &r){ char msgs[512]; tinybuf_result_format_msgs(&r, msgs, sizeof(msgs)); LOGI("%s: res=%d last=%s msgs=%s", tag, r.res, tinybuf_last_error_message()? tinybuf_last_error_message(): "", msgs); }
 
 TEST_CASE("system.extend plugin loads and handles hetero_tuple", "[plugin]")
 {
+    LOGI("case begin: unit hetero_tuple");
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
     int pl = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
     INFO("plugin_load_ret=" << pl);
+    LOGI("plugin register ret=%d", pl);
     REQUIRE(pl == 0);
 #endif
     tinybuf_value *arr = tinybuf_value_alloc();
@@ -26,12 +32,14 @@ TEST_CASE("system.extend plugin loads and handles hetero_tuple", "[plugin]")
     tinybuf_error w = tinybuf_result_ok(0);
     int wl = tinybuf_try_write_custom_id_box(buf, "hetero_tuple", arr, &w);
     INFO(tb_fmt(w));
+    tb_log("write hetero_tuple", w);
     REQUIRE(wl > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_error rr = tinybuf_result_ok(0);
     int rl = tinybuf_try_read_box(&br, out, NULL, &rr);
     INFO(tb_fmt(rr));
+    tb_log("read hetero_tuple", rr);
     REQUIRE(rl > 0);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
@@ -54,16 +62,19 @@ TEST_CASE("system.extend plugin loads and handles hetero_tuple", "[plugin]")
     buffer_free(buf);
     tinybuf_value_free(arr);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: unit hetero_tuple");
 }
 
 TEST_CASE("system.extend plugin handles dataframe", "[plugin]")
 {
+    LOGI("case begin: unit dataframe");
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    int pl2 = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
-    INFO("plugin_load_ret=" << pl2);
-    REQUIRE(pl2 == 0);
+    int pl = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    INFO("plugin_load_ret=" << pl);
+    LOGI("plugin register ret=%d", pl);
+    REQUIRE(pl == 0);
 #endif
     int64_t shape[2] = {2, 2};
     double data[4] = {1.0, 2.0, 3.0, 4.0};
@@ -149,12 +160,17 @@ TEST_CASE("indexed_tensor roundtrip", "[tensor]")
     tinybuf_error w = tinybuf_result_ok(0);
     int wl = tinybuf_try_write_box(payload, df, &w);
     INFO(tb_fmt(w));
+    tb_log("write dataframe", w);
     REQUIRE(wl > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(payload), (int64_t)buffer_get_length(payload), buffer_get_data(payload), (int64_t)buffer_get_length(payload)};
     tinybuf_error rr = tinybuf_result_ok(0);
+    auto t0 = std::chrono::steady_clock::now();
     int rl = tinybuf_try_read_box(&br, out, NULL, &rr);
     INFO(tb_fmt(rr));
+    tb_log("read dataframe", rr);
+    auto t1 = std::chrono::steady_clock::now();
+    LOGI("read dataframe bytes=%d dur_ms=%lld", rl, (long long)std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count());
     REQUIRE(rl > 0);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_indexed_tensor);
@@ -171,26 +187,31 @@ TEST_CASE("indexed_tensor roundtrip", "[tensor]")
     tinybuf_value_free(rows);
     tinybuf_value_free(ten);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: unit dataframe");
 }
 
 TEST_CASE("custom result wrappers", "[result]")
 {
+    LOGI("case begin: unit custom result wrappers");
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
     tinybuf_value *out = tinybuf_value_alloc();
     tinybuf_error rr = tinybuf_result_ok(0);
     int rrl = tinybuf_custom_try_read("string", (const uint8_t *)"abc", 3, out, NULL, &rr);
     INFO(tb_fmt(rr));
+    tb_log("custom read string", rr);
     REQUIRE(rrl == 3);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     tinybuf_error rf = tinybuf_result_ok(0);
     int rfl = tinybuf_custom_try_read("unknown", (const uint8_t *)"x", 1, out, NULL, &rf);
     INFO(tb_fmt(rf));
+    tb_log("custom read unknown", rf);
     REQUIRE(rfl < 0);
     REQUIRE(tinybuf_result_msg_count(&rf) > 0);
     tinybuf_result_unref(&rr);
     tinybuf_result_unref(&rf);
     tinybuf_value_free(out);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: unit custom result wrappers");
 }

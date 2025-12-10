@@ -4,6 +4,7 @@
 #include "tinybuf_plugin.h"
 #include "tinybuf_log.h"
 #include <sstream>
+#include <chrono>
 static std::string tb_fmt(const tinybuf_error &r)
 {
     char msgs[512];
@@ -11,6 +12,13 @@ static std::string tb_fmt(const tinybuf_error &r)
     std::ostringstream os;
     os << "res=" << r.res << " last=" << (tinybuf_last_error_message() ? tinybuf_last_error_message() : "") << " msgs=" << msgs;
     return os.str();
+}
+
+static void tb_log(const char* tag, const tinybuf_error &r)
+{
+    char msgs[512];
+    tinybuf_result_format_msgs(&r, msgs, sizeof(msgs));
+    LOGI("%s: res=%d last=%s msgs=%s", tag, r.res, tinybuf_last_error_message()? tinybuf_last_error_message(): "", msgs);
 }
 
 static int xjson_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
@@ -44,20 +52,29 @@ static int xjson_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error
 
 TEST_CASE("custom string", "[system]")
 {
+    LOGI("case begin: custom string");
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
     buffer *buf = buffer_alloc();
     tinybuf_value *s = tinybuf_value_alloc();
     tinybuf_value_init_string(s, "hello", 5);
     tinybuf_error w = tinybuf_result_ok(0);
+    auto t0 = std::chrono::steady_clock::now();
     int wl = tinybuf_try_write_custom_id_box(buf, "string", s, &w);
     INFO(tb_fmt(w));
+    tb_log("write string", w);
+    LOGI("write string bytes=%d", wl);
+    auto t1 = std::chrono::steady_clock::now();
     REQUIRE(wl > 0);
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_value *out = tinybuf_value_alloc();
     tinybuf_error r = tinybuf_result_ok(0);
+    LOGI("read string begin len=%d", buffer_get_length(buf));
     int rl = tinybuf_try_read_box(&br, out, NULL, &r);
     INFO(tb_fmt(r));
+    tb_log("read string", r);
+    auto t2 = std::chrono::steady_clock::now();
+    LOGI("durations ms: write=%lld read=%lld", (long long)std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count(), (long long)std::chrono::duration_cast<std::chrono::milliseconds>(t2-t1).count());
     REQUIRE(rl > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     tinybuf_error gr = tinybuf_result_ok(0);
@@ -70,10 +87,12 @@ TEST_CASE("custom string", "[system]")
     tinybuf_value_free(s);
     buffer_free(buf);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: custom string");
 }
 
 TEST_CASE("oop fallback", "[system]")
 {
+    LOGI("case begin: oop fallback");
     tinybuf_set_use_strpool(1);
     tinybuf_oop_attach_serializers("xjson", xjson_read, xjson_write, xjson_dump);
     tinybuf_oop_set_serializable("xjson", 1);
@@ -82,14 +101,20 @@ TEST_CASE("oop fallback", "[system]")
     tinybuf_value_init_int(m, 42);
     buffer *buf = buffer_alloc();
     tinybuf_error w = tinybuf_result_ok(0);
+    auto t0 = std::chrono::steady_clock::now();
     int wl = tinybuf_try_write_custom_id_box(buf, "xjson", m, &w);
     INFO(tb_fmt(w));
+    tb_log("write xjson", w);
     REQUIRE(wl > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_error r = tinybuf_result_ok(0);
+    LOGI("read xjson begin len=%d", buffer_get_length(buf));
     int rl = tinybuf_try_read_box(&br, out, NULL, &r);
     INFO(tb_fmt(r));
+    tb_log("read xjson", r);
+    auto t1 = std::chrono::steady_clock::now();
+    LOGI("durations ms: write+prep=%lld read=%lld", (long long)std::chrono::duration_cast<std::chrono::milliseconds>(t0.time_since_epoch()).count(), (long long)std::chrono::duration_cast<std::chrono::milliseconds>(t1-t0).count());
     REQUIRE(rl > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_int);
     tinybuf_error gr2 = tinybuf_result_ok(0);
@@ -100,10 +125,12 @@ TEST_CASE("oop fallback", "[system]")
     tinybuf_value_free(m);
     buffer_free(buf);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: oop fallback");
 }
 
 TEST_CASE("custom vs oop priority", "[system]")
 {
+    LOGI("case begin: custom vs oop priority");
     tinybuf_set_use_strpool(1);
     tinybuf_oop_attach_serializers("mytype", xjson_read, xjson_write, xjson_dump);
     tinybuf_oop_set_serializable("mytype", 1);
@@ -120,12 +147,14 @@ TEST_CASE("custom vs oop priority", "[system]")
     tinybuf_error w = tinybuf_result_ok(0);
     int wl = tinybuf_try_write_custom_id_box(buf, "mytype", s, &w);
     INFO(tb_fmt(w));
+    tb_log("write mytype", w);
     REQUIRE(wl > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_error r = tinybuf_result_ok(0);
     int rl = tinybuf_try_read_box(&br, out, NULL, &r);
     INFO(tb_fmt(r));
+    tb_log("read mytype", r);
     REQUIRE(rl > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     tinybuf_error gr3 = tinybuf_result_ok(0);
@@ -138,14 +167,18 @@ TEST_CASE("custom vs oop priority", "[system]")
     tinybuf_value_free(s);
     buffer_free(buf);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: custom vs oop priority");
 }
 
 TEST_CASE("hetero tuple", "[system]")
 {
+    LOGI("case begin: hetero tuple");
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    REQUIRE(tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll") == 0);
+    int pr = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    LOGI("plugin register ret=%d", pr);
+    REQUIRE(pr == 0);
 #endif
     tinybuf_value *arr = tinybuf_value_alloc();
     tinybuf_value *i = tinybuf_value_alloc();
@@ -165,6 +198,7 @@ TEST_CASE("hetero tuple", "[system]")
         tinybuf_result_format_msgs(&w, wmsgs, sizeof(wmsgs));
         CAPTURE(w.res, wmsgs, tinybuf_last_error_message());
     }
+    tb_log("write hetero_tuple", w);
     REQUIRE(wl > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
@@ -175,6 +209,7 @@ TEST_CASE("hetero tuple", "[system]")
         tinybuf_result_format_msgs(&r, msgs, sizeof(msgs));
         CAPTURE(r.res, msgs, tinybuf_last_error_message());
     }
+    tb_log("read hetero_tuple", r);
     REQUIRE(rl > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
     tinybuf_error csr1 = tinybuf_result_ok(0);
@@ -201,14 +236,18 @@ TEST_CASE("hetero tuple", "[system]")
     buffer_free(buf);
     tinybuf_value_free(arr);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: hetero tuple");
 }
 
 TEST_CASE("hetero list", "[system]")
 {
+    LOGI("case begin: hetero list");
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    REQUIRE(tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll") == 0);
+    int pr = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    LOGI("plugin register ret=%d", pr);
+    REQUIRE(pr == 0);
 #endif
     tinybuf_value *arr = tinybuf_value_alloc();
     for (int k = 0; k < 5; ++k)
@@ -228,6 +267,7 @@ TEST_CASE("hetero list", "[system]")
         tinybuf_result_format_msgs(&w, wmsgs, sizeof(wmsgs));
         CAPTURE(w.res, wmsgs, tinybuf_last_error_message());
     }
+    tb_log("write hetero_list", w);
     REQUIRE(wl > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
@@ -238,6 +278,7 @@ TEST_CASE("hetero list", "[system]")
         tinybuf_result_format_msgs(&r, msgs, sizeof(msgs));
         CAPTURE(r.res, msgs, tinybuf_last_error_message());
     }
+    tb_log("read hetero_list", r);
     REQUIRE(rl > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
     tinybuf_error csr2 = tinybuf_result_ok(0);
@@ -251,14 +292,18 @@ TEST_CASE("hetero list", "[system]")
     buffer_free(buf);
     tinybuf_value_free(arr);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: hetero list");
 }
 
 TEST_CASE("dataframe", "[system]")
 {
+    LOGI("case begin: dataframe");
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    REQUIRE(tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll") == 0);
+    int pr = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    LOGI("plugin register ret=%d", pr);
+    REQUIRE(pr == 0);
 #endif
     int64_t shape[2] = {2, 2};
     double data[4] = {1.0, 2.0, 3.0, 4.0};
@@ -289,6 +334,7 @@ TEST_CASE("dataframe", "[system]")
         tinybuf_result_format_msgs(&w, wmsgs, sizeof(wmsgs));
         CAPTURE(w.res, wmsgs, tinybuf_last_error_message());
     }
+    tb_log("write dataframe", w);
     REQUIRE(wl > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
@@ -299,6 +345,7 @@ TEST_CASE("dataframe", "[system]")
         tinybuf_result_format_msgs(&r, msgs, sizeof(msgs));
         CAPTURE(r.res, msgs, tinybuf_last_error_message());
     }
+    tb_log("read dataframe", r);
     REQUIRE(rl > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_indexed_tensor);
     tinybuf_error tr1 = tinybuf_result_ok(0);
@@ -314,4 +361,5 @@ TEST_CASE("dataframe", "[system]")
     tinybuf_value_free(rows);
     tinybuf_value_free(ten);
     tinybuf_set_use_strpool(0);
+    LOGI("case end: dataframe");
 }

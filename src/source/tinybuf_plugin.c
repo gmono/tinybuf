@@ -206,6 +206,18 @@ static tinybuf_result *s_current_result = NULL;
 void tinybuf_result_set_current(tinybuf_result *r){ s_current_result = r; }
 tinybuf_result *tinybuf_result_get_current(void){ return s_current_result; }
 
+static inline char* _dup_str(const char *s){ if(!s) return NULL; int n=(int)strlen(s); char *p=(char*)tinybuf_malloc(n+1); memcpy(p,s,(size_t)n); p[n]='\0'; return p; }
+int tinybuf_result_append_merge(tinybuf_result *dst, const tinybuf_result *src, int (*mergeres)(int,int))
+{
+    if(!dst || !src) return -1;
+    int sc = tinybuf_result_msg_count(src);
+    for(int i=0;i<sc;++i){ const char *m = tinybuf_result_msg_at(src, i); tinybuf_deleter_fn d = src->msgs ? src->msgs->items[i].deleter : NULL; if(d){ char *cp = _dup_str(m); tinybuf_result_add_msg(dst, cp, &tinybuf_free); } else { tinybuf_result_add_msg_const(dst, m); } }
+    if(dst->res <= 0 || src->res <= 0){ dst->res = -1; return dst->res; }
+    int merged = mergeres ? mergeres(dst->res, src->res) : (dst->res + src->res);
+    dst->res = merged;
+    return dst->res;
+}
+
 int tinybuf_plugin_unregister_all(void){
     for(int i=0;i<s_plugins_count;++i){ tinybuf_free(s_plugins[i].types); }
     tinybuf_free(s_plugins); s_plugins = NULL; s_plugins_count = 0; s_plugins_capacity = 0; return 0;

@@ -20,7 +20,7 @@ jobs:
 
       - name: Install build tools
         run: |
-          dnf -y install git gcc gcc-c++ cmake make curl unzip tar pkgconfig findutils ninja
+          dnf -y install git gcc gcc-c++ cmake make curl unzip tar pkgconfig findutils ninja-build
 
       - name: Setup vcpkg
         run: |

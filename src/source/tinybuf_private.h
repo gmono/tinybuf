@@ -135,6 +135,11 @@ int optional_add(int x, int addx);
 int int_serialize(uint64_t in, uint8_t *out);
 int dump_string(int len, const char *str, buffer *out);
 int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version);
+int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out);
+const char *tinybuf_last_error_message(void);
+int contain_any(uint64_t v);
+uint32_t load_be32(const void *p);
+double read_double(uint8_t *ptr);
 
 // shared strpool read state for dumping
 extern int64_t s_strpool_offset_read;

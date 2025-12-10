@@ -30,17 +30,6 @@ static tinybuf_read_pointer_mode s_read_pointer_mode = tinybuf_read_pointer_ref;
 typedef uint64_t QWORD;
 typedef int64_t SQWORD;
 
-/* moved to tinybuf_strpool.c: s_use_strpool */
-int64_t s_strpool_offset_read = -1;
-const char *s_strpool_base_read = NULL;
-typedef struct
-{
-    buffer *buf;
-} strpool_entry;
-static strpool_entry *s_strpool = NULL;
-static int s_strpool_count = 0;
-static int s_strpool_capacity = 0;
-static const char *s_strpool_base = NULL;
 const char *s_last_error_msg = NULL;
 
 // 是否含有子引用
@@ -166,75 +155,6 @@ static inline int kvpairs_boxkey_deserialize()
 {
 }
 
-//-----------------------
-//--变长整数支持
-/**
- * 序列化整型
- * @param in 整型
- * @param out 序列化字节存放地址，最少预留10个字节
- * @return 序列化字节长度
- */
-static inline int int_serialize(uint64_t in, uint8_t *out)
-{
-    int index = 0;
-    int i;
-    for (i = 0; i <= (8 * sizeof(in)) / 7; ++i, ++index)
-    {
-        // 取最低位7bit
-        out[index] = in & 0x7F;
-        // 右移7位
-        in >>= 7;
-        if (!in)
-        {
-            // 剩余字节为0，最高位bit为0，停止序列化
-            break;
-        }
-        // 后面还有字节,那么最高位bit为1
-        out[index] |= 0x80;
-    }
-    // 返回序列化后总字节数
-    return ++index;
-}
-
-/**
- * 反序列化整型
- * @param in 输入字节流
- * @param in_size 输入字节数
- * @param out 序列化后的整型
- * @return 代表反序列化消耗的字节数
- */
-static inline int int_deserialize(const uint8_t *in, int in_size, uint64_t *out)
-{
-    if (in_size < 1)
-    {
-        return 0;
-    }
-    *out = 0;
-    int index = 0;
-    while (1)
-    {
-        uint8_t byte = in[index];
-        (*out) |= (byte & 0x7F) << ((index++) * 7);
-        if ((byte & 0x80) == 0)
-        {
-            // 最高位为0，所以没有更多后续字节
-            break;
-        }
-        // 后续还有字节
-        if (index >= in_size)
-        {
-            // 字节不够，反序列失败
-            return 0;
-        }
-        if (index * 7 > 56)
-        {
-            // 7bit 最多左移动56位，最大支持64位有符号整形
-            return -1;
-        }
-    }
-    // 序列号成功
-    return index;
-}
 
 tinybuf_value *tinybuf_value_alloc(void)
 {
@@ -427,59 +347,9 @@ int dump_int(uint64_t len, buffer *out)
     return add;
 }
 
-static inline int dump_double(double db, buffer *out)
-{
-    uint64_t encoded = 0;
-    memcpy(&encoded, &db, 8);
-    uint32_t val = htonl(encoded >> 32);
-    buffer_append(out, (char *)&val, 4);
-    val = htonl(encoded & 0xFFFFFFFF);
-    buffer_append(out, (char *)&val, 4);
-    return 8;
-}
 
-static inline uint32_t load_be32(const void *p)
-{
-    uint32_t val;
-    memcpy(&val, p, sizeof val);
-    return ntohl(val);
-}
 
-static inline double read_double(uint8_t *ptr)
-{
-    uint64_t val = ((uint64_t)load_be32(ptr) << 32) | load_be32(ptr + 4);
-    double db = 0;
-    memcpy(&db, &val, 8);
-    return db;
-}
 
-static inline int dump_string(int len, const char *str, buffer *out)
-{
-    int ret = dump_int(len, out);
-    buffer_append(out, str, len);
-    return ret + len;
-}
-
-static int avl_tree_for_each_node_dump_map(void *user_data, AVLTreeNode *node)
-{
-    buffer *out = (buffer *)user_data;
-    buffer *key = (buffer *)avl_tree_node_key(node);
-    tinybuf_value *val = (tinybuf_value *)avl_tree_node_value(node);
-    // 写key
-    dump_string(buffer_get_length_inline(key), buffer_get_data_inline(key), out);
-    // 写value
-    tinybuf_value_serialize(val, out);
-    // 继续遍历
-    return 0;
-}
-
-static int avl_tree_for_each_node_dump_array(void *user_data, AVLTreeNode *node)
-{
-    buffer *out = (buffer *)user_data;
-    // 写value
-    tinybuf_value_serialize(avl_tree_node_value(node), out);
-    return 0;
-}
 
 // 预写（precache）支持：在写侧允许提前写出对象，后续遇到该对象时改为输出指针
 typedef struct
@@ -491,304 +361,7 @@ typedef struct
 static precache_entry *s_precache = NULL;
 static int s_precache_count = 0;
 static int s_precache_capacity = 0;
-/* moved to tinybuf_precache.c: precache state */
-
-/* moved to tinybuf_precache.c: precache_reset */
-/* moved to tinybuf_precache.c: precache_find_start */
-/* moved to tinybuf_precache.c: precache_add */
-
-/* moved to tinybuf_precache.c: tinybuf_precache_reset */
-/* moved to tinybuf_precache.c: tinybuf_precache_register */
-
-/* moved to tinybuf_precache.c: tinybuf_precache_set_redirect / is_redirect */
-
-static int tinybuf_value_serialize_old(const tinybuf_value *value, buffer *out)
-{
-    assert(value);
-    assert(out);
-    if (value && value->_custom_box_type >= 0)
-    {
-        // 自定义 box 类型由插件写入
-        tinybuf_result rr = tinybuf_plugins_try_write((uint8_t)value->_custom_box_type, value, out);
-        if (rr.res <= 0)
-        {
-            s_last_error_msg = "plugin write failed";
-        }
-        return rr.res;
-    }
-    // 如果开启了重定向，并且该对象已注册为预写，则输出指针到start位置
-    if (tinybuf_precache_is_redirect() && value)
-    {
-        int64_t start_pos = tinybuf_precache_find_start_for(out, value);
-        if (start_pos >= 0)
-        {
-            return try_write_pointer_value(out, (enum offset_type)0, start_pos);
-        }
-    }
-    switch (value->_type)
-    {
-    case tinybuf_null:
-    {
-        char type = serialize_null;
-        // null类型
-        buffer_append(out, &type, 1);
-    }
-    break;
-
-    case tinybuf_int:
-    {
-        char type = value->_data._int > 0 ? serialize_positive_int : serialize_negtive_int;
-        // 正整数或负整数类型
-        buffer_append(out, &type, 1);
-        // 后面是int序列化字节
-        dump_int(value->_data._int > 0 ? value->_data._int : -value->_data._int, out);
-    }
-    break;
-
-    case tinybuf_bool:
-    {
-        char type = value->_data._bool ? serialize_bool_true : serialize_bool_false;
-        // bool类型
-        buffer_append(out, &type, 1);
-    }
-    break;
-
-    case tinybuf_double:
-    {
-        char type = serialize_double;
-        // double类型
-        buffer_append(out, &type, 1);
-        // double值序列化
-        dump_double(value->_data._double, out);
-    }
-    break;
-
-    case tinybuf_string:
-    {
-        int len = buffer_get_length_inline(value->_data._string);
-        if (s_use_strpool)
-        {
-            int idx = strpool_add(buffer_get_data_inline(value->_data._string), len);
-            char type = serialize_str_index;
-            buffer_append(out, &type, 1);
-            dump_int((uint64_t)idx, out);
-        }
-        else
-        {
-            char type = serialize_string;
-            buffer_append(out, &type, 1);
-            if (len)
-            {
-                dump_string(len, buffer_get_data_inline(value->_data._string), out);
-            }
-            else
-            {
-                dump_int(0, out);
-            }
-        }
-    }
-    break;
-
-    case tinybuf_map:
-    {
-        char type = serialize_map;
-        // map类型
-        buffer_append(out, &type, 1);
-        int map_size = avl_tree_num_entries(value->_data._map_array);
-        // map size
-        dump_int(map_size, out);
-        avl_tree_for_each_node(value->_data._map_array, out, avl_tree_for_each_node_dump_map);
-    }
-    break;
-
-    case tinybuf_array:
-    {
-        char type = serialize_array;
-        // array类型
-        buffer_append(out, &type, 1);
-        int array_size = avl_tree_num_entries(value->_data._map_array);
-        // array size
-        dump_int(array_size, out);
-        // 遍历node并序列化
-        avl_tree_for_each_node(value->_data._map_array, out, avl_tree_for_each_node_dump_array);
-    }
-    break;
-    case tinybuf_tensor:
-    {
-        tinybuf_tensor_t *t = (tinybuf_tensor_t *)value->_data._custom;
-        if (!t)
-        {
-            break;
-        }
-        int64_t elem = t->count;
-        if (t->dims == 1)
-        {
-            char type = serialize_vector_tensor;
-            buffer_append(out, &type, 1);
-            dump_int((uint64_t)elem, out);
-            dump_int((uint64_t)t->dtype, out);
-            if (t->dtype == 8)
-            {
-                const double *pd = (const double *)t->data;
-                for (int64_t i = 0; i < elem; ++i)
-                {
-                    dump_double(pd[i], out);
-                }
-            }
-            else if (t->dtype == 10)
-            {
-                const float *pf = (const float *)t->data;
-                for (int64_t i = 0; i < elem; ++i)
-                {
-                    uint32_t raw = 0;
-                    memcpy(&raw, &pf[i], 4);
-                    raw = htonl(raw);
-                    buffer_append(out, (char *)&raw, 4);
-                }
-            }
-            else if (t->dtype == 11)
-            {
-                const uint8_t *pb = (const uint8_t *)t->data;
-                int64_t bytes = (elem + 7) / 8;
-                for (int64_t b = 0; b < bytes; ++b)
-                {
-                    uint8_t one = 0;
-                    for (int k = 0; k < 8; ++k)
-                    {
-                        int64_t idx = b * 8 + k;
-                        if (idx >= elem)
-                            break;
-                        uint8_t bit = pb[idx] ? 1 : 0;
-                        one |= (uint8_t)(bit << (7 - k));
-                    }
-                    buffer_append(out, (const char *)&one, 1);
-                }
-            }
-            else
-            {
-                const int64_t *pi64 = (const int64_t *)t->data;
-                for (int64_t i = 0; i < elem; ++i)
-                {
-                    uint64_t v = (uint64_t)(pi64[i] < 0 ? -pi64[i] : pi64[i]);
-                    char ty = (pi64[i] < 0) ? serialize_negtive_int : serialize_positive_int;
-                    buffer_append(out, &ty, 1);
-                    dump_int(v, out);
-                }
-            }
-        }
-        else
-        {
-            char type = serialize_dense_tensor;
-            buffer_append(out, &type, 1);
-            dump_int((uint64_t)t->dims, out);
-            for (int i = 0; i < t->dims; ++i)
-            {
-                dump_int((uint64_t)t->shape[i], out);
-            }
-            dump_int((uint64_t)t->dtype, out);
-            if (t->dtype == 8)
-            {
-                const double *pd = (const double *)t->data;
-                for (int64_t i = 0; i < elem; ++i)
-                {
-                    dump_double(pd[i], out);
-                }
-            }
-            else if (t->dtype == 10)
-            {
-                const float *pf = (const float *)t->data;
-                for (int64_t i = 0; i < elem; ++i)
-                {
-                    uint32_t raw = 0;
-                    memcpy(&raw, &pf[i], 4);
-                    raw = htonl(raw);
-                    buffer_append(out, (char *)&raw, 4);
-                }
-            }
-            else if (t->dtype == 11)
-            {
-                const uint8_t *pb = (const uint8_t *)t->data;
-                int64_t bytes = (elem + 7) / 8;
-                for (int64_t b = 0; b < bytes; ++b)
-                {
-                    uint8_t one = 0;
-                    for (int k = 0; k < 8; ++k)
-                    {
-                        int64_t idx = b * 8 + k;
-                        if (idx >= elem)
-                            break;
-                        uint8_t bit = pb[idx] ? 1 : 0;
-                        one |= (uint8_t)(bit << (7 - k));
-                    }
-                    buffer_append(out, (const char *)&one, 1);
-                }
-            }
-            else
-            {
-                const int64_t *pi64 = (const int64_t *)t->data;
-                for (int64_t i = 0; i < elem; ++i)
-                {
-                    uint64_t v = (uint64_t)(pi64[i] < 0 ? -pi64[i] : pi64[i]);
-                    char ty = (pi64[i] < 0) ? serialize_negtive_int : serialize_positive_int;
-                    buffer_append(out, &ty, 1);
-                    dump_int(v, out);
-                }
-            }
-        }
-    }
-    break;
-    case tinybuf_bool_map:
-    {
-        tinybuf_bool_map_t *bm = (tinybuf_bool_map_t *)value->_data._custom;
-        if (!bm)
-        {
-            break;
-        }
-        char type = serialize_bool_map;
-        buffer_append(out, &type, 1);
-        dump_int((uint64_t)bm->count, out);
-        int64_t bytes = (bm->count + 7) / 8;
-        if (bytes > 0)
-        {
-            buffer_append(out, (const char *)bm->bits, (int)bytes);
-        }
-    }
-    break;
-    case tinybuf_indexed_tensor:
-    {
-        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t *)value->_data._custom;
-        if (!it || !it->tensor)
-        {
-            break;
-        }
-        char type = serialize_indexed_tensor;
-        buffer_append(out, &type, 1);
-        try_write_box(out, it->tensor);
-        dump_int((uint64_t)it->dims, out);
-        for (int i = 0; i < it->dims; ++i)
-        {
-            if (it->indices && it->indices[i])
-            {
-                dump_int(1, out);
-                try_write_box(out, it->indices[i]);
-            }
-            else
-            {
-                dump_int(0, out);
-            }
-        }
-    }
-    break;
-        // 其他类型 version 和versionlist
-
-    default:
-        // 不可达
-        assert(0);
-        break;
-    }
-
-    return 0;
-}
+#if 0
 
 /* strpool declarations are at the top of file */
 
@@ -825,14 +398,6 @@ inline int try_read_int(serialize_type type, const char *ptr, int size, tinybuf_
 
 //---
 int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out);
-
-// 可用于传递错误码 如果无错误 则增加addx后返回
-inline int optional_add(int x, int addx)
-{
-    if (x < 0)
-        return x;
-    return x + addx;
-}
 
 // 支持自定义描述序列支持的反序列化操作
 // 描述子是一串 serialize_type 类型的字节序列
@@ -1326,7 +891,7 @@ static int tinybuf_deserialize_sparse_tensor(const char *ptr, int size, tinybuf_
     out->_custom_free = NULL;
     return 1;
 }
-int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
+static int tinybuf_value_deserialize_impl(const char *ptr, int size, tinybuf_value *out)
 {
     assert(out);
     assert(ptr);
@@ -3379,7 +2944,7 @@ int try_write_int_data(BOOL isneg, buffer *out, QWORD val)
     return dump_int(val, out);
 }
 
-/* moved to tinybuf_write.c: try_write_intbox */
+ 
 
 static inline serialize_type make_pointer_type(enum offset_type t, BOOL neg)
 {
@@ -3413,12 +2978,7 @@ static inline int try_write_pointer(buffer *out, pointer_value pointer)
 }
 
 // 写入总入口由 tinybuf_write.c 提供实现
-
-/* moved to tinybuf_write.c: try_write_plugin_map_table */
-
-/* moved to tinybuf_write.c: try_write_part */
-
-/* moved to tinybuf_write.c: try_write_partitions */
+ 
 
 // public wrappers
 void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode)
@@ -3527,195 +3087,7 @@ static tinybuf_result tinybuf_try_read_box_old(buf_ref *buf, tinybuf_value *out,
     tinybuf_result_set_current(NULL);
     return rr;
 }
-
-/* moved */
-#if 0
-#if 0
-{
-    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_box failed", NULL);
-    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_box_r");
-    tinybuf_result_set_current(&rr);
-    int r = try_write_box(out, value);
-    if (r > 0)
-    {
-        tinybuf_result_set_current(NULL);
-        (void)tinybuf_result_unref(&rr);
-        return tinybuf_result_ok(r);
-    }
-    rr.res = r;
-    tinybuf_result_set_current(NULL);
-    return rr;
-}
-
-/* moved */
-{
-    // 写入单个版本封装的 box
-    int r = try_write_version_box(out, version, box);
-    if (r > 0)
-        return tinybuf_result_ok(r);
-    tinybuf_result rr = _err_with("write version box failed", r);
-    return rr;
-}
-
-/* moved */
-{
-    // 写入版本列表及对应 box
-    int r = try_write_version_list(out, versions, boxes, count);
-    if (r > 0)
-        return tinybuf_result_ok(r);
-    tinybuf_result rr = _err_with("write version list failed", r);
-    return rr;
-}
-
-/* moved */
-{
-    // 写入插件 GUID 映射表以支持运行时解析
-    int r = try_write_plugin_map_table(out);
-    if (r > 0)
-        return tinybuf_result_ok(r);
-    tinybuf_result rr = _err_with("write plugin map failed", r);
-    return rr;
-}
-
-/* moved */
-{
-    // 写入单个分区
-    int r = try_write_part(out, value);
-    if (r > 0)
-        return tinybuf_result_ok(r);
-    tinybuf_result rr = _err_with("write part failed", r);
-    return rr;
-}
-
-/* moved */
-{
-    // 写入多个分区，包含主 box 与子分区
-    int r = try_write_partitions(out, mainbox, subs, count);
-    if (r > 0)
-        return tinybuf_result_ok(r);
-    tinybuf_result rr = _err_with("write partitions failed", r);
-    return rr;
-}
-
-/* moved */
-#endif
-{
-    // 写入指针，t=0/1/2 表示起始/末尾/当前位置
-    enum offset_type et = start;
-    if (t == 1)
-        et = end;
-    else if (t == 2)
-        et = current;
-    int r = try_write_pointer_value(out, et, offset);
-    if (r > 0)
-        return tinybuf_result_ok(r);
-    tinybuf_result rr = _err_with("write pointer failed", r);
-    return rr;
-}
-
-/* moved */
-{
-    // 写入子引用，包含一个指针 box
-    int len = 0;
-    len += try_write_type(out, serialize_sub_ref);
-    enum offset_type et = (t == 1 ? end : (t == 2 ? current : start));
-    int r = try_write_pointer_value(out, et, offset);
-    if (r <= 0)
-        return _err_with("write sub_ref failed", r);
-    len += r;
-    return tinybuf_result_ok(len);
-}
-
-/* moved */
-{
-    int len = 0;
-    len += try_write_type(out, serialize_array);
-    len += try_write_int_data(FALSE, out, (QWORD)count);
-    return len;
-}
-/* moved */
-{
-    int len = 0;
-    len += try_write_type(out, serialize_map);
-    len += try_write_int_data(FALSE, out, (QWORD)count);
-    return len;
-}
-/* moved */
-{
-    return dump_string(len, str, out);
-}
-
-/* moved */
-{
-    // 构造头部与字符串池缓冲区
-    buffer *body = buffer_alloc();
-    buffer *pool = buffer_alloc();
-    strpool_reset_write(body);
-
-    // 写入类型索引与名称索引
-    int idx = strpool_add(name, (int)strlen(name));
-    uint8_t ty = serialize_type_idx;
-    buffer_append(body, (const char *)&ty, 1);
-    dump_int((uint64_t)idx, body);
-
-    // 写入自定义负载长度与内容
-    buffer *payload = buffer_alloc();
-    tinybuf_result wr = tinybuf_custom_try_write(name, in, payload);
-    dump_int((uint64_t)(wr.res > 0 ? wr.res : 0), body);
-    if (wr.res > 0)
-    {
-        buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload));
-    }
-
-    // 写入字符串池尾部
-    strpool_write_tail(pool);
-
-    // 计算最终偏移字段的变长编码长度，使总长度固定点自洽
-    uint64_t body_len = (uint64_t)buffer_get_length_inline(body);
-    uint64_t offset_guess_len = 1;
-    uint8_t tmpv[16];
-    while (1)
-    {
-        uint64_t off = 1 + offset_guess_len + body_len;
-        int l = int_serialize(off, tmpv);
-        if ((uint64_t)l == offset_guess_len)
-            break;
-        offset_guess_len = (uint64_t)l;
-    }
-    uint64_t final_off = 1 + offset_guess_len + body_len;
-
-    // 输出头部池地址表与body
-    try_write_type(out, serialize_str_pool_table);
-    try_write_int_data(FALSE, out, final_off);
-    buffer_append(out, buffer_get_data_inline(body), (int)body_len);
-
-    // 输出字符串池体
-    int pool_len = buffer_get_length_inline(pool);
-    if (pool_len)
-    {
-        buffer_append(out, buffer_get_data_inline(pool), pool_len);
-    }
-
-    // 清理临时缓冲区
-    buffer_free(payload);
-    buffer_free(body);
-    buffer_free(pool);
-
-    // 返回值与错误消息
-    if (wr.res <= 0)
-    {
-        tinybuf_result rr = tinybuf_result_err(wr.res, "write custom payload failed", NULL);
-        char *m = (char *)tinybuf_malloc(64);
-        snprintf(m, 64, "name=%s", name ? name : "(null)");
-        tinybuf_result_add_msg(&rr, m, (tinybuf_deleter_fn)tinybuf_free);
-        return rr;
-    }
-    int total = 1 + (int)offset_guess_len + (int)body_len + pool_len;
-    return tinybuf_result_ok(total);
-}
-
-//------------------------------
-#endif
+static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
 static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
 {
     AVLTree *tree2 = (AVLTree *)user_data;
@@ -3739,7 +3111,6 @@ static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
 
 /////////////////////////////读接口//////////////////////////////////
 
-// forward decls moved to tinybuf_private.h
 static inline int try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset);
 #ifdef _WIN32
 static volatile LONG s_pool_lock_var = 0;

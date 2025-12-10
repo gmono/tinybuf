@@ -45,7 +45,7 @@ int tinybuf_result_unref(tinybuf_result *r);
 
 void tinybuf_result_set_current(tinybuf_result *r);
 tinybuf_result *tinybuf_result_get_current(void);
-int tinybuf_result_append_merge(tinybuf_result *dst, const tinybuf_result *src, int (*mergeres)(int,int));
+int tinybuf_result_append_merge(tinybuf_result *dst, tinybuf_result *src, int (*mergeres)(int,int));
 
 tinybuf_result tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode);
 tinybuf_result tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);

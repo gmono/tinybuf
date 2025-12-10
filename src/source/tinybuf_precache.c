@@ -62,13 +62,13 @@ void tinybuf_precache_reset(buffer *out)
     precache_reset(out);
 }
 
-int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value)
+int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value, tinybuf_error *r)
 {
     int64_t start = (int64_t)buffer_get_length_inline(out);
     precache_add(out, value, start);
     int old = s_precache_redirect; s_precache_redirect = 0; // 禁用重定向，写入真实内容
     int before = buffer_get_length_inline(out);
-    tinybuf_value_serialize(value, out);
+    (void)tinybuf_value_serialize(value, out, r);
     int after = buffer_get_length_inline(out);
     s_precache_redirect = old;
     return (after - before) > 0 ? start : -1;

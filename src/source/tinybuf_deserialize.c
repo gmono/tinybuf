@@ -328,7 +328,7 @@ int int_deserialize(const uint8_t *in, int in_size, uint64_t *out)
 
 int optional_add(int x, int addx){ if(x<0) return x; return x+addx; }
 
-int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tinybuf_result *r)
+int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tinybuf_error *r)
 {
     assert(r);
     assert(out);
@@ -684,14 +684,15 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tin
         if (r1 <= 0)
         {
             buf_ref br_fallback = (buf_ref){(char *)ptr, (int64_t)size, (char *)ptr, (int64_t)size};
-            tinybuf_result r1b = tinybuf_try_read_box(&br_fallback, ten, contain_any);
-            if (r1b.res <= 0)
+            tinybuf_error r1b = tinybuf_result_ok(0);
+            int r1bl = tinybuf_try_read_box(&br_fallback, ten, contain_any, &r1b);
+            if (r1bl <= 0)
             {
                 tinybuf_value_free(ten);
                 tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: indexed tensor tensor decode failed");
-                return r1b.res;
+                return r1bl;
             }
-            r1 = r1b.res;
+            r1 = r1bl;
         }
         ptr += r1;
         size -= r1;
@@ -726,8 +727,9 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tin
                 if (r2 <= 0)
                 {
                     buf_ref br2 = (buf_ref){(char *)ptr, (int64_t)size, (char *)ptr, (int64_t)size};
-                    tinybuf_result rr3 = tinybuf_try_read_box(&br2, idx, contain_any);
-                    if (rr3.res <= 0)
+                    tinybuf_error rr3 = tinybuf_result_ok(0);
+                    int rl3 = tinybuf_try_read_box(&br2, idx, contain_any, &rr3);
+                    if (rl3 <= 0)
                     {
                         if (it->indices)
                         {
@@ -736,9 +738,9 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tin
                         }
                         tinybuf_value_free(ten); tinybuf_free(it);
                         tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: indexed tensor index decode failed");
-                        return rr3.res;
+                        return rl3;
                     }
-                    r2 = rr3.res;
+                    r2 = rl3;
                 }
                 it->indices[i] = idx;
                 ptr += r2; size -= r2;

@@ -34,9 +34,25 @@ struct T_tinybuf_value
 };
 
 // internal types for tensor and advanced values
-typedef struct { int dtype; int dims; int64_t *shape; void *data; int64_t count; } tinybuf_tensor_t;
-typedef struct { int64_t count; uint8_t *bits; } tinybuf_bool_map_t;
-typedef struct { tinybuf_value *tensor; tinybuf_value **indices; int dims; } tinybuf_indexed_tensor_t;
+typedef struct
+{
+    int dtype;
+    int dims;
+    int64_t *shape;
+    void *data;
+    int64_t count;
+} tinybuf_tensor_t;
+typedef struct
+{
+    int64_t count;
+    uint8_t *bits;
+} tinybuf_bool_map_t;
+typedef struct
+{
+    tinybuf_value *tensor;
+    tinybuf_value **indices;
+    int dims;
+} tinybuf_indexed_tensor_t;
 
 // serialize type markers
 typedef enum
@@ -96,14 +112,16 @@ typedef enum
 } serialize_type;
 
 // pointer offset addressing types (shared)
-enum offset_type {
+enum offset_type
+{
     start = 0,
     end = 1,
     current = 2,
     parent_flat_start = 3,
     parent_flat_end = 4
 };
-typedef struct {
+typedef struct
+{
     int64_t offset;
     enum offset_type type;
 } pointer_value;
@@ -120,22 +138,22 @@ typedef int BOOL;
 #endif
 
 // internal write helpers used across modules
-tinybuf_result try_write_type(buffer *out, serialize_type type);
-tinybuf_result try_write_int_data(int isneg, buffer *out, uint64_t val);
-tinybuf_result try_write_pointer_value(buffer *out, enum offset_type t, int64_t offset);
-tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out);
+tinybuf_error try_write_type(buffer *out, serialize_type type);
+tinybuf_error try_write_int_data(int isneg, buffer *out, uint64_t val);
+int try_write_pointer_value(buffer *out, enum offset_type t, int64_t offset, tinybuf_error *r);
+int tinybuf_value_serialize(const tinybuf_value *value, buffer *out, tinybuf_error *r);
 int dump_int(uint64_t len, buffer *out);
 
 // internal read helpers used across modules
 int buf_offset(buf_ref *buf, int64_t offset);
-tinybuf_result try_read_type(buf_ref *buf, serialize_type *type);
+tinybuf_error try_read_type(buf_ref *buf, serialize_type *type);
 int try_read_int_tovar(BOOL isneg, const char *ptr, int size, QWORD *out_val);
 int int_deserialize(const uint8_t *in, int in_size, uint64_t *out);
 int optional_add(int x, int addx);
 int int_serialize(uint64_t in, uint8_t *out);
 int dump_string(int len, const char *str, buffer *out);
- tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version);
- int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tinybuf_result *r);
+int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version, tinybuf_error *r);
+int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tinybuf_error *r);
 const char *tinybuf_last_error_message(void);
 int contain_any(uint64_t v);
 uint32_t load_be32(const void *p);
@@ -157,25 +175,25 @@ extern const char *s_last_error_msg;
 
 // minimal plugin runtime APIs used by writer
 int tinybuf_plugin_get_count(void);
-const char* tinybuf_plugin_get_guid(int index);
+const char *tinybuf_plugin_get_guid(int index);
 // precache APIs
 void tinybuf_precache_reset(buffer *out);
-int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value);
+int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value, tinybuf_error *r);
 void tinybuf_precache_set_redirect(int enable);
 int tinybuf_precache_is_redirect(void);
 int64_t tinybuf_precache_find_start_for(buffer *out, const tinybuf_value *value);
 // internal write APIs
-tinybuf_result try_write_box(buffer *out, const tinybuf_value *value);
-tinybuf_result try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box);
-tinybuf_result try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count);
-tinybuf_result try_write_plugin_map_table(buffer *out);
-tinybuf_result try_write_part(buffer *out, const tinybuf_value *value);
-tinybuf_result try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count);
+int try_write_box(buffer *out, const tinybuf_value *value, tinybuf_error *r);
+int try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box, tinybuf_error *r);
+int try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count, tinybuf_error *r);
+int try_write_plugin_map_table(buffer *out, tinybuf_error *r);
+int try_write_part(buffer *out, const tinybuf_value *value, tinybuf_error *r);
+int try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count, tinybuf_error *r);
 
 // string pool (write side)
 extern int s_use_strpool;
 void strpool_reset_write(const buffer *out);
 int strpool_add(const char *data, int len);
-tinybuf_result strpool_write_tail(buffer *out);
+tinybuf_error strpool_write_tail(buffer *out);
 
 #endif // TINYBUF_PRIVATE_H

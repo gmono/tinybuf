@@ -196,7 +196,7 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
     dump_labels_emit_prefix(cur_pos, dst);
 
     serialize_type t = serialize_null;
-    tinybuf_result add = try_read_type(buf, &t);
+    tinybuf_error add = try_read_type(buf, &t);
     if (add.res <= 0) return add.res;
     consumed += add.res;
 
@@ -354,10 +354,11 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
             tinybuf_value tmp;
             memset(&tmp, 0, sizeof(tmp));
             buf_ref hb = *buf;
-            tinybuf_result r1 = try_read_box(&hb, &tmp, contain_any);
-            if (r1.res <= 0) return r1.res;
-            buf_offset(buf, r1.res);
-            consumed += r1.res;
+            tinybuf_error r1 = tinybuf_result_ok(0);
+            int n1 = tinybuf_try_read_box(&hb, &tmp, contain_any, &r1);
+            if (n1 <= 0) return n1;
+            buf_offset(buf, n1);
+            consumed += n1;
             tinybuf_value_free(&tmp);
 
             QWORD dims = 0;
@@ -378,10 +379,11 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
                     tinybuf_value tmp2;
                     memset(&tmp2, 0, sizeof(tmp2));
                     buf_ref hb2 = *buf;
-                    tinybuf_result r2 = try_read_box(&hb2, &tmp2, contain_any);
-                    if (r2.res <= 0) return r2.res;
-                    buf_offset(buf, r2.res);
-                    consumed += r2.res;
+                    tinybuf_error r2 = tinybuf_result_ok(0);
+                    int n2 = tinybuf_try_read_box(&hb2, &tmp2, contain_any, &r2);
+                    if (n2 <= 0) return n2;
+                    buf_offset(buf, n2);
+                    consumed += n2;
                     tinybuf_value_free(&tmp2);
                 }
             }
@@ -621,9 +623,10 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
         default:
         {
             uint8_t raw = (uint8_t)t;
-            tinybuf_result a = tinybuf_plugins_try_dump_by_type(raw, buf, dst);
-            if (a.res > 0) {
-                consumed += a.res;
+            tinybuf_error r1 = tinybuf_result_ok(0);
+            int n1 = tinybuf_plugins_try_dump_by_type(raw, buf, dst, &r1);
+            if (n1 > 0) {
+                consumed += n1;
             } else {
                 append_cstr(dst, "<unknown>");
             }
@@ -687,7 +690,7 @@ static int collect_box_labels(buf_ref *br)
     s_dump_box_starts[s_dump_box_starts_count++] = start_pos;
 
     serialize_type t = serialize_null;
-    tinybuf_result add = try_read_type(br, &t);
+    tinybuf_error add = try_read_type(br, &t);
     if (add.res <= 0) return add.res;
     consumed += add.res;
 

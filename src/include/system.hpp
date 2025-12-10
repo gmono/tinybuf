@@ -108,7 +108,7 @@ public:
     CRTP_BASE
     // 剩余大小 根据currpos计算
     usize rest_size() { return allsize() - curr_offset(); }
-    dataptr curr_ptr() { return ptr(curr_offset()); } //如果优化 内部做最近访问cache
+    dataptr curr_ptr() { return ptr(curr_offset()); } // 如果优化 内部做最近访问cache
 
     //----代理方法
     // 这里考虑可以直接返回当前指针不需要计算的情况
@@ -144,9 +144,8 @@ public:
     void set_offset(usize n) override { target->set_offset(_offset + n); }
 };
 
-//引用表
+// 引用表
 
-
-//序列化支持中 可以直接serialize(){xx&xx x&xx} 如果使用级联对象 则会自动查找对应的serializer
-//如果要实现指针引用方式而非数据级联则应该使用-> serializer<->xxxx 来实现
-//其中xxxx必须是一个类指针 可以是普通对象指针 或可序列化对象指针或对应智能指针如uniqueptr和sharedptr intrusiveptr
+// 序列化支持中 可以直接serialize(){xx&xx x&xx} 如果使用级联对象 则会自动查找对应的serializer
+// 如果要实现指针引用方式而非数据级联则应该使用-> serializer<->xxxx 来实现
+// 其中xxxx必须是一个类指针 可以是普通对象指针 或可序列化对象指针或对应智能指针如uniqueptr和sharedptr intrusiveptr

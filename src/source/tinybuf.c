@@ -178,7 +178,7 @@ void tinybuf_set_use_strpool(int enable)
     s_use_strpool = enable ? 1 : 0;
 }
 
-static inline tinybuf_result _err_with(const char *msg, int rc)
+static inline tinybuf_error _err_with(const char *msg, int rc)
 {
     return tinybuf_result_err(rc, msg, NULL);
 }

@@ -48,25 +48,25 @@ int strpool_add(const char *data, int len)
 
 typedef struct { int parent; unsigned char ch; int is_leaf; int leaf_id; } trie_node;
 
-tinybuf_result strpool_write_tail(buffer *out)
+tinybuf_error strpool_write_tail(buffer *out)
 {
     if(!s_use_strpool || s_strpool_count==0) return tinybuf_result_ok(0);
     if(!s_use_strpool_trie)
     {
         int len = 0;
-        tinybuf_result r1 = try_write_type(out, serialize_str_pool); if (r1.res <= 0) return r1; len += r1.res;
-        tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)s_strpool_count); if (r2.res <= 0) return r2; len += r2.res;
+        tinybuf_error r1 = try_write_type(out, serialize_str_pool); if (r1.res <= 0) return r1; len += r1.res;
+        tinybuf_error r2 = try_write_int_data(0, out, (uint64_t)s_strpool_count); if (r2.res <= 0) return r2; len += r2.res;
         for(int i=0;i<s_strpool_count;++i)
         {
             int sl = buffer_get_length_inline(s_strpool[i].buf);
-            tinybuf_result r3 = try_write_type(out, serialize_string); if (r3.res <= 0) return r3; len += r3.res;
-            tinybuf_result r4 = try_write_int_data(0, out, (uint64_t)sl); if (r4.res <= 0) return r4; len += r4.res;
+            tinybuf_error r3 = try_write_type(out, serialize_string); if (r3.res <= 0) return r3; len += r3.res;
+            tinybuf_error r4 = try_write_int_data(0, out, (uint64_t)sl); if (r4.res <= 0) return r4; len += r4.res;
             if(sl){ buffer_append(out, buffer_get_data_inline(s_strpool[i].buf), sl); }
         }
         return tinybuf_result_ok(len);
     }
     int before = buffer_get_length_inline(out);
-    { tinybuf_result r0 = try_write_type(out, 27); if (r0.res <= 0) return r0; } /* trie pool */
+    { tinybuf_error r0 = try_write_type(out, 27); if (r0.res <= 0) return r0; } /* trie pool */
     trie_node *nodes = NULL;
     int ncount = 1;
     nodes = (trie_node*)tinybuf_malloc(sizeof(trie_node)*1);
@@ -95,14 +95,14 @@ tinybuf_result strpool_write_tail(buffer *out)
         }
         nodes[cur].is_leaf=1; nodes[cur].leaf_id=i;
     }
-    { tinybuf_result rn = try_write_int_data(0, out, (uint64_t)ncount); if (rn.res <= 0) return rn; }
+    { tinybuf_error rn = try_write_int_data(0, out, (uint64_t)ncount); if (rn.res <= 0) return rn; }
     for(int i=0;i<ncount;++i)
     {
-        { tinybuf_result rp = try_write_int_data(0, out, (uint64_t)(nodes[i].parent<0?0:(uint64_t)nodes[i].parent)); if (rp.res <= 0) return rp; }
+        { tinybuf_error rp = try_write_int_data(0, out, (uint64_t)(nodes[i].parent<0?0:(uint64_t)nodes[i].parent)); if (rp.res <= 0) return rp; }
         buffer_append(out, (const char*)&nodes[i].ch, 1);
         uint8_t flag = nodes[i].is_leaf?1:0;
         buffer_append(out, (const char*)&flag, 1);
-        if(nodes[i].is_leaf){ tinybuf_result rl = try_write_int_data(0, out, (uint64_t)nodes[i].leaf_id); if (rl.res <= 0) return rl; }
+        if(nodes[i].is_leaf){ tinybuf_error rl = try_write_int_data(0, out, (uint64_t)nodes[i].leaf_id); if (rl.res <= 0) return rl; }
     }
     tinybuf_free(nodes);
     int after = buffer_get_length_inline(out);

@@ -35,7 +35,7 @@ extern "C"
     typedef struct T_tinybuf_value tinybuf_value;
 
     // version list和version的实现
-    
+
     void tinybuf_versionlist_add(tinybuf_value *versionlist, int64_t version, tinybuf_value *value);
     void tinybuf_version_set(tinybuf_value *target, int64_t version, tinybuf_value *value);
 
@@ -100,35 +100,35 @@ extern "C"
      * @param value 对象
      * @return int值
      */
-    int64_t tinybuf_value_get_int(const tinybuf_value *value, tinybuf_result *r);
+    int64_t tinybuf_value_get_int(const tinybuf_value *value, tinybuf_error *r);
 
     /**
      * 获取double值
      * @param value 对象
      * @return double值
      */
-    double tinybuf_value_get_double(const tinybuf_value *value, tinybuf_result *r);
+    double tinybuf_value_get_double(const tinybuf_value *value, tinybuf_error *r);
 
     /**
      * 读取bool值
      * @param value 对象
      * @return bool值
      */
-    int tinybuf_value_get_bool(const tinybuf_value *value, tinybuf_result *r);
+    int tinybuf_value_get_bool(const tinybuf_value *value, tinybuf_error *r);
 
     /**
      * 读取string值
      * @param value 对象
      * @return string值
      */
-    buffer *tinybuf_value_get_string(const tinybuf_value *value, tinybuf_result *r);
+    buffer *tinybuf_value_get_string(const tinybuf_value *value, tinybuf_error *r);
 
     /**
      * 获取array或map类型时的成员个数
      * @param value 对象
      * @return 成员个数
      */
-    int tinybuf_value_get_child_size(const tinybuf_value *value, tinybuf_result *r);
+    int tinybuf_value_get_child_size(const tinybuf_value *value, tinybuf_error *r);
 
     /**
      * 获取成员
@@ -136,7 +136,7 @@ extern "C"
      * @param index 索引
      * @return 成员对象的指针
      */
-    const tinybuf_value *tinybuf_value_get_array_child(const tinybuf_value *value, int index, tinybuf_result *r);
+    const tinybuf_value *tinybuf_value_get_array_child(const tinybuf_value *value, int index, tinybuf_error *r);
 
     /**
      * 根据key获取成员对象
@@ -144,8 +144,8 @@ extern "C"
      * @param key 键
      * @return 成员对象
      */
-    const tinybuf_value *tinybuf_value_get_map_child(const tinybuf_value *value, const char *key, tinybuf_result *r);
-    const tinybuf_value *tinybuf_value_get_map_child2(const tinybuf_value *value, const char *key, int key_len, tinybuf_result *r);
+    const tinybuf_value *tinybuf_value_get_map_child(const tinybuf_value *value, const char *key, tinybuf_error *r);
+    const tinybuf_value *tinybuf_value_get_map_child2(const tinybuf_value *value, const char *key, int key_len, tinybuf_error *r);
 
     /**
      * 获取map成员对象以及key
@@ -154,20 +154,20 @@ extern "C"
      * @param key key指针的指针
      * @return 成员对象的指针
      */
-    const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *value, int index, buffer **key, tinybuf_result *r);
+    const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *value, int index, buffer **key, tinybuf_error *r);
 
     int tinybuf_dump_buffer_as_text(const char *data, int len, buffer *out);
 
-    tinybuf_result tinybuf_try_write_array_header(buffer *out, int count);
-    tinybuf_result tinybuf_try_write_map_header(buffer *out, int count);
-    tinybuf_result tinybuf_try_write_string_raw(buffer *out, const char *str, int len);
+    int tinybuf_try_write_array_header(buffer *out, int count, tinybuf_error *r);
+    int tinybuf_try_write_map_header(buffer *out, int count, tinybuf_error *r);
+    int tinybuf_try_write_string_raw(buffer *out, const char *str, int len, tinybuf_error *r);
 
     void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode);
 
     void tinybuf_set_use_strpool(int enable);
 
     void tinybuf_precache_reset(buffer *out);
-    int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value);
+    int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value, tinybuf_error *r);
     void tinybuf_precache_set_redirect(int enable);
     int tinybuf_precache_is_redirect(void);
     ////////////////////////////////赋值////////////////////////////////
@@ -199,16 +199,16 @@ extern "C"
     int tinybuf_value_init_tensor(tinybuf_value *value, int dtype, const int64_t *shape, int dims, const void *data, int64_t elem_count);
     int tinybuf_value_init_bool_map(tinybuf_value *value, const uint8_t *bits, int64_t count);
     int tinybuf_value_init_indexed_tensor(tinybuf_value *value, const tinybuf_value *tensor, const tinybuf_value **indices, int dims);
-    int tinybuf_tensor_get_dtype(const tinybuf_value *value, tinybuf_result *r);
-    int tinybuf_tensor_get_ndim(const tinybuf_value *value, tinybuf_result *r);
-    const int64_t* tinybuf_tensor_get_shape(const tinybuf_value *value, tinybuf_result *r);
-    int64_t tinybuf_tensor_get_count(const tinybuf_value *value, tinybuf_result *r);
-    void* tinybuf_tensor_get_data(tinybuf_value *value, tinybuf_result *r);
-    const void* tinybuf_tensor_get_data_const(const tinybuf_value *value, tinybuf_result *r);
-    const tinybuf_value* tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value *value, tinybuf_result *r);
-    const tinybuf_value* tinybuf_indexed_tensor_get_index_const(const tinybuf_value *value, int dim, tinybuf_result *r);
-    int64_t tinybuf_bool_map_get_count(const tinybuf_value *value, tinybuf_result *r);
-    const uint8_t* tinybuf_bool_map_get_bits_const(const tinybuf_value *value, tinybuf_result *r);
+    int tinybuf_tensor_get_dtype(const tinybuf_value *value, tinybuf_error *r);
+    int tinybuf_tensor_get_ndim(const tinybuf_value *value, tinybuf_error *r);
+    const int64_t *tinybuf_tensor_get_shape(const tinybuf_value *value, tinybuf_error *r);
+    int64_t tinybuf_tensor_get_count(const tinybuf_value *value, tinybuf_error *r);
+    void *tinybuf_tensor_get_data(tinybuf_value *value, tinybuf_error *r);
+    const void *tinybuf_tensor_get_data_const(const tinybuf_value *value, tinybuf_error *r);
+    const tinybuf_value *tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value *value, tinybuf_error *r);
+    const tinybuf_value *tinybuf_indexed_tensor_get_index_const(const tinybuf_value *value, int dim, tinybuf_error *r);
+    int64_t tinybuf_bool_map_get_count(const tinybuf_value *value, tinybuf_error *r);
+    const uint8_t *tinybuf_bool_map_get_bits_const(const tinybuf_value *value, tinybuf_error *r);
 
     /**
      * 对象赋值为string类型
@@ -260,7 +260,7 @@ extern "C"
      * @param out 字节流存放地址
      * @return
      */
-    tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out);
+    int tinybuf_value_serialize(const tinybuf_value *value, buffer *out, tinybuf_error *r);
 
     /**
      * 对象序列化成json字节流
@@ -269,7 +269,7 @@ extern "C"
      * @param compact 是否紧凑(去除多余的空格回车符等)
      * @return
      */
-    int tinybuf_value_serialize_as_json(const tinybuf_value *value, buffer *out, int compact, tinybuf_result *r);
+    int tinybuf_value_serialize_as_json(const tinybuf_value *value, buffer *out, int compact, tinybuf_error *r);
 
     ////////////////////////////////反序列化////////////////////////////////
 
@@ -280,7 +280,7 @@ extern "C"
      * @param out 输出对象，必须不为空
      * @return 序列化消耗的字节数
      */
-    int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out);
+    int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tinybuf_error *r);
 
     /**
      * 加载value部分
@@ -289,7 +289,7 @@ extern "C"
      * @param out vlue值输出
      * @return 消耗的字节数
      */
-    int tinybuf_value_deserialize_from_json(const char *ptr, int size, tinybuf_value *out, tinybuf_result *r);
+    int tinybuf_value_deserialize_from_json(const char *ptr, int size, tinybuf_value *out, tinybuf_error *r);
 
     int tinybuf_value_set_plugin_index(tinybuf_value *value, int index);
     int tinybuf_value_get_plugin_index(const tinybuf_value *value);

@@ -46,43 +46,50 @@ int dump_int(uint64_t len, buffer *out)
     return add;
 }
 
+typedef struct { buffer *out; tinybuf_error *r; } _tb_ser_ctx;
 static int avl_tree_for_each_node_dump_map(void *user_data, AVLTreeNode *node)
 {
-    buffer *out = (buffer *)user_data;
+    _tb_ser_ctx *ctx = (_tb_ser_ctx *)user_data;
+    buffer *out = ctx->out;
     buffer *key = (buffer *)avl_tree_node_key(node);
     tinybuf_value *val = (tinybuf_value *)avl_tree_node_value(node);
     dump_string(buffer_get_length_inline(key), buffer_get_data_inline(key), out);
-    tinybuf_value_serialize(val, out);
+    (void)tinybuf_value_serialize(val, out, ctx->r);
     return 0;
 }
 
 static int avl_tree_for_each_node_dump_array(void *user_data, AVLTreeNode *node)
 {
-    buffer *out = (buffer *)user_data;
-    tinybuf_value_serialize(avl_tree_node_value(node), out);
+    _tb_ser_ctx *ctx = (_tb_ser_ctx *)user_data;
+    buffer *out = ctx->out;
+    (void)tinybuf_value_serialize(avl_tree_node_value(node), out, ctx->r);
     return 0;
 }
 
-tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
+int tinybuf_value_serialize(const tinybuf_value *value, buffer *out, tinybuf_error *r)
 {
     assert(value);
     assert(out);
     int before = buffer_get_length_inline(out);
     if (value && value->_custom_box_type >= 0)
     {
-        tinybuf_result rr = tinybuf_plugins_try_write((uint8_t)value->_custom_box_type, value, out);
-        if (rr.res <= 0)
+        int w = tinybuf_plugins_try_write((uint8_t)value->_custom_box_type, value, out, r);
+        if (w <= 0)
         {
             s_last_error_msg = "plugin write failed";
+            return w;
         }
-        return rr;
+        return w;
     }
     if (tinybuf_precache_is_redirect() && value)
     {
         int64_t start_pos = tinybuf_precache_find_start_for(out, value);
         if (start_pos >= 0)
         {
-            return try_write_pointer_value(out, (enum offset_type)0, start_pos);
+            int t = try_write_pointer_value(out, (enum offset_type)0, start_pos, r);
+            if (t <= 0)
+                return t;
+            return t;
         }
     }
     switch (value->_type)
@@ -149,7 +156,8 @@ tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         buffer_append(out, &type, 1);
         int map_size = avl_tree_num_entries(value->_data._map_array);
         dump_int(map_size, out);
-        avl_tree_for_each_node(value->_data._map_array, out, avl_tree_for_each_node_dump_map);
+        _tb_ser_ctx ctx = { out, r };
+        avl_tree_for_each_node(value->_data._map_array, &ctx, avl_tree_for_each_node_dump_map);
     }
     break;
 
@@ -159,7 +167,8 @@ tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         buffer_append(out, &type, 1);
         int array_size = avl_tree_num_entries(value->_data._map_array);
         dump_int(array_size, out);
-        avl_tree_for_each_node(value->_data._map_array, out, avl_tree_for_each_node_dump_array);
+        _tb_ser_ctx ctx2 = { out, r };
+        avl_tree_for_each_node(value->_data._map_array, &ctx2, avl_tree_for_each_node_dump_array);
     }
     break;
     case tinybuf_tensor:
@@ -312,14 +321,14 @@ tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         }
         char type = serialize_indexed_tensor;
         buffer_append(out, &type, 1);
-        { tinybuf_result r = try_write_box(out, it->tensor); (void)r; }
+        { (void)try_write_box(out, it->tensor, r); }
         dump_int((uint64_t)it->dims, out);
         for (int i = 0; i < it->dims; ++i)
         {
             if (it->indices && it->indices[i])
             {
                 dump_int(1, out);
-                { tinybuf_result r2 = try_write_box(out, it->indices[i]); (void)r2; }
+                { (void)try_write_box(out, it->indices[i], r); }
             }
             else
             {
@@ -335,5 +344,7 @@ tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
     }
 
     int after = buffer_get_length_inline(out);
-    return tinybuf_result_ok(after - before);
+    tinybuf_error ok = tinybuf_result_ok(after - before);
+    tinybuf_result_append_merge(r, &ok, tinybuf_merger_sum);
+    return after - before;
 }

@@ -252,7 +252,7 @@ int tinybuf_value_array_append(tinybuf_value *parent, tinybuf_value *value)
     avl_tree_insert(parent->_data._map_array, (AVLTreeKey)key, value, NULL, mapFreeValueFunc);
     return 0;
 }
-int tinybuf_value_get_child_size(const tinybuf_value *value, tinybuf_result *r)
+int tinybuf_value_get_child_size(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
     if (!value || (value->_type != tinybuf_map && value->_type != tinybuf_array))
@@ -263,7 +263,7 @@ int tinybuf_value_get_child_size(const tinybuf_value *value, tinybuf_result *r)
     return avl_tree_num_entries(value->_data._map_array);
 }
 
-const tinybuf_value *tinybuf_value_get_array_child(const tinybuf_value *value, int index, tinybuf_result *r)
+const tinybuf_value *tinybuf_value_get_array_child(const tinybuf_value *value, int index, tinybuf_error *r)
 {
     assert(r);
     if (!value || value->_type != tinybuf_array || !value->_data._map_array)
@@ -274,12 +274,12 @@ const tinybuf_value *tinybuf_value_get_array_child(const tinybuf_value *value, i
     return (tinybuf_value *)avl_tree_lookup(value->_data._map_array, (AVLTreeKey)index);
 }
 
-const tinybuf_value *tinybuf_value_get_map_child(const tinybuf_value *value, const char *key, tinybuf_result *r)
+const tinybuf_value *tinybuf_value_get_map_child(const tinybuf_value *value, const char *key, tinybuf_error *r)
 {
     return tinybuf_value_get_map_child2(value, key, (int)strlen(key), r);
 }
 
-const tinybuf_value *tinybuf_value_get_map_child2(const tinybuf_value *value, const char *key, int key_len, tinybuf_result *r)
+const tinybuf_value *tinybuf_value_get_map_child2(const tinybuf_value *value, const char *key, int key_len, tinybuf_error *r)
 {
     assert(r);
     if (!value || !key || value->_type != tinybuf_map || !value->_data._map_array)
@@ -294,7 +294,7 @@ const tinybuf_value *tinybuf_value_get_map_child2(const tinybuf_value *value, co
     return (tinybuf_value *)avl_tree_lookup(value->_data._map_array, &buf);
 }
 
-const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *value, int index, buffer **key, tinybuf_result *r)
+const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *value, int index, buffer **key, tinybuf_error *r)
 {
     assert(r);
     if (!value || value->_type != tinybuf_map || !value->_data._map_array)
@@ -329,7 +329,7 @@ void tinybuf_version_set(tinybuf_value *target, int64_t version, tinybuf_value *
     target->_data._ref = value;
 }
 
-const tinybuf_value* tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value *value, tinybuf_result *r)
+const tinybuf_value* tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
     if(!value || value->_type!=tinybuf_indexed_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_indexed_tensor_get_tensor_const: not indexed_tensor"); return NULL; }
@@ -337,7 +337,7 @@ const tinybuf_value* tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value
     return it ? it->tensor : NULL;
 }
 
-const tinybuf_value* tinybuf_indexed_tensor_get_index_const(const tinybuf_value *value, int dim, tinybuf_result *r)
+const tinybuf_value* tinybuf_indexed_tensor_get_index_const(const tinybuf_value *value, int dim, tinybuf_error *r)
 {
     assert(r);
     if(!value || value->_type!=tinybuf_indexed_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_indexed_tensor_get_index_const: not indexed_tensor"); return NULL; }
@@ -351,7 +351,7 @@ tinybuf_type tinybuf_value_get_type(const tinybuf_value *value)
     return value->_type;
 }
 
-int64_t tinybuf_value_get_int(const tinybuf_value *value, tinybuf_result *r)
+int64_t tinybuf_value_get_int(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
     if (!value || value->_type != tinybuf_int)
@@ -362,7 +362,7 @@ int64_t tinybuf_value_get_int(const tinybuf_value *value, tinybuf_result *r)
     return value->_data._int;
 }
 
-double tinybuf_value_get_double(const tinybuf_value *value, tinybuf_result *r)
+double tinybuf_value_get_double(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
     if (!value || value->_type != tinybuf_double)
@@ -373,7 +373,7 @@ double tinybuf_value_get_double(const tinybuf_value *value, tinybuf_result *r)
     return value->_data._double;
 }
 
-int tinybuf_value_get_bool(const tinybuf_value *value, tinybuf_result *r)
+int tinybuf_value_get_bool(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
     if (!value || value->_type != tinybuf_bool)
@@ -384,7 +384,7 @@ int tinybuf_value_get_bool(const tinybuf_value *value, tinybuf_result *r)
     return value->_data._bool;
 }
 
-buffer *tinybuf_value_get_string(const tinybuf_value *value, tinybuf_result *r)
+buffer *tinybuf_value_get_string(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
     if (!value || value->_type != tinybuf_string)

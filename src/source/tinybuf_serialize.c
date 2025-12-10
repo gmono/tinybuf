@@ -34,6 +34,18 @@ int int_serialize(uint64_t in, uint8_t *out)
     return ++index;
 }
 
+int dump_int(uint64_t len, buffer *out)
+{
+    int buf_len = buffer_get_length_inline(out);
+    if (buffer_get_capacity_inline(out) - buf_len < 16)
+    {
+        buffer_add_capacity(out, 16);
+    }
+    int add = int_serialize(len, (uint8_t *)buffer_get_data_inline(out) + buf_len);
+    buffer_set_length(out, buf_len + add);
+    return add;
+}
+
 static int avl_tree_for_each_node_dump_map(void *user_data, AVLTreeNode *node)
 {
     buffer *out = (buffer *)user_data;
@@ -55,6 +67,7 @@ tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
 {
     assert(value);
     assert(out);
+    int before = buffer_get_length_inline(out);
     if (value && value->_custom_box_type >= 0)
     {
         tinybuf_result rr = tinybuf_plugins_try_write((uint8_t)value->_custom_box_type, value, out);
@@ -321,5 +334,6 @@ tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         break;
     }
 
-    return tinybuf_result_ok(0);
+    int after = buffer_get_length_inline(out);
+    return tinybuf_result_ok(after - before);
 }

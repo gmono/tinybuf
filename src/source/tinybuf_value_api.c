@@ -2,6 +2,256 @@
 #include "tinybuf_buffer.h"
 #include "tinybuf_private.h"
 
+static tinybuf_value **s_clear_stack = NULL;
+static int s_clear_stack_count = 0;
+static int s_clear_stack_capacity = 0;
+
+static inline int clear_stack_contains(tinybuf_value *v)
+{
+    for (int i = 0; i < s_clear_stack_count; ++i)
+    {
+        if (s_clear_stack[i] == v)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static inline void clear_stack_push(tinybuf_value *v)
+{
+    if (s_clear_stack_count == s_clear_stack_capacity)
+    {
+        int newcap = s_clear_stack_capacity ? (s_clear_stack_capacity * 2) : 16;
+        s_clear_stack = (tinybuf_value **)tinybuf_realloc(s_clear_stack, sizeof(tinybuf_value *) * newcap);
+        s_clear_stack_capacity = newcap;
+    }
+    s_clear_stack[s_clear_stack_count++] = v;
+}
+
+static inline void clear_stack_pop(tinybuf_value *v)
+{
+    if (s_clear_stack_count == 0)
+    {
+        return;
+    }
+    if (s_clear_stack[s_clear_stack_count - 1] == v)
+    {
+        --s_clear_stack_count;
+        return;
+    }
+    for (int i = 0; i < s_clear_stack_count; ++i)
+    {
+        if (s_clear_stack[i] == v)
+        {
+            for (int j = i + 1; j < s_clear_stack_count; ++j)
+            {
+                s_clear_stack[j - 1] = s_clear_stack[j];
+            }
+            --s_clear_stack_count;
+            return;
+        }
+    }
+}
+
+inline bool has_sub_ref(const tinybuf_value *value)
+{
+    return value->_data._ref != NULL && (value->_type == tinybuf_value_ref || value->_type == tinybuf_version);
+}
+
+int tinybuf_value_clear(tinybuf_value *value);
+inline bool maybe_free_sub_ref(tinybuf_value *value)
+{
+    if (has_sub_ref(value))
+    {
+        tinybuf_value *sub = value->_data._ref;
+        value->_data._ref = NULL;
+        tinybuf_value_clear(sub);
+        return true;
+    }
+    return false;
+}
+
+inline bool need_custom_free(const tinybuf_value *value)
+{
+    return value->_data._custom != NULL && (value->_type == tinybuf_custom || value->_type == tinybuf_tensor || value->_type == tinybuf_bool_map || value->_type == tinybuf_indexed_tensor);
+}
+inline bool maybe_free_custom(tinybuf_value *value)
+{
+    if (need_custom_free(value))
+    {
+        if (value->_custom_free)
+        {
+            value->_custom_free(value->_data._custom);
+            value->_data._custom = NULL;
+            value->_type = tinybuf_null;
+        }
+        else
+        {
+            free(value->_data._custom);
+            value->_data._custom = NULL;
+            value->_type = tinybuf_null;
+        }
+        return true;
+    }
+    return false;
+}
+
+tinybuf_value *tinybuf_value_alloc(void)
+{
+    tinybuf_value *ret = tinybuf_malloc(sizeof(tinybuf_value));
+    assert(ret);
+    memset(ret, 0, sizeof(tinybuf_value));
+    ret->_type = tinybuf_null;
+    ret->_plugin_index = -1;
+    ret->_custom_box_type = -1;
+    return ret;
+}
+
+tinybuf_value *tinybuf_value_alloc_with_type(tinybuf_type type)
+{
+    tinybuf_value *value = tinybuf_value_alloc();
+    value->_type = type;
+    return value;
+}
+
+int tinybuf_value_free(tinybuf_value *value)
+{
+    assert(value);
+    tinybuf_value_clear(value);
+    tinybuf_free(value);
+    return 0;
+}
+
+int tinybuf_value_clear(tinybuf_value *value)
+{
+    assert(value);
+    if (clear_stack_contains(value))
+    {
+        return 0;
+    }
+    clear_stack_push(value);
+    switch (value->_type)
+    {
+    case tinybuf_string:
+    {
+        if (value->_data._string)
+        {
+            buffer_free(value->_data._string);
+            value->_data._string = NULL;
+        }
+    }
+    break;
+
+    case tinybuf_map:
+    case tinybuf_array:
+    {
+        if (value->_data._map_array)
+        {
+            avl_tree_free(value->_data._map_array);
+            value->_data._map_array = NULL;
+        }
+    }
+    break;
+
+    default:
+        break;
+    }
+
+    maybe_free_sub_ref(value);
+    maybe_free_custom(value);
+
+    if (value->_type != tinybuf_null)
+    {
+        memset(value, 0, sizeof(tinybuf_value));
+        value->_type = tinybuf_null;
+    }
+    clear_stack_pop(value);
+    return 0;
+}
+
+static int mapKeyCompare(AVLTreeKey key1, AVLTreeKey key2)
+{
+    buffer *buf_key1 = (buffer *)key1;
+    buffer *buf_key2 = (buffer *)key2;
+    int buf_len1 = buffer_get_length_inline(buf_key1);
+    int buf_len2 = buffer_get_length_inline(buf_key2);
+    int min_len = buf_len1 < buf_len2 ? buf_len1 : buf_len2;
+    int ret = memcmp(buffer_get_data_inline(buf_key1), buffer_get_data_inline(buf_key2), min_len);
+    if (ret != 0)
+    {
+        return ret;
+    }
+    return buf_len1 - buf_len2;
+}
+
+static void mapFreeValueFunc(AVLTreeValue value)
+{
+    tinybuf_value_free(value);
+}
+
+static void buffer_key_free(AVLTreeKey key)
+{
+    buffer_free((buffer *)key);
+}
+
+int tinybuf_value_map_set2(tinybuf_value *parent, buffer *key, tinybuf_value *value)
+{
+    assert(parent);
+    assert(key);
+    assert(value);
+    if (parent->_type != tinybuf_map && parent->_type != tinybuf_versionlist)
+    {
+        tinybuf_value_clear(parent);
+        parent->_type = tinybuf_map;
+    }
+    if (!parent->_data._map_array)
+    {
+        parent->_data._map_array = avl_tree_new(mapKeyCompare);
+    }
+    avl_tree_insert(parent->_data._map_array, key, value, buffer_key_free, mapFreeValueFunc);
+    return 0;
+}
+
+int tinybuf_value_map_set(tinybuf_value *parent, const char *key, tinybuf_value *value)
+{
+    assert(key);
+    buffer *key_buf = buffer_alloc();
+    assert(key_buf);
+    buffer_assign(key_buf, key, 0);
+    return tinybuf_value_map_set2(parent, key_buf, value);
+}
+
+int tinybuf_value_map_set_int(tinybuf_value *parent, uint64_t key, tinybuf_value *value)
+{
+    buffer *key_buf = buffer_alloc();
+    assert(key_buf);
+    dump_int(key, key_buf);
+    return tinybuf_value_map_set2(parent, key_buf, value);
+}
+
+static int arrayKeyCompare(AVLTreeKey key1, AVLTreeKey key2)
+{
+    return (int)(((intptr_t)key1) - ((intptr_t)key2));
+}
+
+int tinybuf_value_array_append(tinybuf_value *parent, tinybuf_value *value)
+{
+    assert(parent);
+    assert(value);
+    if (parent->_type != tinybuf_array)
+    {
+        tinybuf_value_clear(parent);
+        parent->_type = tinybuf_array;
+    }
+    if (!parent->_data._map_array)
+    {
+        parent->_data._map_array = avl_tree_new(arrayKeyCompare);
+    }
+    int key = avl_tree_num_entries(parent->_data._map_array);
+    avl_tree_insert(parent->_data._map_array, (AVLTreeKey)key, value, NULL, mapFreeValueFunc);
+    return 0;
+}
 int tinybuf_value_get_child_size(const tinybuf_value *value)
 {
     if (!value || (value->_type != tinybuf_map && value->_type != tinybuf_array))

@@ -2,13 +2,18 @@
 #include "tinybuf.h"
 #include "tinybuf_plugin.h"
 #include "tinybuf_buffer.h"
+#include <sstream>
+#include <string>
+static std::string tb_fmt(const tinybuf_result &r){ char msgs[512]; tinybuf_result_format_msgs(&r, msgs, sizeof(msgs)); std::ostringstream os; os << "res=" << r.res << " last=" << (tinybuf_last_error_message()? tinybuf_last_error_message(): "") << " msgs=" << msgs; return os.str(); }
 
 TEST_CASE("system.extend plugin loads and handles hetero_tuple", "[plugin]")
 {
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    REQUIRE(tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll") == 0);
+    int pl = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    INFO("plugin_load_ret=" << pl);
+    REQUIRE(pl == 0);
 #endif
     tinybuf_value *arr = tinybuf_value_alloc();
     tinybuf_value *i = tinybuf_value_alloc();
@@ -19,13 +24,12 @@ TEST_CASE("system.extend plugin loads and handles hetero_tuple", "[plugin]")
     tinybuf_value_array_append(arr, s);
     buffer *buf = buffer_alloc();
     tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "hetero_tuple", arr);
+    INFO(tb_fmt(w));
     REQUIRE(w.res > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_result rr = tinybuf_try_read_box(&br, out, NULL);
-    char msgs[256];
-    tinybuf_result_format_msgs(&rr, msgs, sizeof(msgs));
-    CAPTURE(rr.res, msgs);
+    INFO(tb_fmt(rr));
     REQUIRE(rr.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
@@ -50,7 +54,9 @@ TEST_CASE("system.extend plugin handles dataframe", "[plugin]")
     tinybuf_set_use_strpool(1);
     tinybuf_register_builtin_plugins();
 #ifdef _WIN32
-    REQUIRE(tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll") == 0);
+    int pl2 = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    INFO("plugin_load_ret=" << pl2);
+    REQUIRE(pl2 == 0);
 #endif
     int64_t shape[2] = {2, 2};
     double data[4] = {1.0, 2.0, 3.0, 4.0};
@@ -75,13 +81,12 @@ TEST_CASE("system.extend plugin handles dataframe", "[plugin]")
     tinybuf_value_init_indexed_tensor(df, ten, idxs, 2);
     buffer *payload = buffer_alloc();
     tinybuf_result w = tinybuf_try_write_custom_id_box(payload, "dataframe", df);
+    INFO(tb_fmt(w));
     REQUIRE(w.res > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br2{buffer_get_data(payload), (int64_t)buffer_get_length(payload), buffer_get_data(payload), (int64_t)buffer_get_length(payload)};
     tinybuf_result rr = tinybuf_try_read_box(&br2, out, NULL);
-    char msgs2[256];
-    tinybuf_result_format_msgs(&rr, msgs2, sizeof(msgs2));
-    CAPTURE(rr.res, msgs2, tinybuf_last_error_message());
+    INFO(tb_fmt(rr));
     REQUIRE(rr.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_indexed_tensor);
@@ -131,13 +136,12 @@ TEST_CASE("indexed_tensor roundtrip", "[tensor]")
     tinybuf_value_init_indexed_tensor(df, ten, idxs, 2);
     buffer *payload = buffer_alloc();
     tinybuf_result w = tinybuf_try_write_box(payload, df);
+    INFO(tb_fmt(w));
     REQUIRE(w.res > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(payload), (int64_t)buffer_get_length(payload), buffer_get_data(payload), (int64_t)buffer_get_length(payload)};
     tinybuf_result rr = tinybuf_try_read_box(&br, out, NULL);
-    char msgs[256];
-    tinybuf_result_format_msgs(&rr, msgs, sizeof(msgs));
-    CAPTURE(rr.res, msgs, tinybuf_last_error_message());
+    INFO(tb_fmt(rr));
     REQUIRE(rr.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_indexed_tensor);
@@ -160,13 +164,12 @@ TEST_CASE("custom result wrappers", "[result]")
     tinybuf_register_builtin_plugins();
     tinybuf_value *out = tinybuf_value_alloc();
     tinybuf_result rr = tinybuf_custom_try_read("string", (const uint8_t *)"abc", 3, out, NULL);
+    INFO(tb_fmt(rr));
     REQUIRE(rr.res == 3);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     tinybuf_result rf = tinybuf_custom_try_read("unknown", (const uint8_t *)"x", 1, out, NULL);
-    char msgs3[256];
-    tinybuf_result_format_msgs(&rf, msgs3, sizeof(msgs3));
-    CAPTURE(rf.res, msgs3);
+    INFO(tb_fmt(rf));
     REQUIRE(rf.res < 0);
     REQUIRE(tinybuf_result_msg_count(&rf) > 0);
     tinybuf_result_unref(&rr);

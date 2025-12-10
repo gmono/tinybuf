@@ -4,7 +4,11 @@
 #include "tinybuf_buffer.h"
 /* forward declarations to avoid circular include with tinybuf.h */
 typedef struct T_tinybuf_value tinybuf_value;
-typedef int tinybuf_read_pointer_mode;
+typedef enum {
+    tinybuf_read_pointer_ref = 0,
+    tinybuf_read_pointer_deref = 1,
+    tinybuf_read_pointer_auto = 2
+} tinybuf_read_pointer_mode;
 
 #ifdef __cplusplus
 extern "C" {

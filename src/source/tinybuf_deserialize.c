@@ -3,6 +3,9 @@
 #include "tinybuf_plugin.h"
 #include <string.h>
 
+const char *s_last_error_msg = NULL;
+const char *tinybuf_last_error_message(void){ return s_last_error_msg; }
+
 uint32_t load_be32(const void *p)
 {
     uint32_t val;

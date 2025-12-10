@@ -510,14 +510,18 @@ tinybuf_result tinybuf_custom_try_read(const char *name, const uint8_t *data, in
         if(rr.res>0) return rr;
         const char *msg = tinybuf_last_error_message();
         if(!msg) msg = "custom read failed";
-        return _make_err(msg, rr.res);
+        tinybuf_result er = _make_err(msg, rr.res);
+        if(name) tinybuf_result_add_msg_const(&er, name);
+        return er;
     }
     if(idx >= 0 && s_customs[idx].read){
         tinybuf_result rr = s_customs[idx].read(name, data, len, out, contain_handler);
         if(rr.res>0) return rr;
         const char *msg = tinybuf_last_error_message();
         if(!msg) msg = "custom read failed";
-        return _make_err(msg, rr.res);
+        tinybuf_result er = _make_err(msg, rr.res);
+        if(name) tinybuf_result_add_msg_const(&er, name);
+        return er;
     }
     return _make_err("custom type not found", -1);
 }
@@ -528,14 +532,14 @@ tinybuf_result tinybuf_custom_try_write(const char *name, const tinybuf_value *i
     int oi = oop_index_by_name(name);
     if(oi>=0 && s_oop[oi].is_serializable && s_oop[oi].write){
         tinybuf_result rr = s_oop[oi].write(name, in, out);
-        if(rr.res>0) return rr;
+        if(rr.res>=0) return rr;
         tinybuf_result er = _make_err("custom write failed", rr.res);
         tinybuf_result_add_msg_const(&er, name);
         return er;
     }
     if(idx >= 0 && s_customs[idx].write){
         tinybuf_result rr = s_customs[idx].write(name, in, out);
-        if(rr.res>0) return rr;
+        if(rr.res>=0) return rr;
         tinybuf_result er = _make_err("custom write failed", rr.res);
         tinybuf_result_add_msg_const(&er, name);
         return er;

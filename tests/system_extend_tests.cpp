@@ -3,6 +3,8 @@
 #include "tinybuf_buffer.h"
 #include "tinybuf_plugin.h"
 #include "tinybuf_log.h"
+#include <sstream>
+static std::string tb_fmt(const tinybuf_result &r){ char msgs[512]; tinybuf_result_format_msgs(&r, msgs, sizeof(msgs)); std::ostringstream os; os << "res=" << r.res << " last=" << (tinybuf_last_error_message()? tinybuf_last_error_message(): "") << " msgs=" << msgs; return os.str(); }
 
 static tinybuf_result xjson_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br{ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }
 static tinybuf_result xjson_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; buffer *tmp = buffer_alloc(); tinybuf_result r = tinybuf_try_write_box(tmp, in); if(r.res>0){ buffer_append(out, buffer_get_data(tmp), r.res); } buffer_free(tmp); return r; }
@@ -15,20 +17,12 @@ TEST_CASE("custom string", "[system]"){
     tinybuf_value *s = tinybuf_value_alloc();
     tinybuf_value_init_string(s, "hello", 5);
     tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "string", s);
-    {
-        char wmsgs[256];
-        tinybuf_result_format_msgs(&w, wmsgs, sizeof(wmsgs));
-        CAPTURE(w.res, wmsgs, tinybuf_last_error_message());
-    }
+    INFO(tb_fmt(w));
     REQUIRE(w.res > 0);
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_value *out = tinybuf_value_alloc();
     tinybuf_result r = tinybuf_try_read_box(&br, out, NULL);
-    {
-        char msgs[256];
-        tinybuf_result_format_msgs(&r, msgs, sizeof(msgs));
-        CAPTURE(r.res, msgs, tinybuf_last_error_message());
-    }
+    INFO(tb_fmt(r));
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     buffer *sv = tinybuf_value_get_string(out);
@@ -51,20 +45,12 @@ TEST_CASE("oop fallback", "[system]"){
     tinybuf_value_init_int(m, 42);
     buffer *buf = buffer_alloc();
     tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "xjson", m);
-    {
-        char wmsgs[256];
-        tinybuf_result_format_msgs(&w, wmsgs, sizeof(wmsgs));
-        CAPTURE(w.res, wmsgs, tinybuf_last_error_message());
-    }
+    INFO(tb_fmt(w));
     REQUIRE(w.res > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_result r = tinybuf_try_read_box(&br, out, NULL);
-    {
-        char msgs[256];
-        tinybuf_result_format_msgs(&r, msgs, sizeof(msgs));
-        CAPTURE(r.res, msgs, tinybuf_last_error_message());
-    }
+    INFO(tb_fmt(r));
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_int);
     REQUIRE(tinybuf_value_get_int(out) == 42);
@@ -91,20 +77,12 @@ TEST_CASE("custom vs oop priority", "[system]"){
     tinybuf_value_init_string(s, "override", 8);
     buffer *buf = buffer_alloc();
     tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "mytype", s);
-    {
-        char wmsgs[256];
-        tinybuf_result_format_msgs(&w, wmsgs, sizeof(wmsgs));
-        CAPTURE(w.res, wmsgs, tinybuf_last_error_message());
-    }
+    INFO(tb_fmt(w));
     REQUIRE(w.res > 0);
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_result r = tinybuf_try_read_box(&br, out, NULL);
-    {
-        char msgs[256];
-        tinybuf_result_format_msgs(&r, msgs, sizeof(msgs));
-        CAPTURE(r.res, msgs, tinybuf_last_error_message());
-    }
+    INFO(tb_fmt(r));
     REQUIRE(r.res > 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     buffer *sv = tinybuf_value_get_string(out);

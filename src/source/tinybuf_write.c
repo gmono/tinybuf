@@ -17,6 +17,19 @@ static inline int int_serialize_local(uint64_t in, uint8_t *out_bytes){
     return index + 1;
 }
 
+tinybuf_result try_write_type(buffer *out, serialize_type type)
+{
+    buffer_append(out, (char *)&type, 1);
+    return tinybuf_result_ok(1);
+}
+
+tinybuf_result try_write_int_data(int isneg, buffer *out, uint64_t val)
+{
+    (void)isneg;
+    int n = dump_int(val, out);
+    return tinybuf_result_ok(n);
+}
+
 
 tinybuf_result try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box)
 {
@@ -248,6 +261,7 @@ tinybuf_result tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
     tinybuf_result_set_current(&rr);
     tinybuf_result r = try_write_box(out, value);
     if (r.res > 0){ tinybuf_result_set_current(NULL); (void)tinybuf_result_unref(&rr); return r; }
+    tinybuf_result_add_msg_const(&r, "tinybuf_try_write_box_r");
     tinybuf_result_set_current(NULL); return r;
 }
 
@@ -312,7 +326,7 @@ tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, co
     if (wr.res > 0){ buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload)); }
     tinybuf_result rpool = strpool_write_tail(pool); if (rpool.res <= 0){ buffer_free(payload); buffer_free(body); buffer_free(pool); return rpool; }
     uint64_t body_len = (uint64_t)buffer_get_length_inline(body); uint64_t offset_guess_len = 1; uint8_t tmpv[16];
-    while (1){ uint64_t off = 1 + offset_guess_len + body_len; int l = int_serialize(off, tmpv); if ((uint64_t)l == offset_guess_len) break; offset_guess_len = (uint64_t)l; }
+    while (1){ uint64_t off = 1 + offset_guess_len + body_len; int l = int_serialize_local(off, tmpv); if ((uint64_t)l == offset_guess_len) break; offset_guess_len = (uint64_t)l; }
     uint64_t final_off = 1 + offset_guess_len + body_len;
     tinybuf_result acc = tinybuf_result_ok(0);
     tinybuf_result rtype = try_write_type(out, serialize_str_pool_table); if (rtype.res <= 0){ buffer_free(payload); buffer_free(body); buffer_free(pool); return rtype; } tinybuf_result_append_merge(&acc, &rtype, tinybuf_merger_sum);
@@ -320,6 +334,6 @@ tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, co
     buffer_append(out, buffer_get_data_inline(body), (int)body_len);
     int pool_len = buffer_get_length_inline(pool); if (pool_len){ buffer_append(out, buffer_get_data_inline(pool), pool_len); }
     buffer_free(payload); buffer_free(body); buffer_free(pool);
-    if (wr.res <= 0){ tinybuf_result rr = tinybuf_result_err(wr.res, "write custom payload failed", NULL); char *m = (char *)tinybuf_malloc(64); snprintf(m, 64, "name=%s", name ? name : "(null)"); tinybuf_result_add_msg(&rr, m, (tinybuf_deleter_fn)tinybuf_free); return rr; }
+    if (wr.res < 0){ tinybuf_result_add_msg_const(&wr, "write custom payload failed"); char *m = (char *)tinybuf_malloc(64); snprintf(m, 64, "name=%s", name ? name : "(null)"); tinybuf_result_add_msg(&wr, m, (tinybuf_deleter_fn)tinybuf_free); return wr; }
     int total = 1 + (int)offset_guess_len + (int)body_len + pool_len; tinybuf_result rt = tinybuf_result_ok(total); tinybuf_result_append_merge(&rt, &acc, tinybuf_merger_left); return rt;
 }

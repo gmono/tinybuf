@@ -1,13 +1,26 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 project(tinybuf)
+
+
+set(CMAKE_TOOLCHAIN_FILE "C:/vcpkg/scripts/buildsystems/vcpkg.cmake")
+# find_package(Catch2 CONFIG REQUIRED)
+
+
 
 #使能c++11
 #add_compile_options(-std=c++11)
 set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+
 if(NOT MSVC)
     add_definitions(-Wno-int-to-void-pointer-cast -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
 endif()
 
+
+
+set(CMAKE_PREFIX_PATH "C:/vcpkg/installed/x64-windows")
+find_package(Catch2 REQUIRED)
 
 #加载自定义模块
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
@@ -45,10 +58,6 @@ if(JEMALLOC_FOUND)
 endif()
 
 
-if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "c:/vcpkg/scripts/buildsystems/vcpkg.cmake")
-endif()
-find_package(Catch2 CONFIG QUIET)
 
 
 if(MSVC)
@@ -60,7 +69,7 @@ if(MSVC)
 else()
     target_link_libraries(benchmark jsoncpp tinybuf ${LINK_LIST} pthread)
     target_link_libraries(sys_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} pthread)
-    target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain pthread)
+target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain pthread)
     target_link_libraries(upper_plugin tinybuf pthread)
     target_link_libraries(system_extend tinybuf pthread)
 endif()
@@ -69,6 +78,12 @@ add_custom_command(TARGET system_extend POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins"
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins/"
 )
+
+enable_testing()
+add_test(NAME unit_tests COMMAND $<TARGET_FILE:unit_tests>)
+set_tests_properties(unit_tests PROPERTIES TIMEOUT 8)
+add_test(NAME sys_tests COMMAND $<TARGET_FILE:sys_tests>)
+set_tests_properties(sys_tests PROPERTIES TIMEOUT 8)
 
 
 

@@ -162,11 +162,6 @@ extern "C"
     tinybuf_result tinybuf_try_write_map_header(buffer *out, int count);
     tinybuf_result tinybuf_try_write_string_raw(buffer *out, const char *str, int len);
 
-    typedef enum {
-        tinybuf_read_pointer_ref = 0,
-        tinybuf_read_pointer_deref = 1,
-        tinybuf_read_pointer_auto = 2
-    } tinybuf_read_pointer_mode;
     void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode);
 
     void tinybuf_set_use_strpool(int enable);

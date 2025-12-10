@@ -8,21 +8,21 @@ jobs:
   rocky-rpm:
     runs-on: ubuntu-latest
     container:
-      image: rockylinux:9
+      image: openeuler/openeuler:24.03
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Switch to TUNA mirrors (Rocky)
+      - name: 更新包缓存
         run: |
           dnf -y makecache
           dnf -y update
 
-      - name: Install build tools
+      - name: 安装构建工具
         run: |
           dnf -y install git gcc gcc-c++ cmake make curl unzip tar pkgconfig findutils ninja-build
 
-      - name: Setup vcpkg
+      - name: 安装vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg
           ./vcpkg/bootstrap-vcpkg.sh

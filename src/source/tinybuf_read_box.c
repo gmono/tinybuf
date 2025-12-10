@@ -352,9 +352,13 @@ tinybuf_result tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HA
     }
     tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_read_box failed", NULL);
     tinybuf_result_add_msg_const(&rr, "tinybuf_try_read_box_r");
+    tinybuf_result *cur = tinybuf_result_get_current();
+    int owns_current = (cur == NULL);
+    if (owns_current) tinybuf_result_set_current(&rr);
     int r = try_read_box(buf, out, contain_handler);
-    if (r > 0) return tinybuf_result_ok(r);
-    return rr;
+    if (owns_current) tinybuf_result_set_current(NULL);
+    if (r > 0){ (void)tinybuf_result_unref(&rr); return tinybuf_result_ok(r); }
+    rr.res = r; return rr;
 }
 
 int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)

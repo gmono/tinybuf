@@ -42,7 +42,7 @@ TEST_CASE("custom string via type_idx", "[custom]")
     tinybuf_result rr = tinybuf_try_read_box(&br, out, NULL);
     char msgs[128];
     tinybuf_result_format_msgs(&rr, msgs, sizeof(msgs));
-    CAPTURE(rr.res, msgs);
+    CAPTURE(rr.res, msgs, tinybuf_last_error_message());
     REQUIRE(rr.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
@@ -50,6 +50,8 @@ TEST_CASE("custom string via type_idx", "[custom]")
     REQUIRE(sv != NULL);
     REQUIRE(buffer_get_length(sv) == 5);
 
+    tinybuf_result_dispose(&rr);
+    tinybuf_result_dispose(&w);
     tinybuf_value_free(out);
     tinybuf_value_free(s);
     buffer_free(buf);
@@ -82,7 +84,7 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     tinybuf_result rr2 = tinybuf_try_read_box(&br, out, NULL);
     char msgs2[128];
     tinybuf_result_format_msgs(&rr2, msgs2, sizeof(msgs2));
-    CAPTURE(rr2.res, msgs2);
+    CAPTURE(rr2.res, msgs2, tinybuf_last_error_message());
     REQUIRE(rr2.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr2) == 0);
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_array);
@@ -90,6 +92,8 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     const tinybuf_value *last = tinybuf_value_get_array_child(out, 5);
     REQUIRE(tinybuf_value_get_type(last) == tinybuf_string);
 
+    tinybuf_result_dispose(&rr2);
+    tinybuf_result_dispose(&w);
     tinybuf_value_free(out);
     buffer_free(buf);
     tinybuf_value_free(arr);

@@ -1,6 +1,5 @@
 #include "tinybuf_private.h"
 #include "tinybuf_plugin.h"
-static int contain_any(uint64_t v);
 #ifdef _WIN32
 #include <winsock2.h>
 #else
@@ -105,32 +104,6 @@ inline int OK_AND_ADDTO(int x, int *s)
 
 typedef tinybuf_value value;
 
-//---util function s
-// 求buf当前偏移
-BOOL validate_buf(buf_ref *buf)
-{
-    return buf->base <= buf->ptr &&
-           buf->size <= buf->all_size &&
-           buf->all_size + buf->base == buf->ptr + buf->size;
-}
-
-// ptr是否在范围内
-BOOL buf_ptr_ok(buf_ref *buf)
-{
-    return buf->ptr >= buf->base && buf->ptr < buf->base + buf->all_size;
-}
-
-// 开启严格缓冲区安全验证
-#define ENABLE_STRICT_VALIDATE
-inline void maybe_validate(buf_ref *buf)
-{
-#ifdef ENABLE_STRICT_VALIDATE
-    assert(validate_buf(buf));
-#endif
-}
-
-// 执行缓冲区当前指针偏移 返回0 表示成功
-
 //------------utils结束------
 
 // 所有read函数 返回-1表示失败 否则返回消耗的字节数返回0表示数据不够 负数表示具体错误
@@ -207,7 +180,7 @@ static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
 
 /////////////////////////////读接口//////////////////////////////////
 
-static int contain_any(uint64_t v)
+int contain_any(uint64_t v)
 {
     (void)v;
     return 1;

@@ -30,22 +30,6 @@ int64_t buf_current_offset(buf_ref *buf)
 {
     return buf->ptr - buf->base;
 }
-static inline BOOL validate_buf(buf_ref *buf)
-{
-    return buf->base <= buf->ptr &&
-           buf->size <= buf->all_size &&
-           buf->all_size + buf->base == buf->ptr + buf->size;
-}
-static inline BOOL buf_ptr_ok(buf_ref *buf)
-{
-    return buf->ptr >= buf->base && buf->ptr < buf->base + buf->all_size;
-}
-static inline void maybe_validate(buf_ref *buf)
-{
-#ifdef ENABLE_STRICT_VALIDATE
-    assert(validate_buf(buf));
-#endif
-}
 int buf_offset(buf_ref *buf, int64_t offset)
 {
     const char *temp = buf->ptr;
@@ -986,9 +970,4 @@ static inline enum offset_type get_offset_type(serialize_type type)
     default:
         return start;
     }
-}
-int contain_any(uint64_t v)
-{
-    (void)v;
-    return 1;
 }

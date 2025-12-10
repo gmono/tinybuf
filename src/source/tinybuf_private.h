@@ -137,6 +137,24 @@ typedef int BOOL;
 #define FALSE 0
 #endif
 
+static inline BOOL validate_buf(buf_ref *buf)
+{
+    return buf->base <= buf->ptr &&
+           buf->size <= buf->all_size &&
+           buf->all_size + buf->base == buf->ptr + buf->size;
+}
+static inline BOOL buf_ptr_ok(buf_ref *buf)
+{
+    return buf->ptr >= buf->base && buf->ptr < buf->base + buf->all_size;
+}
+#define ENABLE_STRICT_VALIDATE
+static inline void maybe_validate(buf_ref *buf)
+{
+#ifdef ENABLE_STRICT_VALIDATE
+    assert(validate_buf(buf));
+#endif
+}
+
 // internal write helpers used across modules
 tinybuf_error try_write_type(buffer *out, serialize_type type);
 tinybuf_error try_write_int_data(int isneg, buffer *out, uint64_t val);

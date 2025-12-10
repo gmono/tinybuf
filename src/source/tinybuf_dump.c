@@ -3,11 +3,6 @@
 #include "tinybuf_common.h"
 #include "tinybuf_plugin.h"
 #include <stdio.h>
-static int contain_any(uint64_t v)
-{
-    (void)v;
-    return 1;
-}
 
 static inline void append_cstr(buffer *dst, const char *s)
 {

@@ -3528,7 +3528,9 @@ static tinybuf_result tinybuf_try_read_box_old(buf_ref *buf, tinybuf_value *out,
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
+/* moved */
+#if 0
+#if 0
 {
     tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_box failed", NULL);
     tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_box_r");
@@ -3545,7 +3547,7 @@ tinybuf_result tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_version_box(buffer *out, QWORD version, const tinybuf_value *box)
+/* moved */
 {
     // 写入单个版本封装的 box
     int r = try_write_version_box(out, version, box);
@@ -3555,7 +3557,7 @@ tinybuf_result tinybuf_try_write_version_box(buffer *out, QWORD version, const t
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_version_list(buffer *out, const QWORD *versions, const tinybuf_value **boxes, int count)
+/* moved */
 {
     // 写入版本列表及对应 box
     int r = try_write_version_list(out, versions, boxes, count);
@@ -3565,7 +3567,7 @@ tinybuf_result tinybuf_try_write_version_list(buffer *out, const QWORD *versions
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_plugin_map_table(buffer *out)
+/* moved */
 {
     // 写入插件 GUID 映射表以支持运行时解析
     int r = try_write_plugin_map_table(out);
@@ -3575,7 +3577,7 @@ tinybuf_result tinybuf_try_write_plugin_map_table(buffer *out)
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_part(buffer *out, const tinybuf_value *value)
+/* moved */
 {
     // 写入单个分区
     int r = try_write_part(out, value);
@@ -3585,7 +3587,7 @@ tinybuf_result tinybuf_try_write_part(buffer *out, const tinybuf_value *value)
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count)
+/* moved */
 {
     // 写入多个分区，包含主 box 与子分区
     int r = try_write_partitions(out, mainbox, subs, count);
@@ -3595,7 +3597,8 @@ tinybuf_result tinybuf_try_write_partitions(buffer *out, const tinybuf_value *ma
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_pointer(buffer *out, int t, SQWORD offset)
+/* moved */
+#endif
 {
     // 写入指针，t=0/1/2 表示起始/末尾/当前位置
     enum offset_type et = start;
@@ -3610,7 +3613,7 @@ tinybuf_result tinybuf_try_write_pointer(buffer *out, int t, SQWORD offset)
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_sub_ref(buffer *out, int t, SQWORD offset)
+/* moved */
 {
     // 写入子引用，包含一个指针 box
     int len = 0;
@@ -3623,26 +3626,26 @@ tinybuf_result tinybuf_try_write_sub_ref(buffer *out, int t, SQWORD offset)
     return tinybuf_result_ok(len);
 }
 
-int tinybuf_try_write_array_header(buffer *out, int count)
+/* moved */
 {
     int len = 0;
     len += try_write_type(out, serialize_array);
     len += try_write_int_data(FALSE, out, (QWORD)count);
     return len;
 }
-int tinybuf_try_write_map_header(buffer *out, int count)
+/* moved */
 {
     int len = 0;
     len += try_write_type(out, serialize_map);
     len += try_write_int_data(FALSE, out, (QWORD)count);
     return len;
 }
-int tinybuf_try_write_string_raw(buffer *out, const char *str, int len)
+/* moved */
 {
     return dump_string(len, str, out);
 }
 
-tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in)
+/* moved */
 {
     // 构造头部与字符串池缓冲区
     buffer *body = buffer_alloc();
@@ -3712,6 +3715,7 @@ tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, co
 }
 
 //------------------------------
+#endif
 static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
 {
     AVLTree *tree2 = (AVLTree *)user_data;

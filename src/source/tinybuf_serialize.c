@@ -14,11 +14,24 @@ static inline int dump_double(double db, buffer *out)
     return 8;
 }
 
-static inline int dump_string(int len, const char *str, buffer *out)
+int dump_string(int len, const char *str, buffer *out)
 {
     int ret = dump_int(len, out);
     buffer_append(out, str, len);
     return ret + len;
+}
+
+int int_serialize(uint64_t in, uint8_t *out)
+{
+    int index = 0;
+    for (int i = 0; i <= (8 * sizeof(in)) / 7; ++i, ++index)
+    {
+        out[index] = (uint8_t)(in & 0x7F);
+        in >>= 7;
+        if (!in) break;
+        out[index] |= 0x80;
+    }
+    return ++index;
 }
 
 static int avl_tree_for_each_node_dump_map(void *user_data, AVLTreeNode *node)

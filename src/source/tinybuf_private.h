@@ -132,6 +132,8 @@ int try_read_type(buf_ref *buf, serialize_type *type);
 int try_read_int_tovar(BOOL isneg, const char *ptr, int size, QWORD *out_val);
 int int_deserialize(const uint8_t *in, int in_size, uint64_t *out);
 int optional_add(int x, int addx);
+int int_serialize(uint64_t in, uint8_t *out);
+int dump_string(int len, const char *str, buffer *out);
 int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version);
 
 // shared strpool read state for dumping

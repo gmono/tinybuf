@@ -181,3 +181,98 @@ int try_write_pointer_value(buffer *out, enum offset_type t, int64_t offset)
     len += try_write_int_data(0, out, mag);
     return len;
 }
+static inline tinybuf_result _err_with(const char *msg, int rc)
+{
+    return tinybuf_result_err(rc, msg, NULL);
+}
+
+tinybuf_result tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
+{
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_box failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_box_r");
+    tinybuf_result_set_current(&rr);
+    int r = try_write_box(out, value);
+    if (r > 0){ tinybuf_result_set_current(NULL); (void)tinybuf_result_unref(&rr); return tinybuf_result_ok(r); }
+    rr.res = r; tinybuf_result_set_current(NULL); return rr;
+}
+
+tinybuf_result tinybuf_try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box)
+{
+    int r = try_write_version_box(out, version, box);
+    if (r > 0) return tinybuf_result_ok(r);
+    return _err_with("write version box failed", r);
+}
+
+tinybuf_result tinybuf_try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count)
+{
+    int r = try_write_version_list(out, versions, boxes, count);
+    if (r > 0) return tinybuf_result_ok(r);
+    return _err_with("write version list failed", r);
+}
+
+tinybuf_result tinybuf_try_write_plugin_map_table(buffer *out)
+{
+    int r = try_write_plugin_map_table(out);
+    if (r > 0) return tinybuf_result_ok(r);
+    return _err_with("write plugin map failed", r);
+}
+
+tinybuf_result tinybuf_try_write_part(buffer *out, const tinybuf_value *value)
+{
+    int r = try_write_part(out, value);
+    if (r > 0) return tinybuf_result_ok(r);
+    return _err_with("write part failed", r);
+}
+
+tinybuf_result tinybuf_try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count)
+{
+    int r = try_write_partitions(out, mainbox, subs, count);
+    if (r > 0) return tinybuf_result_ok(r);
+    return _err_with("write partitions failed", r);
+}
+
+tinybuf_result tinybuf_try_write_pointer(buffer *out, int t, int64_t offset)
+{
+    enum offset_type et = start; if (t == 1) et = end; else if (t == 2) et = current;
+    int r = try_write_pointer_value(out, et, offset);
+    if (r > 0) return tinybuf_result_ok(r);
+    return _err_with("write pointer failed", r);
+}
+
+tinybuf_result tinybuf_try_write_sub_ref(buffer *out, int t, int64_t offset)
+{
+    int len = 0; len += try_write_type(out, serialize_sub_ref);
+    enum offset_type et = (t == 1 ? end : (t == 2 ? current : start));
+    int r = try_write_pointer_value(out, et, offset); if (r <= 0) return _err_with("write sub_ref failed", r);
+    len += r; return tinybuf_result_ok(len);
+}
+
+int tinybuf_try_write_array_header(buffer *out, int count)
+{
+    int len = 0; len += try_write_type(out, serialize_array); len += try_write_int_data(0, out, (uint64_t)count); return len;
+}
+int tinybuf_try_write_map_header(buffer *out, int count)
+{
+    int len = 0; len += try_write_type(out, serialize_map); len += try_write_int_data(0, out, (uint64_t)count); return len;
+}
+int tinybuf_try_write_string_raw(buffer *out, const char *str, int len)
+{
+    return dump_string(len, str, out);
+}
+
+tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in)
+{
+    buffer *body = buffer_alloc(); buffer *pool = buffer_alloc(); strpool_reset_write(body);
+    int idx = strpool_add(name, (int)strlen(name)); uint8_t ty = serialize_type_idx; buffer_append(body, (const char *)&ty, 1); dump_int((uint64_t)idx, body);
+    buffer *payload = buffer_alloc(); tinybuf_result wr = tinybuf_custom_try_write(name, in, payload); dump_int((uint64_t)(wr.res > 0 ? wr.res : 0), body);
+    if (wr.res > 0){ buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload)); }
+    strpool_write_tail(pool);
+    uint64_t body_len = (uint64_t)buffer_get_length_inline(body); uint64_t offset_guess_len = 1; uint8_t tmpv[16];
+    while (1){ uint64_t off = 1 + offset_guess_len + body_len; int l = int_serialize(off, tmpv); if ((uint64_t)l == offset_guess_len) break; offset_guess_len = (uint64_t)l; }
+    uint64_t final_off = 1 + offset_guess_len + body_len;
+    try_write_type(out, serialize_str_pool_table); try_write_int_data(0, out, final_off); buffer_append(out, buffer_get_data_inline(body), (int)body_len);
+    int pool_len = buffer_get_length_inline(pool); if (pool_len){ buffer_append(out, buffer_get_data_inline(pool), pool_len); }
+    buffer_free(payload); buffer_free(body); buffer_free(pool);
+    if (wr.res <= 0){ tinybuf_result rr = tinybuf_result_err(wr.res, "write custom payload failed", NULL); char *m = (char *)tinybuf_malloc(64); snprintf(m, 64, "name=%s", name ? name : "(null)"); tinybuf_result_add_msg(&rr, m, (tinybuf_deleter_fn)tinybuf_free); return rr; }
+    int total = 1 + (int)offset_guess_len + (int)body_len + pool_len; return tinybuf_result_ok(total);
+}

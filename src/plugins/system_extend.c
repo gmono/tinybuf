@@ -16,7 +16,7 @@ static tinybuf_value* clone_box(const tinybuf_value *in)
     if(rr.res<=0){ tinybuf_value_free(out); return NULL; }
     return out;
 }
-// 插入一个元素到异质列表
+
 static int op_hlist_insert(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
     int n = tinybuf_value_get_child_size(value);
@@ -38,7 +38,6 @@ static int op_hlist_insert(tinybuf_value *value, const tinybuf_value *args, tiny
     return 0;
 }
 
-// 删除指定索引的元素
 static int op_hlist_delete(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
     int n = tinybuf_value_get_child_size(value);
@@ -50,7 +49,6 @@ static int op_hlist_delete(tinybuf_value *value, const tinybuf_value *args, tiny
     return 0;
 }
 
-// 连接两个异质列表
 static int op_hlist_concat(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
     const tinybuf_value *other = NULL;
@@ -64,9 +62,7 @@ static int op_hlist_concat(tinybuf_value *value, const tinybuf_value *args, tiny
     return 0;
 }
 
-// 字符串化
 static int op_str(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ (void)args; char buf[64]; int n = tinybuf_value_get_child_size(value); int len = snprintf(buf, sizeof(buf), "hetero_list[%d]", n); if(len<0) len=0; tinybuf_value_init_string(out, buf, len); return 0; }
-// 描述
 static int op_desc(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ (void)args; const char *s = "system.extend hetero_list"; tinybuf_value_init_string(out, s, (int)strlen(s)); return 0; }
 
 static tinybuf_result tuple_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }

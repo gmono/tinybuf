@@ -58,13 +58,7 @@ int tinybuf_oop_set_serializable(const char *type_name, int serializable);
 }
 #endif
 
-#ifdef __cplusplus
-/* C++ overloads for benchmarks using int-return callbacks */
-int tinybuf_oop_attach_serializers_int(const char *type_name,
-    int (*read)(const char*, const uint8_t*, int, tinybuf_value*, CONTAIN_HANDLER),
-    int (*write)(const char*, const tinybuf_value*, buffer*),
-    int (*dump)(const char*, buf_ref*, buffer*));
-#endif
+/* removed int-return overloads */
 
 #endif
 #ifdef __cplusplus

@@ -2337,7 +2337,7 @@ static inline tinybuf_result _err_with(const char *msg, int rc)
 tinybuf_result tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     pool_reset(buf);
-    if (buf->ptr == buf->base && buf->size >= 1 && (uint8_t)buf->base[0] == serialize_str_pool_table)
+    if (buf->size >= 1 && (uint8_t)buf->ptr[0] == serialize_str_pool_table)
     {
         s_strpool_base_read = buf->base; s_strpool_offset_read = -1;
         buf_ref hb = *buf;

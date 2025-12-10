@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  rocky-rpm:
+  euler-build:
     runs-on: ubuntu-latest
     container:
       image: openeuler/openeuler:24.03

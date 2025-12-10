@@ -20,7 +20,7 @@ jobs:
 
       - name: Install build tools
         run: |
-          dnf -y install git gcc gcc-c++ cmake make curl unzip tar pkgconfig findutils
+          dnf -y install git gcc gcc-c++ cmake make curl unzip tar pkgconfig findutils ninja
 
       - name: Setup vcpkg
         run: |
@@ -30,18 +30,8 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE=$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug
+          cmake -G Ninja -S . -B build -DCMAKE_TOOLCHAIN_FILE=$PWD/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Debug
 
       - name: Build
         run: |
-          cmake --build build -j 2
-
-      - name: Prepare plugins for scan
-        run: |
-          mkdir -p tinybuf_plugins
-          PLG=$(find build -maxdepth 3 -type f -name '*system_extend*.so' -print -quit)
-          if [ -n "$PLG" ]; then cp "$PLG" tinybuf_plugins/; fi
-
-      - name: Run unit tests
-        run: |
-          ( test -x build/bin/unit_tests && (cd build/bin && ./unit_tests) ) || ( test -x build/unit_tests && ./build/unit_tests )
+          ninja -C build

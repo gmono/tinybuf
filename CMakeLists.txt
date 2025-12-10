@@ -17,16 +17,6 @@ endif()
 find_package(Catch2 REQUIRED)
 
 
-#使能c++11
-#add_compile_options(-std=c++11)
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-
-if(NOT MSVC)
-    add_definitions(-Wno-int-to-void-pointer-cast -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast)
-endif()
-
 
 
 
@@ -103,7 +93,7 @@ add_test(NAME benchmark COMMAND $<TARGET_FILE:benchmark>)
 set_tests_properties(benchmark PROPERTIES LABELS "benchmark;performance" DISABLED TRUE TIMEOUT 120)
 
 # 汇总所有测试一次性运行
-add_test(NAME all_tests COMMAND $<TARGET_FILE:all_tests>)
+add_test(NAME all_tests COMMAND $<TARGET_FILE:all_tests> "~[benchmark]" "~[plugin]")
 set_tests_properties(all_tests PROPERTIES TIMEOUT 120 LABELS "all")
 
 

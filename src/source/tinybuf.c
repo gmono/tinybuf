@@ -32,14 +32,10 @@ static inline void pool_unlock(void);
 
 typedef uint64_t QWORD;
 typedef int64_t SQWORD;
-typedef struct { int dtype; int dims; int64_t *shape; void *data; int64_t count; } tinybuf_tensor_t;
-typedef struct { int64_t count; uint8_t *bits; } tinybuf_bool_map_t;
-typedef struct { tinybuf_value *tensor; tinybuf_value **indices; int dims; } tinybuf_indexed_tensor_t;
 
-int s_use_strpool = 0;
-static int s_use_strpool_trie = 1;
-static int64_t s_strpool_offset_read = -1;
-static const char *s_strpool_base_read = NULL;
+/* moved to tinybuf_strpool.c: s_use_strpool */
+int64_t s_strpool_offset_read = -1;
+const char *s_strpool_base_read = NULL;
 typedef struct { buffer *buf; } strpool_entry;
 static strpool_entry *s_strpool = NULL;
 static int s_strpool_count = 0;
@@ -139,85 +135,6 @@ inline bool maybe_free_custom(tinybuf_value *value)
     return false;
 }
 
-//--目前除了指针系列 version与versionlist其他都未实现
-typedef enum
-{
-    serialize_null = 0,                 // 已实现
-    serialize_positive_int = 1,         // 已实现
-    serialize_negtive_int = 2,          // 已实现
-    serialize_bool_true = 3,            // 已实现
-    serialize_bool_false = 4,           // 已实现
-    serialize_double = 5,               // 已实现
-    serialize_string = 6,               // 已实现
-    serialize_map = 7,                  // 已实现
-    serialize_array = 8,                // 已实现
-    //--额外序列化类型 支持自偏移与头尾偏移 最小化指针int体积
-    // p表示正偏移 n表示负偏 后跟变长整数 非完整databox
-    serialize_pointer_from_current_n = 9, // 已实现
-    serialize_pointer_from_start_n = 10,  // 已实现
-    serialize_pointer_from_end_n = 11,    // 已实现
-    serialize_pointer_from_current_p = 12,// 已实现
-    serialize_pointer_from_start_p = 13,  // 已实现
-    serialize_pointer_from_end_p = 14,    // 已实现
-    // 支持精准锁定环结构 递归结构后面跟databox
-    serialize_pre_cache = 15,            // 未实现
-    // 支持版本号标记 向前向后兼容 此标记表示后面是一个verion unit
-    // 使用一个变长整数表示 递归结构 非完整databox 变长整数后面是完整的databox
-    serialize_version = 16,              // 已实现
-    // 集束box标识 表示后面是一个异类型序列集合 递归结构  读取时批量读取
-    serialize_boxlist = 17, // 未实现 boxlist_sign lstlen type1 type2 type3 type4 ... data1 data2 data3
-    // 压缩树表示中的keysign使用变长int存储
-    serialize_zip_kvpairs = 18,        // 未实现 压缩树表示 不存储key 转而存储key 的keysign //需要msgpack的key(0)等标记
-    serialize_zip_kvpairs_boxkey = 19, // 未实现 压缩树表示 但key使用完整databox存储 这意味着key支持version或pointer等结构
-    // 任何时候value都是完整box存储
-    // 兼容机制 version列表 支持新版本兼容旧版本
-
-    serialize_version_list = 20,        // 已实现
-    // 用于支持多part 每个part就是一个分区 用于支持并发读取每个分区拥有自己的长度
-    // 分区指针指向分区头部位置 目标必然是一个part类型 type partlen data 其中 其中partlen为intdata
-    serialize_part = 21,                // 未实现
-    // 用于支持并发读取
-    serialize_part_table = 22,          // 未实现 分区表 后跟一个整数长度 加标准整数列表 非完整box 每个整数表示分区头指针
-
-    // 字符串池索引
-    serialize_str_index = 23,           // 已实现
-    // 表示一个字符串池 可缩小体积
-    serialize_str_pool = 24,            // 已实现（尾部池对象）
-    // 用于支持把字符串池放在末尾
-    serialize_str_pool_table = 25,      // 已实现（头部池地址表）
-    serialize_uri = 26,            // 未实现 可以是文件uri或其他 结构为 sign uritype otherdata 后面跟一个文件path str 再跟一个整数表示数据在文件中的位置
-    serialize_router_link = 27,    // 未实现 跟一个uribox
-    // 遇到文件链接 应跳转到另一个文件的指定位置继续读取 高层box 对数据透明
-    // 与uri的区别是 uri只读取一个value并返回
-    serialize_text_ref = 28, // 未实现 uri指向的文本文件引用 fileid 有编码说明
-    serialize_bin_ref = 29,  // 未实现 二进制文件引用 支持部分引用 fileid
-    serialize_embed_file=30,    // 未实现 内嵌文件 有fileid 文件名 文件mime等 支持strptr和str
-    serialize_file_range=31,    // 未实现 文件范围引用 基于已经有的fileid
-    serialize_with_metadata=32, // 未实现 元类型 表示一个带有metadata的box 透明
-    serialize_noseq_part=33,    // 未实现 表示一个无序区 遇到直接跳过 无序区用于保存孤立对象 这种对象只被某个指针引用 不存在于其他位置
-    // 空白区 遇到直接跳过 用于用fat在其中高性能删除已有数据 并留下一个空白区
-    serialize_empty_part=34, // 未实现 sign len
-    // fs和fstable都支持多分块 元数据里会有指向下一个block和上一个block的指针 用于将space联成一片
-    serialize_fs=35,         // 未实现 表示一个文件系统块里面可以有目录结构
-    serialize_file_table=36, // 未实现 表示一个文件表 结构简单 没有目录结构
-    serialize_fs_file=37,    // 未实现 表示一个文件系统或文件表中的 文件 文件就是具名+具metadata的数据对象
-    serialize_fs_inode=38,   // 未实现 表示一个inode 一个fs节点 节点可以是目录 链接 或文件
-    serialize_flat_part=39,  // 未实现 通用连续空间块 支持相对寻址 平坦空间支持指向下一个block或上一个block 使用指针类型
-    // 可以是普通指针或高级指针
-    serialize_pointer_advance=40, // 未实现 先进指针 支持更丰富的寻址方式 例如flat空间寻址 block内部寻址 跨文件寻址等
-    serialize_empty_table=41,     // 未实现 空白空间表 用于配合平坦buf实现文件内连续子空间
-    // 子引用：后跟一个完整的指针box，读取时强制生成子引用节点（不透明）
-    serialize_sub_ref=42,         // 已实现
-    serialize_vector_tensor=43,
-    serialize_dense_tensor=44,
-    serialize_sparse_tensor=45,
-    serialize_bool_map=46,
-    serialize_indexed_tensor=47,
-    serialize_type_idx = 48,
-    serialize_extern_str_idx = 253,
-    serialize_extern_str = 254,
-    serialize_extern_int = 255
-} serialize_type;
 //---压缩boxlist数据集合的序列化
 static inline int boxlist_serialize()
 {
@@ -394,133 +311,6 @@ int tinybuf_value_clear(tinybuf_value *value)
     return 0;
 }
 
-int tinybuf_value_init_bool(tinybuf_value *value, int flag)
-{
-    assert(value);
-    tinybuf_value_clear(value);
-    value->_type = tinybuf_bool;
-    value->_data._bool = (flag != 0);
-    return 0;
-}
-
-int tinybuf_value_init_int(tinybuf_value *value, int64_t int_val)
-{
-    assert(value);
-    tinybuf_value_clear(value);
-    value->_type = tinybuf_int;
-    value->_data._int = int_val;
-    return 0;
-}
-
-// 初始化整数like box 使用特定类型
-int tinybuf_value_init_intlike_with_type(tinybuf_value *value, tinybuf_type type, int64_t int_val)
-{
-    int ret = tinybuf_value_init_int(value, int_val);
-    if (ret != 0)
-    {
-        return ret;
-    }
-    value->_type = type;
-    return 0;
-}
-// 直接设置类型 不修改数据
-int tinybuf_value_set_type(tinybuf_value *value, tinybuf_type type)
-{
-    assert(value);
-    value->_type = type;
-    return 0;
-}
-
-int tinybuf_value_set_plugin_index(tinybuf_value *value, int index)
-{
-    assert(value);
-    value->_plugin_index = index;
-    return 0;
-}
-
-int tinybuf_value_get_plugin_index(const tinybuf_value *value)
-{
-    if(!value) return -1;
-    return value->_plugin_index;
-}
-
-int tinybuf_value_set_custom_box_type(tinybuf_value *value, int type)
-{
-    assert(value);
-    value->_custom_box_type = type;
-    return 0;
-}
-
-int tinybuf_value_get_custom_box_type(const tinybuf_value *value)
-{
-    if(!value) return -1;
-    return value->_custom_box_type;
-}
-
-int tinybuf_value_init_double(tinybuf_value *value, double db_val)
-{
-    assert(value);
-    tinybuf_value_clear(value);
-    value->_type = tinybuf_double;
-    value->_data._double = db_val;
-    return 0;
-}
-
-int tinybuf_value_init_string2(tinybuf_value *value, buffer *buf)
-{
-    assert(value);
-    assert(buf);
-    if (value->_type != tinybuf_string)
-    {
-        tinybuf_value_clear(value);
-    }
-
-    if (value->_data._string)
-    {
-        buffer_free(value->_data._string);
-    }
-    value->_type = tinybuf_string;
-    value->_data._string = buf;
-    return 0;
-}
-
-static inline int tinybuf_value_init_string_l(tinybuf_value *value, const char *str, int len, int use_strlen)
-{
-    assert(value);
-    assert(str);
-    if (value->_type != tinybuf_string)
-    {
-        tinybuf_value_clear(value);
-    }
-
-    if (!value->_data._string)
-    {
-        value->_data._string = buffer_alloc();
-        assert(value->_data._string);
-    }
-
-    value->_type = tinybuf_string;
-
-    if (len <= 0 && use_strlen)
-    {
-        len = strlen(str);
-    }
-
-    if (len > 0)
-    {
-        buffer_assign(value->_data._string, str, len);
-    }
-    else
-    {
-        buffer_set_length(value->_data._string, 0);
-    }
-    return 0;
-}
-
-int tinybuf_value_init_string(tinybuf_value *value, const char *str, int len)
-{
-    return tinybuf_value_init_string_l(value, str, len, 1);
-}
 
 static int mapKeyCompare(AVLTreeKey key1, AVLTreeKey key2)
 {
@@ -615,7 +405,7 @@ int tinybuf_value_array_append(tinybuf_value *parent, tinybuf_value *value)
     return 0;
 }
 
-static inline int dump_int(uint64_t len, buffer *out)
+int dump_int(uint64_t len, buffer *out)
 {
     int buf_len = buffer_get_length_inline(out);
     if (buffer_get_capacity_inline(out) - buf_len < 16)
@@ -688,46 +478,35 @@ typedef struct { const tinybuf_value *value; buffer *stream; int64_t start; } pr
 static precache_entry *s_precache = NULL;
 static int s_precache_count = 0;
 static int s_precache_capacity = 0;
-static buffer *s_precache_stream = NULL;
-static int s_precache_redirect = 0; // 当为1时，序列化遇到已注册对象则输出指针而非内容
+/* moved to tinybuf_precache.c: precache state */
 
-static inline void precache_reset(buffer *out){ s_precache_stream = out; s_precache_count = 0; }
-static inline int64_t precache_find_start(buffer *out, const tinybuf_value *value){
-    if(out != s_precache_stream){ return -1; }
-    for(int i=0;i<s_precache_count;++i){ if(s_precache[i].value == value){ return s_precache[i].start; } }
-    return -1;
-}
-static inline void precache_add(buffer *out, const tinybuf_value *value, int64_t start){
-    if(out != s_precache_stream){ s_precache_stream = out; s_precache_count = 0; }
-    for(int i=0;i<s_precache_count;++i){ if(s_precache[i].value == value){ s_precache[i].start = start; return; } }
-    if(s_precache_count == s_precache_capacity){ int newcap = s_precache_capacity ? s_precache_capacity*2 : 16; s_precache = (precache_entry*)tinybuf_realloc(s_precache, sizeof(precache_entry)*newcap); s_precache_capacity = newcap; }
-    s_precache[s_precache_count].value = value; s_precache[s_precache_count].stream = out; s_precache[s_precache_count].start = start; ++s_precache_count;
-}
+/* moved to tinybuf_precache.c: precache_reset */
+/* moved to tinybuf_precache.c: precache_find_start */
+/* moved to tinybuf_precache.c: precache_add */
 
-void tinybuf_precache_reset(buffer *out){ precache_reset(out); }
-int64_t tinybuf_precache_register(buffer *out, const tinybuf_value *value){
-    int64_t start = (int64_t)buffer_get_length_inline(out);
-    precache_add(out, value, start);
-    int old = s_precache_redirect; s_precache_redirect = 0; // 禁用重定向，写入真实内容
-    int before = buffer_get_length_inline(out);
-    tinybuf_value_serialize(value, out);
-    int after = buffer_get_length_inline(out);
-    s_precache_redirect = old;
-    return (after - before) > 0 ? start : -1;
-}
+/* moved to tinybuf_precache.c: tinybuf_precache_reset */
+/* moved to tinybuf_precache.c: tinybuf_precache_register */
 
-void tinybuf_precache_set_redirect(int enable){ s_precache_redirect = (enable != 0); }
-int tinybuf_precache_is_redirect(void){ return s_precache_redirect; }
+/* moved to tinybuf_precache.c: tinybuf_precache_set_redirect / is_redirect */
 
 int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
 {
     assert(value);
     assert(out);
-    if(value && value->_custom_box_type >= 0){ return tinybuf_plugins_try_write((uint8_t)value->_custom_box_type, value, out); }
-    // 如果开启了重定向，并且该对象已注册为预写，则输出指针到start位置
-    if (s_precache_redirect && value)
+    if(value && value->_custom_box_type >= 0)
     {
-        int64_t start_pos = precache_find_start(out, value);
+        // 自定义 box 类型由插件写入
+        tinybuf_result rr = tinybuf_plugins_try_write((uint8_t)value->_custom_box_type, value, out);
+        if(rr.res<=0)
+        {
+            s_last_error_msg = "plugin write failed";
+        }
+        return rr.res;
+    }
+    // 如果开启了重定向，并且该对象已注册为预写，则输出指针到start位置
+    if (tinybuf_precache_is_redirect() && value)
+    {
+        int64_t start_pos = tinybuf_precache_find_start_for(out, value);
         if (start_pos >= 0)
         {
             return try_write_pointer_value(out, (enum offset_type)0, start_pos);
@@ -895,8 +674,15 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         try_write_box(out, it->tensor);
         dump_int((uint64_t)it->dims, out);
         for(int i=0;i<it->dims;++i){
-            if(it->indices && it->indices[i]){ dump_int(1, out); try_write_box(out, it->indices[i]); }
-            else { dump_int(0, out); }
+            if(it->indices && it->indices[i])
+            {
+                dump_int(1, out);
+                try_write_box(out, it->indices[i]);
+            }
+            else
+            {
+                dump_int(0, out);
+            }
         }
     }
     break;
@@ -913,11 +699,6 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
 
 /* strpool declarations are at the top of file */
 
-static inline void strpool_reset_write(const buffer *out){ s_strpool_count = 0; s_strpool_base = (const char*)out; }
-static inline int strpool_find(const char *data, int len){ for(int i=0;i<s_strpool_count;++i){ int l = buffer_get_length_inline(s_strpool[i].buf); if(l==len && memcmp(buffer_get_data_inline(s_strpool[i].buf), data, len)==0){ return i; } } return -1; }
-static inline int strpool_add(const char *data, int len){ int idx = strpool_find(data, len); if(idx>=0) return idx; if(s_strpool_count==s_strpool_capacity){ int newcap = s_strpool_capacity? s_strpool_capacity*2:16; s_strpool = (strpool_entry*)tinybuf_realloc(s_strpool, sizeof(strpool_entry)*newcap); s_strpool_capacity = newcap; } buffer *b = buffer_alloc(); buffer_assign(b, data, len); s_strpool[s_strpool_count].buf = b; return s_strpool_count++; }
-typedef struct { int parent; unsigned char ch; unsigned char is_leaf; int leaf_id; } trie_node;
-static inline int strpool_write_tail(buffer *out){ if(!s_use_strpool || s_strpool_count==0) return 0; if(!s_use_strpool_trie){ int len = 0; len += try_write_type(out, serialize_str_pool); len += try_write_int_data(FALSE, out, (QWORD)s_strpool_count); for(int i=0;i<s_strpool_count;++i){ int sl = buffer_get_length_inline(s_strpool[i].buf); len += try_write_type(out, serialize_string); len += try_write_int_data(FALSE, out, (QWORD)sl); if(sl){ buffer_append(out, buffer_get_data_inline(s_strpool[i].buf), sl); } } return len; } int before = buffer_get_length_inline(out); try_write_type(out, 27); /* trie pool */ trie_node *nodes = NULL; int ncount = 1; nodes = (trie_node*)tinybuf_malloc(sizeof(trie_node)*1); nodes[0].parent=-1; nodes[0].ch=0; nodes[0].is_leaf=0; nodes[0].leaf_id=-1; for(int i=0;i<s_strpool_count;++i){ const char *p = buffer_get_data_inline(s_strpool[i].buf); int sl = buffer_get_length_inline(s_strpool[i].buf); int cur = 0; for(int k=0;k<sl;++k){ unsigned char c = (unsigned char)p[k]; int found=-1; for(int j=1;j<ncount;++j){ if(nodes[j].parent==cur && nodes[j].ch==c){ found=j; break; } } if(found<0){ nodes = (trie_node*)tinybuf_realloc(nodes, sizeof(trie_node)*(ncount+1)); nodes[ncount].parent=cur; nodes[ncount].ch=c; nodes[ncount].is_leaf=0; nodes[ncount].leaf_id=-1; found = ncount; ++ncount; } cur = found; } nodes[cur].is_leaf=1; nodes[cur].leaf_id=i; } try_write_int_data(FALSE, out, (QWORD)ncount); for(int i=0;i<ncount;++i){ try_write_int_data(FALSE, out, (QWORD)(nodes[i].parent<0?0:(QWORD)nodes[i].parent)); buffer_append(out, (const char*)&nodes[i].ch, 1); uint8_t flag = nodes[i].is_leaf?1:0; buffer_append(out, (const char*)&flag, 1); if(nodes[i].is_leaf){ try_write_int_data(FALSE, out, (QWORD)nodes[i].leaf_id); } } tinybuf_free(nodes); int after = buffer_get_length_inline(out); return after - before; }
 
 // 裸整数操作读写函数 正整数做uint64 负数作为int64
 inline int try_read_int_tovar(BOOL isneg, const char *ptr, int size, QWORD *out_val)
@@ -1258,7 +1039,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
         }
 
         // 赋值为string
-        tinybuf_value_init_string_l(out, ptr, bytes_len, 0);
+            tinybuf_value_init_string(out, ptr, bytes_len);
 
         // 消耗总字节数
         return 1 + len + bytes_len;
@@ -1278,7 +1059,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
             uint64_t cnt = 0; int l2 = int_deserialize((uint8_t *)q, (int)r, &cnt); if(l2 <= 0){ return -1; }
             q += l2; r -= l2;
             if(idx >= cnt){ return -1; }
-            for(uint64_t i=0;i<cnt;++i){ if(r < 1){ return 0; } if((uint8_t)q[0] != serialize_string){ return -1; } ++q; --r; uint64_t sl; int l3 = int_deserialize((uint8_t *)q, (int)r, &sl); if(l3 <= 0){ return l3; } q += l3; r -= l3; if(r < (int64_t)sl){ return 0; } if(i == idx){ tinybuf_value_init_string_l(out, q, (int)sl, 0); return 1 + len; } q += sl; r -= sl; }
+            for(uint64_t i=0;i<cnt;++i){ if(r < 1){ return 0; } if((uint8_t)q[0] != serialize_string){ return -1; } ++q; --r; uint64_t sl; int l3 = int_deserialize((uint8_t *)q, (int)r, &sl); if(l3 <= 0){ return l3; } q += l3; r -= l3; if(r < (int64_t)sl){ return 0; } if(i == idx){ tinybuf_value_init_string(out, q, (int)sl); return 1 + len; } q += sl; r -= sl; }
             return -1;
         } else if((uint8_t)q[0] == 27){
             ++q; --r;
@@ -1301,7 +1082,7 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
             int tlen = buffer_get_length_inline(tmp); const char *td = buffer_get_data_inline(tmp);
             char *rev = (char*)tinybuf_malloc(tlen);
             for(int i=0;i<tlen;++i){ rev[i] = td[tlen-1-i]; }
-            tinybuf_value_init_string_l(out, rev, tlen, 0);
+            tinybuf_value_init_string(out, rev, tlen);
             tinybuf_free(rev); buffer_free(tmp);
             return 1 + len;
         } else { return -1; }
@@ -1458,14 +1239,20 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
     case serialize_indexed_tensor:
     {
         const char *p0 = ptr;
-        buf_ref br = (buf_ref){ (char*)ptr, (int64_t)size, (char*)ptr, (int64_t)size };
-        tinybuf_value *ten = tinybuf_value_alloc(); int r1 = try_read_box(&br, ten, contain_any); if(r1<=0){ tinybuf_value_free(ten); return r1; }
+        tinybuf_value *ten = tinybuf_value_alloc(); int r1 = tinybuf_value_deserialize(ptr, size, ten);
+        if(r1<=0){
+            /* fallback to public wrapper to ensure strpool context */
+            buf_ref br_fallback = (buf_ref){ (char*)ptr, (int64_t)size, (char*)ptr, (int64_t)size };
+            tinybuf_result r1b = tinybuf_try_read_box(&br_fallback, ten, contain_any);
+            if(r1b.res<=0){ tinybuf_value_free(ten); return r1; }
+            r1 = r1b.res;
+        }
         ptr += r1; size -= r1;
         uint64_t dims=0; int a = int_deserialize((uint8_t*)ptr, size, &dims); if(a<=0){ tinybuf_value_free(ten); return a; }
         ptr += a; size -= a;
         tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)tinybuf_malloc((int)sizeof(tinybuf_indexed_tensor_t)); it->tensor = ten; it->dims = (int)dims; it->indices = NULL;
         if(dims>0){ it->indices = (tinybuf_value**)tinybuf_malloc(sizeof(tinybuf_value*)*(size_t)dims); for(uint64_t i=0;i<dims;++i) it->indices[i] = NULL; }
-        for(uint64_t i=0;i<dims;++i){ uint64_t has=0; int c = int_deserialize((uint8_t*)ptr, size, &has); if(c<=0){ /* cleanup */ if(it->indices){ for(uint64_t k=0;k<i;++k){ if(it->indices[k]) tinybuf_value_free(it->indices[k]); } tinybuf_free(it->indices);} tinybuf_value_free(ten); tinybuf_free(it); return c; } ptr+=c; size-=c; if(has){ tinybuf_value *idx = tinybuf_value_alloc(); buf_ref br2 = (buf_ref){ (char*)ptr, (int64_t)size, (char*)ptr, (int64_t)size }; int r2 = try_read_box(&br2, idx, contain_any); if(r2<=0){ tinybuf_value_free(idx); if(it->indices){ for(uint64_t k=0;k<i;++k){ if(it->indices[k]) tinybuf_value_free(it->indices[k]); } tinybuf_free(it->indices);} tinybuf_value_free(ten); tinybuf_free(it); return r2; } ptr += r2; size -= r2; it->indices[i] = idx; } }
+        for(uint64_t i=0;i<dims;++i){ uint64_t has=0; int c = int_deserialize((uint8_t*)ptr, size, &has); if(c<=0){ if(it->indices){ for(uint64_t k=0;k<i;++k){ if(it->indices[k]) tinybuf_value_free(it->indices[k]); } tinybuf_free(it->indices);} tinybuf_value_free(ten); tinybuf_free(it); return c; } ptr+=c; size-=c; if(has){ tinybuf_value *idx = tinybuf_value_alloc(); int r2 = tinybuf_value_deserialize(ptr, size, idx); if(r2<=0){ buf_ref br2 = (buf_ref){ (char*)ptr, (int64_t)size, (char*)ptr, (int64_t)size }; tinybuf_result r3 = tinybuf_try_read_box(&br2, idx, contain_any); if(r3.res<=0){ tinybuf_value_free(idx); if(it->indices){ for(uint64_t k=0;k<i;++k){ if(it->indices[k]) tinybuf_value_free(it->indices[k]); } tinybuf_free(it->indices);} tinybuf_value_free(ten); tinybuf_free(it); return r2; } r2 = r3.res; } ptr += r2; size -= r2; it->indices[i] = idx; } }
         out->_type = tinybuf_indexed_tensor; out->_data._custom = it; out->_custom_free = NULL;
         return 1 + (int)(ptr - p0);
     }
@@ -1487,13 +1274,13 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out)
             int tlen=buffer_get_length_inline(tmp); const char *td=buffer_get_data_inline(tmp); name_out=(char*)tinybuf_malloc(tlen+1); for(int i=0;i<tlen;++i){ name_out[i]=td[tlen-1-i]; } name_out[tlen]='\0'; name_len=tlen; buffer_free(tmp);
         } else { return -1; }
         if(!name_out) return -1;
-        int rr = tinybuf_custom_try_read(name_out, (const uint8_t*)ptr, (int)blen, out, contain_any);
+        tinybuf_result rr = tinybuf_custom_try_read(name_out, (const uint8_t*)ptr, (int)blen, out, contain_any);
         tinybuf_free(name_out);
-        if(rr < 0){
+        if(rr.res <= 0){
             buf_ref br3 = (buf_ref){ (char*)ptr, (int64_t)blen, (char*)ptr, (int64_t)blen };
             int ir = try_read_box(&br3, out, contain_any);
             if(ir > 0){ return 1 + a + b + ir; }
-            return rr;
+            return rr.res;
         }
         return 1 + a + b + (int)blen;
     }
@@ -1588,21 +1375,7 @@ int try_read_type(buf_ref *buf, serialize_type *type)
     return 1;
 }
 
-// 指针偏移系统
-enum offset_type
-{
-    start,
-    end,
-    current,
-    // 高级指针类型
-    parent_flat_start, // 基于父flat 空间寻址
-    parent_flat_end    // 基于父flat 末尾寻址
-};
-typedef struct
-{
-    int64_t offset;
-    enum offset_type type;
-} pointer_value;
+// 指针偏移系统：types are declared in tinybuf_private.h
 
 // 转换pointervalue为从start开始的pointervalue
 // 直接修改ptr指针对象
@@ -1649,7 +1422,9 @@ BOOL RESULT_OK_AND_ADDTO(read_result x, int *s)
 // 高级序列化read入口
 // 二级版本 可处理二级格式 readbox标准 成功则修改buf指针 返回>0 否则不修改并返回<=0
 
-#define SET_FAILED(s) (reason = s, s_last_error_msg = s, failed = TRUE)
+#include "tinybuf_plugin.h"
+static inline void _tb_push_err_msg(const char *msg){ tinybuf_result *cr = tinybuf_result_get_current(); if(cr && msg){ tinybuf_result_add_msg_const(cr, msg); } }
+#define SET_FAILED(s) (reason = s, s_last_error_msg = s, failed = TRUE, _tb_push_err_msg(s))
 #define SET_SUCCESS() (failed = FALSE, reason = NULL, s_last_error_msg = NULL)
 #define CHECK_FAILED (failed && buf_offset(buf, -len));
 #define INIT_STATE       \
@@ -1719,9 +1494,26 @@ static inline void pool_mark_complete(int64_t offset){
     pool_unlock();
 }
 
-static inline void set_out_ref(tinybuf_value *out, tinybuf_value *target){ out->_type = tinybuf_value_ref; out->_data._ref = target; }
-static inline void set_out_deref(tinybuf_value *out, const tinybuf_value *target){ tinybuf_value *clone = tinybuf_value_clone(target); tinybuf_value_clear(out); memcpy(out, clone, sizeof(tinybuf_value)); tinybuf_free(clone); }
-static inline void set_out_by_mode(tinybuf_value *out, tinybuf_value *target, int deref){ if(deref) set_out_deref(out, target); else set_out_ref(out, target); }
+static inline void set_out_ref(tinybuf_value *out, tinybuf_value *target)
+{
+    // 输出引用目标（不拷贝）
+    out->_type = tinybuf_value_ref;
+    out->_data._ref = target;
+}
+static inline void set_out_deref(tinybuf_value *out, const tinybuf_value *target)
+{
+    // 输出解引用（拷贝值）
+    tinybuf_value *clone = tinybuf_value_clone(target);
+    tinybuf_value_clear(out);
+    memcpy(out, clone, sizeof(tinybuf_value));
+    tinybuf_free(clone);
+}
+static inline void set_out_by_mode(tinybuf_value *out, tinybuf_value *target, int deref)
+{
+    // 根据模式设置输出
+    if(deref) set_out_deref(out, target);
+    else set_out_ref(out, target);
+}
 // 从给定位置偏移一段距离 读取值
 int _read_box_by_offset(buf_ref *buf, int64_t offset, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
@@ -2079,6 +1871,55 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             break;
         }
 
+        case serialize_indexed_tensor:
+        {
+            /* parse inner tensor using base deserializer first; if it fails, fallback to public wrapper */
+            tinybuf_value *ten = tinybuf_value_alloc();
+            int r1 = tinybuf_value_deserialize(buf->ptr, (int)buf->size, ten);
+            if(r1<=0){
+                buf_ref br_fallback = *buf;
+                tinybuf_result rr1 = tinybuf_try_read_box(&br_fallback, ten, contain_any);
+                if(rr1.res<=0){ tinybuf_value_free(ten); SET_FAILED("read indexed_tensor tensor failed"); break; }
+                r1 = rr1.res;
+            }
+            buf_offset(buf, r1); len += r1;
+            QWORD dims=0; if(!OK_AND_ADDTO(try_read_int_data(FALSE, buf, &dims), &len)){ tinybuf_value_free(ten); SET_FAILED("read indexed_tensor dims failed"); break; }
+            tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)tinybuf_malloc((int)sizeof(tinybuf_indexed_tensor_t)); it->tensor = ten; it->dims = (int)dims; it->indices = NULL;
+            if(dims>0){ it->indices = (tinybuf_value**)tinybuf_malloc(sizeof(tinybuf_value*)*(size_t)dims); for(QWORD i=0;i<dims;++i) it->indices[i] = NULL; }
+            for(QWORD i=0;i<dims;++i){
+                QWORD has=0; if(!OK_AND_ADDTO(try_read_int_data(FALSE, buf, &has), &len)){
+                    if(it->indices){ for(QWORD k=0;k<i;++k){ if(it->indices[k]) tinybuf_value_free(it->indices[k]); } tinybuf_free(it->indices);} tinybuf_value_free(ten); tinybuf_free(it);
+                    SET_FAILED("read indexed_tensor has failed");
+                    break;
+                }
+                if(has){
+                    tinybuf_value *idx = tinybuf_value_alloc();
+                    int r2 = tinybuf_value_deserialize(buf->ptr, (int)buf->size, idx);
+                    if(r2<=0){
+                        /* fallback to public wrapper in case nested strpool table or advanced box */
+                        buf_ref br2 = *buf;
+                    tinybuf_result rr3 = tinybuf_try_read_box(&br2, idx, contain_any);
+                    if(rr3.res<=0){
+                        if(it->indices){ for(QWORD k=0;k<i;++k){ if(it->indices[k]) tinybuf_value_free(it->indices[k]); } tinybuf_free(it->indices);} tinybuf_value_free(ten); tinybuf_free(it);
+                        char *m=(char*)tinybuf_malloc(96);
+                        unsigned ht = buf->size>0 ? (unsigned)(uint8_t)buf->ptr[0] : 255;
+                        snprintf(m,96,"indexed_tensor index failed at dim=%llu head_type=%u",(unsigned long long)i,ht);
+                        s_last_error_msg = m; /* propagate; ownership transferred to global */
+                        SET_FAILED("read indexed_tensor index failed");
+                    
+                        break;
+                        }
+                        buf_offset(buf, rr3.res); len += rr3.res;
+                    } else {
+                        buf_offset(buf, r2); len += r2;
+                    }
+                    it->indices[i] = idx;
+                }
+            }
+            if(!failed){ out->_type = tinybuf_indexed_tensor; out->_data._custom = it; out->_custom_free = NULL; pool_mark_complete(box_offset); SET_SUCCESS(); }
+            break;
+        }
+
         case 26:
         {
             QWORD cnt = 0;
@@ -2089,8 +1930,8 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 tinybuf_plugin_set_runtime_map(guids, (int)cnt);
                 for(QWORD i=0;i<cnt;++i){ tinybuf_free((void*)guids[i]); }
                 tinybuf_free(guids);
-                int inner = tinybuf_try_read_box_with_plugins(buf, out, target_version);
-                if(inner > 0){ len += inner; SET_SUCCESS(); break; }
+                tinybuf_result inner = tinybuf_try_read_box_with_plugins(buf, out, target_version);
+                if(inner.res > 0){ len += inner.res; SET_SUCCESS(); break; }
                 SET_FAILED("plugin map followed by invalid box"); break;
             }
             SET_FAILED("plugin map header failed"); break;
@@ -2386,12 +2227,12 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
                 }
             }
             if(name_out){
-                int ir = tinybuf_custom_try_read(name_out, (const uint8_t*)buf->ptr, (int)blen, out, contain_any);
-                if(ir > 0){ buf_offset(buf, (int)blen); len += (int)blen; pool_mark_complete(box_offset); SET_SUCCESS(); }
+                tinybuf_result cr = tinybuf_custom_try_read(name_out, (const uint8_t*)buf->ptr, (int)blen, out, contain_any);
+                if(cr.res > 0){ buf_offset(buf, (int)blen); len += (int)blen; pool_mark_complete(box_offset); SET_SUCCESS(); }
                 else{
                     buf_ref br3 = (buf_ref){ (char*)buf->ptr, (int64_t)blen, (char*)buf->ptr, (int64_t)blen };
-                    int ir2 = try_read_box(&br3, out, contain_any);
-                    if(ir2 > 0){ buf_offset(buf, ir2); len += ir2; pool_mark_complete(box_offset); SET_SUCCESS(); }
+                    tinybuf_result ir2 = tinybuf_try_read_box(&br3, out, contain_any);
+                    if(ir2.res > 0){ buf_offset(buf, ir2.res); len += ir2.res; pool_mark_complete(box_offset); SET_SUCCESS(); }
                     else { SET_FAILED("custom read failed"); }
                 }
                 tinybuf_free(name_out);
@@ -2402,8 +2243,12 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
             break;
         }
         default:
-            SET_FAILED("read type UNKNOWN");
+        {
+            char *m = (char*)tinybuf_malloc(64);
+            snprintf(m,64,"read type UNKNOWN %u",(unsigned)type);
+            reason = m; s_last_error_msg = m; failed = TRUE;
             break;
+        }
         }
     }
     else
@@ -2416,26 +2261,18 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_versio
     READ_RETURN
 }
 
-static inline int try_write_type(buffer *out, serialize_type type)
+int try_write_type(buffer *out, serialize_type type)
 {
     buffer_append(out, (char *)&type, 1);
     return 1;
 }
 
-static inline int try_write_int_data(BOOL isneg, buffer *out, QWORD val)
+int try_write_int_data(BOOL isneg, buffer *out, QWORD val)
 {
     return dump_int(val, out);
 }
 
-static inline int try_write_intbox(buffer *out, SQWORD sval)
-{
-    int len = 0;
-    serialize_type type = sval < 0 ? serialize_negtive_int : serialize_positive_int;
-    len += try_write_type(out, type);
-    QWORD mag = sval < 0 ? (QWORD)(-sval) : (QWORD)sval;
-    len += try_write_int_data(type == serialize_negtive_int, out, mag);
-    return len;
-}
+/* moved to tinybuf_write.c: try_write_intbox */
 
 static inline serialize_type make_pointer_type(enum offset_type t, BOOL neg)
 {
@@ -2468,146 +2305,36 @@ static inline int try_write_pointer(buffer *out, pointer_value pointer)
     return try_write_pointer_value(out, pointer.type, pointer.offset);
 }
 
-// 写入总入口
-static inline int try_write_box(buffer *out, const tinybuf_value *value)
-{
-    if(!s_use_strpool){
-        int before = buffer_get_length_inline(out);
-        tinybuf_value_serialize(value, out);
-        int after = buffer_get_length_inline(out);
-        return after - before;
-    }
-    // strpool-enabled: write head table, body, then pool without linear scan
-    buffer *body = buffer_alloc();
-    buffer *pool = buffer_alloc();
-    strpool_reset_write(body);
-    tinybuf_value_serialize(value, body);
-    // write pool into separate buf
-    strpool_write_tail(pool);
-    int body_len = buffer_get_length_inline(body);
-    int pool_len = buffer_get_length_inline(pool);
-    // compute varint length of offset iteratively
-    uint64_t offset_guess_len = 1; // initial guess for varint
-    uint8_t tmp[16];
-    while(1){
-        uint64_t off = 1 + offset_guess_len + (uint64_t)body_len; // type(1) + varint + body
-        int l = int_serialize(off, tmp);
-        if((uint64_t)l == offset_guess_len){ break; }
-        offset_guess_len = (uint64_t)l;
-    }
-    uint64_t final_off = 1 + offset_guess_len + (uint64_t)body_len;
-    int before = buffer_get_length_inline(out);
-    // write table
-    try_write_type(out, serialize_str_pool_table);
-    try_write_int_data(FALSE, out, final_off);
-    // write body
-    buffer_append(out, buffer_get_data_inline(body), body_len);
-    // write pool
-    if(pool_len){ buffer_append(out, buffer_get_data_inline(pool), pool_len); }
-    int after = buffer_get_length_inline(out);
-    buffer_free(body); buffer_free(pool);
-    return after - before;
-}
+// 写入总入口由 tinybuf_write.c 提供实现
 
-static inline int try_write_version_box(buffer *out, QWORD version, const tinybuf_value *box)
-{
-    int len = 0;
-    len += try_write_type(out, serialize_version);
-    len += try_write_int_data(FALSE, out, version);
-    len += try_write_box(out, box);
-    return len;
-}
+/* moved to tinybuf_write.c: try_write_plugin_map_table */
 
-static inline int try_write_version_list(buffer *out, const QWORD *versions, const tinybuf_value **boxes, int count)
-{
-    int len = 0;
-    len += try_write_type(out, serialize_version_list);
-    len += try_write_int_data(FALSE, out, (QWORD)count);
-    for (int i = 0; i < count; ++i)
-    {
-        len += try_write_int_data(FALSE, out, versions[i]);
-        len += try_write_box(out, boxes[i]);
-    }
-    return len;
-}
+/* moved to tinybuf_write.c: try_write_part */
 
-static inline int try_write_plugin_map_table(buffer *out){
-    int before = buffer_get_length_inline(out);
-    int pc = tinybuf_plugin_get_count();
-    try_write_type(out, 26);
-    try_write_int_data(FALSE, out, (QWORD)pc);
-    for(int i=0;i<pc;++i){ const char *g = tinybuf_plugin_get_guid(i); if(!g) g=""; int gl = (int)strlen(g); try_write_type(out, serialize_string); try_write_int_data(FALSE, out, (QWORD)gl); if(gl){ buffer_append(out, g, gl); } }
-    int after = buffer_get_length_inline(out);
-    return after - before;
-}
-
-static inline int try_write_part(buffer *out, const tinybuf_value *value)
-{
-    buffer *body = buffer_alloc();
-    int body_len = try_write_box(body, value);
-    int before = buffer_get_length_inline(out);
-    try_write_type(out, serialize_part);
-    try_write_int_data(FALSE, out, (QWORD)body_len);
-    buffer_append(out, buffer_get_data_inline(body), body_len);
-    int after = buffer_get_length_inline(out);
-    buffer_free(body);
-    return after - before;
-}
-
-static inline int try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count)
-{
-    int total = 1 + count;
-    buffer **parts = (buffer **)tinybuf_malloc(sizeof(buffer *) * total);
-    int *lens = (int *)tinybuf_malloc(sizeof(int) * total);
-    for (int i = 0; i < total; ++i)
-    {
-        parts[i] = buffer_alloc();
-    }
-    lens[0] = try_write_part(parts[0], mainbox);
-    for (int i = 0; i < count; ++i)
-    {
-        lens[1 + i] = try_write_part(parts[1 + i], subs[i]);
-    }
-    uint64_t *offs = (uint64_t *)tinybuf_malloc(sizeof(uint64_t) * total);
-    uint64_t *vlen = (uint64_t *)tinybuf_malloc(sizeof(uint64_t) * total);
-    for (int i = 0; i < total; ++i) vlen[i] = 1;
-    uint8_t tmp[32];
-    while (1)
-    {
-        uint64_t table_len = 1 + (uint64_t)int_serialize((uint64_t)total, tmp);
-        for (int i = 0; i < total; ++i) table_len += vlen[i];
-        offs[0] = table_len;
-        for (int i = 1; i < total; ++i) offs[i] = offs[i - 1] + (uint64_t)lens[i - 1];
-        int stable = 1;
-        for (int i = 0; i < total; ++i)
-        {
-            int l = int_serialize(offs[i], tmp);
-            if ((uint64_t)l != vlen[i]) { vlen[i] = (uint64_t)l; stable = 0; }
-        }
-        if (stable) break;
-    }
-    int before = buffer_get_length_inline(out);
-    try_write_type(out, serialize_part_table);
-    try_write_int_data(FALSE, out, (QWORD)total);
-    for (int i = 0; i < total; ++i)
-    {
-        try_write_int_data(FALSE, out, (QWORD)offs[i]);
-    }
-    for (int i = 0; i < total; ++i)
-    {
-        buffer_append(out, buffer_get_data_inline(parts[i]), buffer_get_length_inline(parts[i]));
-    }
-    int after = buffer_get_length_inline(out);
-    for (int i = 0; i < total; ++i) buffer_free(parts[i]);
-    tinybuf_free(parts);
-    tinybuf_free(lens);
-    tinybuf_free(offs);
-    tinybuf_free(vlen);
-    return after - before;
-}
+/* moved to tinybuf_write.c: try_write_partitions */
 
 // public wrappers
-int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
+void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode)
+{
+    s_read_pointer_mode = mode;
+}
+tinybuf_result tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode)
+{
+    s_read_pointer_mode = mode;
+    return tinybuf_try_read_box(buf, out, contain_handler);
+}
+
+void tinybuf_set_use_strpool(int enable)
+{
+    s_use_strpool = enable ? 1 : 0;
+}
+
+static inline tinybuf_result _err_with(const char *msg, int rc)
+{
+    return tinybuf_result_err(rc, msg, NULL);
+}
+
+tinybuf_result tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     pool_reset(buf);
     if (buf->ptr == buf->base && buf->size >= 1 && (uint8_t)buf->base[0] == serialize_str_pool_table)
@@ -2621,115 +2348,195 @@ int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER conta
             if (c2 > 0){ s_strpool_offset_read = (int64_t)off; buf_offset(buf, c + c2); }
         }
     }
-    return try_read_box(buf, out, contain_handler);
-}
-
-void tinybuf_set_read_pointer_mode(tinybuf_read_pointer_mode mode){ s_read_pointer_mode = mode; }
-int tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode){ s_read_pointer_mode = mode; return tinybuf_try_read_box(buf, out, contain_handler); }
-
-void tinybuf_set_use_strpool(int enable){ s_use_strpool = enable ? 1 : 0; }
-
-int tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
-{
-    return try_write_box(out, value);
-}
-
-tinybuf_result tinybuf_try_read_box_r(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
-{
-    int r = tinybuf_try_read_box(buf, out, contain_handler);
-    if (r <= 0){ int alt = tinybuf_value_deserialize(buf->ptr, buf->size, out); if(alt > 0){ return tinybuf_result_ok(alt); } }
-    if (r > 0) { return tinybuf_result_ok(r); }
-    if(buf && buf->size>0 && (uint8_t)buf->ptr[0] == serialize_type_idx){
-        const char *p = buf->ptr + 1; int64_t sz = buf->size - 1;
-        QWORD idx=0; int a=try_read_int_tovar(FALSE,p,(int)sz,&idx); if(a>0){ p+=a; sz-=a; QWORD blen=0; int b=try_read_int_tovar(FALSE,p,(int)sz,&blen); if(b>0){ p+=b; sz-=b; if(sz >= (int64_t)blen && s_strpool_offset_read>=0 && s_strpool_base_read){ const char *q = s_strpool_base_read + s_strpool_offset_read; int64_t rsz = ((const char*)buf->ptr + buf->size) - q; char *name_out=NULL; if(rsz>0){ if((uint8_t)q[0]==serialize_str_pool){ ++q; --rsz; QWORD cnt=0; int l2=try_read_int_tovar(FALSE,q,(int)rsz,&cnt); if(l2>0){ q+=l2; rsz-=l2; for(QWORD i=0;i<cnt;++i){ if(rsz<1) break; if((uint8_t)q[0]!=serialize_string) break; ++q; --rsz; QWORD sl=0; int l3=try_read_int_tovar(FALSE,q,(int)rsz,&sl); if(l3<=0) break; q+=l3; rsz-=l3; if(rsz < (int64_t)sl) break; if(i==idx){ name_out=(char*)tinybuf_malloc((int)sl+1); memcpy(name_out,q,(size_t)sl); name_out[sl]='\0'; break; } q+=sl; rsz-=sl; } } }
-                                else if((uint8_t)q[0]==27){ ++q; --rsz; QWORD ncount=0; int l2=try_read_int_tovar(FALSE,q,(int)rsz,&ncount); if(l2>0){ const char *nodes_base=q+l2; int64_t nodes_size=rsz-l2; const char *pp=nodes_base; int64_t rr=nodes_size; int found=-1; for(QWORD i=0;i<ncount;++i){ QWORD parent=0; int lp=try_read_int_tovar(FALSE,pp,(int)rr,&parent); if(lp<=0) break; pp+=lp; rr-=lp; if(rr<2) break; unsigned char ch=(unsigned char)pp[0]; unsigned char flag=(unsigned char)pp[1]; pp+=2; rr-=2; if(flag){ QWORD leaf=0; int ll=try_read_int_tovar(FALSE,pp,(int)rr,&leaf); if(ll<=0) break; pp+=ll; rr-=ll; if(leaf==(QWORD)idx){ found=(int)i; break; } } }
-                                        if(found>=0){ buffer *tmp=buffer_alloc(); int current=found; while(1){ const char *p2=nodes_base; int64_t rr2=nodes_size; int node_index=0; int parent_index=-1; unsigned char ch=0; unsigned char flag=0; QWORD leaf=0; while(node_index<=current){ QWORD parent=0; int lp=try_read_int_tovar(FALSE,p2,(int)rr2,&parent); p2+=lp; rr2-=lp; if(rr2<2) break; ch=(unsigned char)p2[0]; flag=(unsigned char)p2[1]; p2+=2; rr2-=2; if(flag){ int ll=try_read_int_tovar(FALSE,p2,(int)rr2,&leaf); p2+=ll; rr2-=ll; } parent_index=(int)parent; ++node_index; } if(ch){ buffer_append(tmp,(const char*)&ch,1); } if(parent_index<=0) break; current=parent_index; }
-                                            int tlen=buffer_get_length_inline(tmp); const char *td=buffer_get_data_inline(tmp); name_out=(char*)tinybuf_malloc(tlen+1); for(int i=0;i<tlen;++i){ name_out[i]=td[tlen-1-i]; } name_out[tlen]='\0'; buffer_free(tmp); }
-                                    }
-                                }
-                if(name_out){ int ir=tinybuf_custom_try_read(name_out,(const uint8_t*)p,(int)blen,out,contain_handler); tinybuf_free(name_out); if(ir>0){ return tinybuf_result_ok(1 + a + b + (int)blen); } }
-            } }
-        /* fallback failed */
-    }
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_read_box failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_read_box_r");
+    tinybuf_result_set_current(&rr);
+    buf_ref snap = *buf;
+    int r1 = try_read_box(&snap, out, contain_handler);
+    if(r1 > 0){ buf_offset(buf, r1); tinybuf_result_set_current(NULL); (void)tinybuf_result_unref(&rr); return tinybuf_result_ok(r1); }
+    buf_ref raw = *buf;
+    int r2 = tinybuf_value_deserialize(raw.ptr, raw.size, out);
+    if(r2 > 0){ buf_offset(buf, r2); tinybuf_result_set_current(NULL); (void)tinybuf_result_unref(&rr); return tinybuf_result_ok(r2); }
     const char *msg = tinybuf_last_error_message();
-    if(!msg) msg = (r == 0) ? "buffer too small" : "read failed";
-    tinybuf_result rr = tinybuf_result_err(r, msg, NULL);
-    /* add context */ tinybuf_result_add_msg_const(&rr, "tinybuf_try_read_box failed");
+    if(!msg) msg = (r1 == 0 || r2 == 0) ? "buffer too small" : "read failed";
+    int rc = r1<0 ? r1 : (r2<0 ? r2 : -1);
+    rr.res = rc;
     if(buf && buf->size>0){ char *m=(char*)tinybuf_malloc(64); snprintf(m,64,"head_type=%u",(unsigned)(uint8_t)buf->ptr[0]); tinybuf_result_add_msg(&rr,m,(tinybuf_deleter_fn)tinybuf_free); }
     { char *m2=(char*)tinybuf_malloc(64); snprintf(m2,64,"strpool_off=%lld",(long long)s_strpool_offset_read); tinybuf_result_add_msg(&rr,m2,(tinybuf_deleter_fn)tinybuf_free); }
     { char *m3=(char*)tinybuf_malloc(64); snprintf(m3,64,"plugins=%d",tinybuf_plugin_get_count()); tinybuf_result_add_msg(&rr,m3,(tinybuf_deleter_fn)tinybuf_free); }
+    if(buf && buf->size>1 && (uint8_t)buf->ptr[0] == serialize_type_idx){
+        const char *p = buf->ptr + 1; int64_t s = buf->size - 1; uint64_t idx=0; int a=int_deserialize((uint8_t*)p,(int)s,&idx); if(a>0){ p+=a; s-=a; uint64_t blen=0; int b=int_deserialize((uint8_t*)p,(int)s,&blen); if(b>0){ char *m4=(char*)tinybuf_malloc(96); snprintf(m4,96,"type_idx(idx=%llu,blen=%llu)",(unsigned long long)idx,(unsigned long long)blen); tinybuf_result_add_msg(&rr,m4,(tinybuf_deleter_fn)tinybuf_free); } }
+    }
+    tinybuf_result_set_current(NULL);
     return rr;
 }
 
-tinybuf_result tinybuf_try_write_box_r(buffer *out, const tinybuf_value *value)
+tinybuf_result tinybuf_try_write_box(buffer *out, const tinybuf_value *value)
 {
-    int r = tinybuf_try_write_box(out, value);
-    if (r > 0) { return tinybuf_result_ok(r); }
-    tinybuf_result rr = tinybuf_result_err(r, "write failed", NULL);
-    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_box failed");
+    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_write_box failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "tinybuf_try_write_box_r");
+    tinybuf_result_set_current(&rr);
+    int r = try_write_box(out, value);
+    if (r > 0) { tinybuf_result_set_current(NULL); (void)tinybuf_result_unref(&rr); return tinybuf_result_ok(r); }
+    rr.res = r;
+    tinybuf_result_set_current(NULL);
     return rr;
 }
 
-int tinybuf_try_write_version_box(buffer *out, QWORD version, const tinybuf_value *box)
+tinybuf_result tinybuf_try_write_version_box(buffer *out, QWORD version, const tinybuf_value *box)
 {
-    return try_write_version_box(out, version, box);
+    // 写入单个版本封装的 box
+    int r = try_write_version_box(out, version, box);
+    if(r>0) return tinybuf_result_ok(r);
+    tinybuf_result rr = _err_with("write version box failed", r);
+    return rr;
 }
 
-int tinybuf_try_write_version_list(buffer *out, const QWORD *versions, const tinybuf_value **boxes, int count)
+tinybuf_result tinybuf_try_write_version_list(buffer *out, const QWORD *versions, const tinybuf_value **boxes, int count)
 {
-    return try_write_version_list(out, versions, boxes, count);
+    // 写入版本列表及对应 box
+    int r = try_write_version_list(out, versions, boxes, count);
+    if(r>0) return tinybuf_result_ok(r);
+    tinybuf_result rr = _err_with("write version list failed", r);
+    return rr;
 }
 
-int tinybuf_try_write_plugin_map_table(buffer *out){ return try_write_plugin_map_table(out); }
-
-int tinybuf_try_write_part(buffer *out, const tinybuf_value *value)
+tinybuf_result tinybuf_try_write_plugin_map_table(buffer *out)
 {
-    return try_write_part(out, value);
+    // 写入插件 GUID 映射表以支持运行时解析
+    int r = try_write_plugin_map_table(out);
+    if(r>0) return tinybuf_result_ok(r);
+    tinybuf_result rr = _err_with("write plugin map failed", r);
+    return rr;
 }
 
-int tinybuf_try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count)
+tinybuf_result tinybuf_try_write_part(buffer *out, const tinybuf_value *value)
 {
-    return try_write_partitions(out, mainbox, subs, count);
+    // 写入单个分区
+    int r = try_write_part(out, value);
+    if(r>0) return tinybuf_result_ok(r);
+    tinybuf_result rr = _err_with("write part failed", r);
+    return rr;
 }
 
-int tinybuf_try_write_pointer(buffer *out, int t, SQWORD offset)
+tinybuf_result tinybuf_try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count)
 {
+    // 写入多个分区，包含主 box 与子分区
+    int r = try_write_partitions(out, mainbox, subs, count);
+    if(r>0) return tinybuf_result_ok(r);
+    tinybuf_result rr = _err_with("write partitions failed", r);
+    return rr;
+}
+
+tinybuf_result tinybuf_try_write_pointer(buffer *out, int t, SQWORD offset)
+{
+    // 写入指针，t=0/1/2 表示起始/末尾/当前位置
     enum offset_type et = start;
     if (t == 1) et = end;
     else if (t == 2) et = current;
-    return try_write_pointer_value(out, et, offset);
+    int r = try_write_pointer_value(out, et, offset);
+    if(r>0) return tinybuf_result_ok(r);
+    tinybuf_result rr = _err_with("write pointer failed", r);
+    return rr;
 }
 
-int tinybuf_try_write_sub_ref(buffer *out, int t, SQWORD offset)
+tinybuf_result tinybuf_try_write_sub_ref(buffer *out, int t, SQWORD offset)
 {
+    // 写入子引用，包含一个指针 box
     int len = 0;
     len += try_write_type(out, serialize_sub_ref);
-    len += tinybuf_try_write_pointer(out, t, offset);
-    return len;
+    enum offset_type et = (t==1?end:(t==2?current:start));
+    int r = try_write_pointer_value(out, et, offset);
+    if(r<=0) return _err_with("write sub_ref failed", r);
+    len += r;
+    return tinybuf_result_ok(len);
 }
 
-int tinybuf_try_write_array_header(buffer *out, int count){
-    int len = 0; len += try_write_type(out, serialize_array); len += try_write_int_data(FALSE, out, (QWORD)count); return len;
+int tinybuf_try_write_array_header(buffer *out, int count)
+{
+    int len = 0;
+    len += try_write_type(out, serialize_array);
+    len += try_write_int_data(FALSE, out, (QWORD)count);
+    return len;
 }
-int tinybuf_try_write_map_header(buffer *out, int count){
-    int len = 0; len += try_write_type(out, serialize_map); len += try_write_int_data(FALSE, out, (QWORD)count); return len;
+int tinybuf_try_write_map_header(buffer *out, int count)
+{
+    int len = 0;
+    len += try_write_type(out, serialize_map);
+    len += try_write_int_data(FALSE, out, (QWORD)count);
+    return len;
 }
-int tinybuf_try_write_string_raw(buffer *out, const char *str, int len){
+int tinybuf_try_write_string_raw(buffer *out, const char *str, int len)
+{
     return dump_string(len, str, out);
 }
-int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in){
-    buffer *body = buffer_alloc(); buffer *pool = buffer_alloc(); strpool_reset_write(body);
-    int idx = strpool_add(name, (int)strlen(name)); uint8_t ty = serialize_type_idx; buffer_append(body, (const char*)&ty, 1); dump_int((uint64_t)idx, body);
-    buffer *payload = buffer_alloc(); int plen = tinybuf_custom_try_write(name, in, payload); dump_int((uint64_t)plen, body); if(plen>0){ buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload)); }
+
+tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in)
+{
+    // 构造头部与字符串池缓冲区
+    buffer *body = buffer_alloc();
+    buffer *pool = buffer_alloc();
+    strpool_reset_write(body);
+
+    // 写入类型索引与名称索引
+    int idx = strpool_add(name, (int)strlen(name));
+    uint8_t ty = serialize_type_idx;
+    buffer_append(body, (const char*)&ty, 1);
+    dump_int((uint64_t)idx, body);
+
+    // 写入自定义负载长度与内容
+    buffer *payload = buffer_alloc();
+    tinybuf_result wr = tinybuf_custom_try_write(name, in, payload);
+    dump_int((uint64_t)(wr.res>0?wr.res:0), body);
+    if(wr.res>0)
+    {
+        buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload));
+    }
+
+    // 写入字符串池尾部
     strpool_write_tail(pool);
+
+    // 计算最终偏移字段的变长编码长度，使总长度固定点自洽
     uint64_t body_len = (uint64_t)buffer_get_length_inline(body);
-    uint64_t offset_guess_len = 1; uint8_t tmpv[16]; while(1){ uint64_t off = 1 + offset_guess_len + body_len; int l = int_serialize(off, tmpv); if((uint64_t)l == offset_guess_len) break; offset_guess_len = (uint64_t)l; }
+    uint64_t offset_guess_len = 1;
+    uint8_t tmpv[16];
+    while(1)
+    {
+        uint64_t off = 1 + offset_guess_len + body_len;
+        int l = int_serialize(off, tmpv);
+        if((uint64_t)l == offset_guess_len) break;
+        offset_guess_len = (uint64_t)l;
+    }
     uint64_t final_off = 1 + offset_guess_len + body_len;
-    try_write_type(out, serialize_str_pool_table); try_write_int_data(FALSE, out, final_off);
+
+    // 输出头部池地址表与body
+    try_write_type(out, serialize_str_pool_table);
+    try_write_int_data(FALSE, out, final_off);
     buffer_append(out, buffer_get_data_inline(body), (int)body_len);
-    int pool_len = buffer_get_length_inline(pool); if(pool_len){ buffer_append(out, buffer_get_data_inline(pool), pool_len); }
-    buffer_free(payload); buffer_free(body); buffer_free(pool);
-    return 1 + (int)offset_guess_len + (int)body_len + pool_len;
+
+    // 输出字符串池体
+    int pool_len = buffer_get_length_inline(pool);
+    if(pool_len)
+    {
+        buffer_append(out, buffer_get_data_inline(pool), pool_len);
+    }
+
+    // 清理临时缓冲区
+    buffer_free(payload);
+    buffer_free(body);
+    buffer_free(pool);
+
+    // 返回值与错误消息
+    if(wr.res<=0)
+    {
+        tinybuf_result rr = tinybuf_result_err(wr.res, "write custom payload failed", NULL);
+        char *m=(char*)tinybuf_malloc(64);
+        snprintf(m,64,"name=%s", name?name:"(null)");
+        tinybuf_result_add_msg(&rr,m,(tinybuf_deleter_fn)tinybuf_free);
+        return rr;
+    }
+    int total = 1 + (int)offset_guess_len + (int)body_len + pool_len;
+    return tinybuf_result_ok(total);
 }
 
 //------------------------------
@@ -2754,656 +2561,47 @@ static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
     return 0;
 }
 
-int tinybuf_value_is_same(const tinybuf_value *value1, const tinybuf_value *value2)
-{
-    assert(value1);
-    assert(value2);
-    if (value1 == value2)
-    {
-        // 是同一个对象
-        return 1;
-    }
-    if (value1->_type != value2->_type)
-    {
-        // 对象类型不同
-        return 0;
-    }
 
-    switch (value1->_type)
-    {
-    case tinybuf_null:
-        return 1;
-    case tinybuf_int:
-        return value1->_data._int == value2->_data._int;
-    case tinybuf_bool:
-        return value1->_data._bool == value2->_data._bool;
-    case tinybuf_double:
-    {
-        return value1->_data._double == value2->_data._double;
-    }
-    case tinybuf_string:
-    {
-        int len1 = buffer_get_length_inline(value1->_data._string);
-        int len2 = buffer_get_length_inline(value2->_data._string);
-        if (len1 != len2)
-        {
-            // 长度不一样
-            return 0;
-        }
-        if (!len1)
-        {
-            // 都是空
-            return 1;
-        }
-        return buffer_is_same(value1->_data._string, value2->_data._string);
-    }
 
-    case tinybuf_array:
-    case tinybuf_map:
-    {
-        int map_size1 = avl_tree_num_entries(value1->_data._map_array);
-        int map_size2 = avl_tree_num_entries(value2->_data._map_array);
-        if (map_size1 != map_size2)
-        {
-            // 元素个数不一致
-            return 0;
-        }
-        if (!map_size1)
-        {
-            // 都是空
-            return 1;
-        }
-        return avl_tree_for_each_node(value1->_data._map_array, value2->_data._map_array, avl_tree_for_each_node_is_same) == 0;
-    }
 
-    default:
-        assert(0);
-        return 0;
-    }
-}
-
-static int avl_tree_for_each_node_clone_map(void *user_data, AVLTreeNode *node)
-{
-    tinybuf_value *ret = (tinybuf_value *)user_data;
-    buffer *key = (buffer *)avl_tree_node_key(node);
-    tinybuf_value *val = (tinybuf_value *)avl_tree_node_value(node);
-
-    buffer *key_clone = buffer_alloc();
-    buffer_append_buffer(key_clone, key);
-    tinybuf_value_map_set2(ret, key_clone, tinybuf_value_clone(val));
-
-    // 继续遍历
-    return 0;
-}
-
-static int avl_tree_for_each_node_clone_array(void *user_data, AVLTreeNode *node)
-{
-    tinybuf_value_array_append((tinybuf_value *)user_data, tinybuf_value_clone(avl_tree_node_value(node)));
-    // 继续遍历
-    return 0;
-}
-
-tinybuf_value *tinybuf_value_clone(const tinybuf_value *value)
-{
-    tinybuf_value *ret = tinybuf_value_alloc_with_type(value->_type);
-    switch (value->_type)
-    {
-    case tinybuf_null:
-    case tinybuf_int:
-    case tinybuf_bool:
-    case tinybuf_double:
-    {
-        memcpy(ret, value, sizeof(tinybuf_value));
-        return ret;
-    }
-    case tinybuf_string:
-        if (buffer_get_length_inline(value->_data._string))
-        {
-            ret->_data._string = buffer_alloc();
-            assert(ret->_data._string);
-            buffer_append_buffer(ret->_data._string, value->_data._string);
-        }
-        return ret;
-
-    case tinybuf_map:
-    {
-        avl_tree_for_each_node(value->_data._map_array, ret, avl_tree_for_each_node_clone_map);
-        return ret;
-    }
-
-    case tinybuf_array:
-    {
-        avl_tree_for_each_node(value->_data._map_array, ret, avl_tree_for_each_node_clone_array);
-        return ret;
-    }
-    default:
-        memcpy(ret, value, sizeof(tinybuf_value));
-        return ret;
-    }
-}
 
 /////////////////////////////读接口//////////////////////////////////
 
-tinybuf_type tinybuf_value_get_type(const tinybuf_value *value)
-{
-    if (!value)
-    {
-        return tinybuf_null;
-    }
-    return value->_type;
-}
 
-int64_t tinybuf_value_get_int(const tinybuf_value *value)
-{
-    if (!value || value->_type != tinybuf_int)
-    {
-        return 0;
-    }
-    return value->_data._int;
-}
-
-double tinybuf_value_get_double(const tinybuf_value *value)
-{
-    if (!value || value->_type != tinybuf_double)
-    {
-        return 0;
-    }
-    return value->_data._double;
-}
-
-int tinybuf_value_get_bool(const tinybuf_value *value)
-{
-    if (!value || value->_type != tinybuf_bool)
-    {
-        return 0;
-    }
-    return value->_data._bool;
-}
-
-buffer *tinybuf_value_get_string(const tinybuf_value *value)
-{
-    if (!value || value->_type != tinybuf_string)
-    {
-        return 0;
-    }
-    return value->_data._string;
-}
-
-int tinybuf_tensor_get_dtype(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return 0; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->dtype : 0; }
-int tinybuf_tensor_get_ndim(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return 0; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->dims : 0; }
-const int64_t* tinybuf_tensor_get_shape(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return NULL; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->shape : NULL; }
-int64_t tinybuf_tensor_get_count(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return 0; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->count : 0; }
-void* tinybuf_tensor_get_data(tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return NULL; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->data : NULL; }
-const void* tinybuf_tensor_get_data_const(const tinybuf_value *value){ if(!value || value->_type != tinybuf_tensor) return NULL; tinybuf_tensor_t *t=(tinybuf_tensor_t*)value->_data._custom; return t? t->data : NULL; }
-
-int tinybuf_value_init_tensor(tinybuf_value *value, int dtype, const int64_t *shape, int dims, const void *data, int64_t elem_count){ if(!value || !shape || dims<=0 || elem_count<0) return -1; tinybuf_value_clear(value); tinybuf_tensor_t *t=(tinybuf_tensor_t*)tinybuf_malloc(sizeof(tinybuf_tensor_t)); t->dtype=dtype; t->dims=dims; t->shape=(int64_t*)tinybuf_malloc(sizeof(int64_t)*(size_t)dims); for(int i=0;i<dims;++i){ t->shape[i]=shape[i]; } t->count=elem_count; size_t bytes=0; if(dtype==8){ bytes=(size_t)(elem_count*8); } else if(dtype==10){ bytes=(size_t)(elem_count*4); } else if(dtype==11){ bytes=(size_t)(elem_count); } else { bytes=(size_t)(elem_count*sizeof(int64_t)); } t->data=tinybuf_malloc(bytes); if(data && bytes){ memcpy(t->data, data, bytes); } value->_type=tinybuf_tensor; value->_data._custom=t; value->_custom_free=NULL; return 0; }
-
-int tinybuf_value_init_bool_map(tinybuf_value *value, const uint8_t *bits, int64_t count){ if(!value || count<0) return -1; tinybuf_value_clear(value); tinybuf_bool_map_t *bm=(tinybuf_bool_map_t*)tinybuf_malloc(sizeof(tinybuf_bool_map_t)); bm->count=count; int64_t bytes=(count+7)/8; bm->bits=(uint8_t*)tinybuf_malloc((int)bytes); if(bits && bytes>0){ memcpy(bm->bits, bits, (size_t)bytes); } else if(bytes>0){ memset(bm->bits, 0, (size_t)bytes); } value->_type=tinybuf_bool_map; value->_data._custom=bm; value->_custom_free=NULL; return 0; }
-int64_t tinybuf_bool_map_get_count(const tinybuf_value *value){ if(!value || value->_type!=tinybuf_bool_map) return 0; tinybuf_bool_map_t *bm=(tinybuf_bool_map_t*)value->_data._custom; return bm? bm->count : 0; }
-const uint8_t* tinybuf_bool_map_get_bits_const(const tinybuf_value *value){ if(!value || value->_type!=tinybuf_bool_map) return NULL; tinybuf_bool_map_t *bm=(tinybuf_bool_map_t*)value->_data._custom; return bm? bm->bits : NULL; }
-
-int tinybuf_value_get_child_size(const tinybuf_value *value)
-{
-    if (!value || (value->_type != tinybuf_map && value->_type != tinybuf_array))
-    {
-        return 0;
-    }
-    return avl_tree_num_entries(value->_data._map_array);
-}
-
-const tinybuf_value *tinybuf_value_get_array_child(const tinybuf_value *value, int index)
-{
-    if (!value || value->_type != tinybuf_array || !value->_data._map_array)
-    {
-        return NULL;
-    }
-    return (tinybuf_value *)avl_tree_lookup(value->_data._map_array, (AVLTreeKey)index);
-}
-
-const tinybuf_value *tinybuf_value_get_map_child(const tinybuf_value *value, const char *key)
-{
-    return tinybuf_value_get_map_child2(value, key, strlen(key));
-}
-
-const tinybuf_value *tinybuf_value_get_map_child2(const tinybuf_value *value, const char *key, int key_len)
-{
-    if (!value || !key || value->_type != tinybuf_map || !value->_data._map_array)
-    {
-        return NULL;
-    }
-
-    buffer buf;
-    buf._data = (char *)key;
-    buf._len = key_len;
-    buf._capacity = buf._len + 1;
-
-    return (tinybuf_value *)avl_tree_lookup(value->_data._map_array, &buf);
-}
-
-const tinybuf_value *tinybuf_value_get_map_child_and_key(const tinybuf_value *value, int index, buffer **key)
-{
-    if (!value || value->_type != tinybuf_map || !value->_data._map_array)
-    {
-        return NULL;
-    }
-
-    AVLTreeNode *node = avl_tree_get_node_by_index(value->_data._map_array, index);
-    if (!node)
-    {
-        return NULL;
-    }
-
-    if (key)
-    {
-        *key = (buffer *)avl_tree_node_key(node);
-    }
-
-    return (tinybuf_value *)avl_tree_node_value(node);
-}
-
-static inline void append_cstr(buffer *out, const char *s){
-    buffer_append(out, s, (int)strlen(s));
-}
-static inline void append_int_dec(buffer *out, int64_t v){
-    char tmp[64];
-    int n = snprintf(tmp, sizeof(tmp), "%lld", (long long)v);
-    buffer_append(out, tmp, n);
-}
-static inline void append_newline(buffer *out){
-    buffer_append(out, "\r\n", 2);
-}
-static int s_dump_indent = 0;
-static inline void append_indent(buffer *out){
-    for(int i=0;i<s_dump_indent;++i){
-        buffer_append(out, "    ", 4);
-    }
-}
-
-static int dump_box_text(buf_ref *buf, buffer *out);
-static int collect_box_labels(buf_ref *buf);
-
-typedef struct { int64_t pos; int label; } dump_label;
-static dump_label *s_dump_labels = NULL;
-static int s_dump_labels_count = 0;
-static int s_dump_labels_capacity = 0;
-static const char *s_dump_base = NULL;
-static int64_t s_dump_total = 0;
-static int64_t *s_dump_box_starts = NULL;
-static int s_dump_box_starts_count = 0;
-static int s_dump_box_starts_capacity = 0;
-
-static inline void dump_labels_reset(const buf_ref *buf){
-    s_dump_base = buf->base;
-    s_dump_total = buf->all_size;
-    s_dump_labels_count = 0;
-    s_dump_box_starts_count = 0;
-}
-static inline void dump_labels_register(int64_t target_pos, int label){
-    if(s_dump_labels_count == s_dump_labels_capacity){
-        int newcap = s_dump_labels_capacity ? (s_dump_labels_capacity * 2) : 16;
-        s_dump_labels = (dump_label*)tinybuf_realloc(s_dump_labels, sizeof(dump_label) * newcap);
-        s_dump_labels_capacity = newcap;
-    }
-    s_dump_labels[s_dump_labels_count].pos = target_pos;
-    s_dump_labels[s_dump_labels_count].label = (int)target_pos; // store start-based target to match (p:x)
-    ++s_dump_labels_count;
-}
-static inline int64_t nearest_box_start(int64_t pos){
-    int64_t best = -1;
-    for(int i=0;i<s_dump_box_starts_count;++i){
-        int64_t v = s_dump_box_starts[i];
-        if(v <= pos && v >= 0){
-            if(best < 0 || v > best){ best = v; }
-        }
-    }
-    return best < 0 ? pos : best;
-}
-static inline void dump_labels_emit_prefix(int64_t cur_pos, buffer *out){
-    int first = 1;
-    for(int i=0;i<s_dump_labels_count;++i){
-        if(s_dump_labels[i].pos == cur_pos){
-            if(first){ append_cstr(out, "(p:"); first = 0; }
-            else { append_cstr(out, ","); }
-            append_int_dec(out, (int64_t)s_dump_labels[i].label);
-        }
-    }
-    if(!first){ append_cstr(out, ") "); }
-}
-
-int tinybuf_dump_buffer_as_text(const char *data, int len, buffer *out){
-    buf_ref br;
-    br.base = data;
-    br.all_size = (int64_t)len;
-    br.ptr = data;
-    br.size = (int64_t)len;
-    dump_labels_reset(&br);
-    // first pass: collect labels across entire buffer
-    collect_box_labels(&br);
-    // second pass: real dump with prefixes
-    br.ptr = data; br.size = (int64_t)len;
-    return dump_box_text(&br, out);
-}
-
-static int dump_string_text(buf_ref *buf, buffer *out){
-    QWORD slen=0; int consumed=0; int add=0;
-    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &slen);
-    if(add <= 0) return add;
-    consumed += add;
-    buf_offset(buf, add);
-    append_cstr(out, "\"");
-    if((int64_t)slen <= buf->size){
-        buffer_append(out, buf->ptr, (int)slen);
-        buf_offset(buf, (int)slen);
-        consumed += (int)slen;
-    }
-    append_cstr(out, "\"");
-    return consumed;
-}
-
-static int dump_array_text(buf_ref *buf, buffer *out){
-    QWORD cnt=0; int consumed=0; int add=0;
-    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
-    if(add <= 0) return add;
-    consumed += add; buf_offset(buf, add);
-    append_cstr(out, "["); append_newline(out); ++s_dump_indent;
-    for(QWORD i=0;i<cnt;++i){
-        if(i){ append_cstr(out, ","); append_newline(out); }
-        append_indent(out);
-        consumed += dump_box_text(buf, out);
-    }
-    append_newline(out); --s_dump_indent; append_indent(out); append_cstr(out, "]");
-    return consumed;
-}
-
-static int dump_map_text(buf_ref *buf, buffer *out){
-    QWORD cnt=0; int consumed=0; int add=0;
-    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
-    if(add <= 0) return add;
-    consumed += add; buf_offset(buf, add);
-    append_cstr(out, "{"); append_newline(out); ++s_dump_indent;
-    for(QWORD i=0;i<cnt;++i){
-        if(i){ append_cstr(out, ","); append_newline(out); }
-        append_indent(out);
-        consumed += dump_string_text(buf, out);
-        append_cstr(out, " : ");
-        consumed += dump_box_text(buf, out);
-    }
-    append_newline(out); --s_dump_indent; append_indent(out); append_cstr(out, "}");
-    return consumed;
-}
-
-static int dump_box_text(buf_ref *buf, buffer *out){
-    int tinybuf_plugins_try_dump_by_type(uint8_t type, buf_ref *buf, buffer *out);
-    int consumed=0; int64_t cur_pos = (int64_t)(buf->ptr - buf->base);
-    dump_labels_emit_prefix(cur_pos, out);
-    serialize_type t=serialize_null; int add=try_read_type(buf,&t); if(add<=0) return add; consumed+=add;
-    switch(t){
-        case serialize_null:
-            append_cstr(out, "null");
-            break;
-        case serialize_positive_int:
-        case serialize_negtive_int:
-        {
-            QWORD v=0; int a=try_read_int_tovar(t==serialize_negtive_int, buf->ptr, (int)buf->size, &v);
-            if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            append_int_dec(out, (int64_t)v);
-            break;
-        }
-        case serialize_bool_true: append_cstr(out, "true"); break;
-        case serialize_bool_false: append_cstr(out, "false"); break;
-        case serialize_double:
-        {
-            if(buf->size < 8) return 0; double dv=0; memcpy(&dv, buf->ptr, 8); buf_offset(buf,8); consumed+=8; char tmp[64]; int n=snprintf(tmp,sizeof(tmp),"%g",dv); buffer_append(out,tmp,n);
-            break;
-        }
-        case serialize_string:
-            consumed += dump_string_text(buf, out);
-            break;
-        case serialize_map:
-            consumed += dump_map_text(buf, out);
-            break;
-        case serialize_array:
-            consumed += dump_array_text(buf, out);
-            break;
-        case serialize_vector_tensor:
-        {
-            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; buf_offset(buf,a); consumed+=a; QWORD dt=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dt); if(b<=0) return b; buf_offset(buf,b); consumed+=b; append_cstr(out, "tensor(shape=["); append_int_dec(out,(int64_t)cnt); append_cstr(out, "], dtype="); append_int_dec(out,(int64_t)dt); append_cstr(out, ", count="); append_int_dec(out,(int64_t)cnt); append_cstr(out, ")"); if((int64_t)dt==8){ int64_t need=(int64_t)cnt*8; if(buf->size<need) return 0; buf_offset(buf,need); consumed+=(int)need; } else if((int64_t)dt==10){ int64_t need=(int64_t)cnt*4; if(buf->size<need) return 0; buf_offset(buf,need); consumed+=(int)need; } else if((int64_t)dt==11){ int64_t need=((int64_t)cnt + 7) / 8; if(buf->size<need) return 0; buf_offset(buf,(int)need); consumed+=(int)need; } else { for(QWORD i=0;i<cnt;++i){ serialize_type t2=(serialize_type)buf->ptr[0]; buf_offset(buf,1); consumed+=1; QWORD v=0; int c=try_read_int_tovar(t2==serialize_negtive_int, buf->ptr, (int)buf->size, &v); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } } return consumed;
-        }
-        case serialize_dense_tensor:
-        {
-            QWORD dims=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dims); if(a<=0) return a; buf_offset(buf,a); consumed+=a; int64_t prod=1; for(QWORD i=0;i<dims;++i){ QWORD d=0; int c=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &d); if(c<=0) return c; buf_offset(buf,c); consumed+=c; prod *= (int64_t)d; } QWORD dt=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dt); if(b<=0) return b; buf_offset(buf,b); consumed+=b; append_cstr(out, "tensor(shape=["); for(QWORD i=0;i<dims;++i){ if(i) append_cstr(out, ","); } append_cstr(out, "], dtype="); append_int_dec(out,(int64_t)dt); append_cstr(out, ", count="); append_int_dec(out,prod); append_cstr(out, ")"); if((int64_t)dt==8){ int64_t need=prod*8; if(buf->size<need) return 0; buf_offset(buf,need); consumed+=(int)need; } else if((int64_t)dt==10){ int64_t need=prod*4; if(buf->size<need) return 0; buf_offset(buf,need); consumed+=(int)need; } else if((int64_t)dt==11){ int64_t need=(prod + 7) / 8; if(buf->size<need) return 0; buf_offset(buf,(int)need); consumed+=(int)need; } else { for(int64_t i=0;i<prod;++i){ serialize_type t2=(serialize_type)buf->ptr[0]; buf_offset(buf,1); consumed+=1; QWORD v=0; int c=try_read_int_tovar(t2==serialize_negtive_int, buf->ptr, (int)buf->size, &v); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } } return consumed;
-        }
-        case serialize_indexed_tensor:
-        {
-            tinybuf_value tmp; memset(&tmp,0,sizeof(tmp));
-            buf_ref hb = *buf; int r1 = try_read_box(&hb, &tmp, contain_any); if(r1<=0) return r1; buf_offset(buf,r1); consumed+=r1; tinybuf_value_free(&tmp);
-            QWORD dims=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dims); if(a<=0) return a; buf_offset(buf,a); consumed+=a;
-            append_cstr(out, "indexed_tensor(dims="); append_int_dec(out,(int64_t)dims); append_cstr(out, ")");
-            for(QWORD i=0;i<dims;++i){ QWORD has=0; int c=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &has); if(c<=0) return c; buf_offset(buf,c); consumed+=c; if(has){ tinybuf_value tmp2; memset(&tmp2,0,sizeof(tmp2)); buf_ref hb2 = *buf; int r2 = try_read_box(&hb2, &tmp2, contain_any); if(r2<=0) return r2; buf_offset(buf,r2); consumed+=r2; tinybuf_value_free(&tmp2);} }
-            return consumed;
-        }
-        case serialize_type_idx:
-        {
-            QWORD idx=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &idx); if(a<=0) return a; buf_offset(buf,a); consumed+=a; QWORD blen=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &blen); if(b<=0) return b; buf_offset(buf,b); consumed+=b; const char *pool_start = s_strpool_base_read + s_strpool_offset_read; const char *q = pool_start; int64_t r = ((const char*)buf->ptr + buf->size) - pool_start; char *name_out=NULL; int name_len=0; if(r>0){ if((uint8_t)q[0]==serialize_str_pool){ ++q; --r; QWORD cnt=0; int l2=try_read_int_tovar(FALSE,q,(int)r,&cnt); if(l2>0){ q+=l2; r-=l2; for(QWORD i=0;i<cnt;++i){ if(r<1) break; if((uint8_t)q[0]!=serialize_string) break; ++q; --r; QWORD sl=0; int l3=try_read_int_tovar(FALSE,q,(int)r,&sl); if(l3<=0) break; q+=l3; r-=l3; if(r < (int64_t)sl) break; if(i==idx){ name_out=(char*)tinybuf_malloc((int)sl+1); memcpy(name_out,q,(size_t)sl); name_out[sl]='\0'; name_len=(int)sl; break; } q+=sl; r-=sl; } } } }
-            if(name_out){ buffer_append(out, "custom:", 7); buffer_append(out, name_out, name_len); tinybuf_free(name_out); }
-            if((int64_t)blen > buf->size) return 0; buf_offset(buf, (int)blen); consumed += (int)blen; break;
-        }
-        case serialize_bool_map:
-        {
-            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; buf_offset(buf,a); consumed+=a; int64_t need=((int64_t)cnt + 7) / 8; if(buf->size<need) return 0; buf_offset(buf,(int)need); consumed+=(int)need; append_cstr(out, "bool_map(count="); append_int_dec(out,(int64_t)cnt); append_cstr(out, ")"); return consumed;
-        }
-        case serialize_sparse_tensor:
-        {
-            QWORD dims=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dims); if(a<=0) return a; buf_offset(buf,a); consumed+=a; for(QWORD i=0;i<dims;++i){ QWORD d=0; int c=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &d); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } QWORD dt=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dt); if(b<=0) return b; buf_offset(buf,b); consumed+=b; QWORD k=0; int e=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &k); if(e<=0) return e; buf_offset(buf,e); consumed+=e; append_cstr(out, "tensor(sparse, entries="); append_int_dec(out,(int64_t)k); append_cstr(out, ")"); for(QWORD i=0;i<k;++i){ for(QWORD j=0;j<dims;++j){ QWORD idx=0; int c=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &idx); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } if((int64_t)dt==8){ if(buf->size<8) return 0; buf_offset(buf,8); consumed+=8; } else if((int64_t)dt==10){ if(buf->size<4) return 0; buf_offset(buf,4); consumed+=4; } else { serialize_type t2=(serialize_type)buf->ptr[0]; buf_offset(buf,1); consumed+=1; QWORD v=0; int c=try_read_int_tovar(t2==serialize_negtive_int, buf->ptr, (int)buf->size, &v); if(c<=0) return c; buf_offset(buf,c); consumed+=c; } } return consumed;
-        }
-        case serialize_pointer_from_current_n:
-        case serialize_pointer_from_start_n:
-        case serialize_pointer_from_end_n:
-        case serialize_pointer_from_current_p:
-        case serialize_pointer_from_start_p:
-        case serialize_pointer_from_end_p:
-        {
-            BOOL neg = (t==serialize_pointer_from_current_n||t==serialize_pointer_from_start_n||t==serialize_pointer_from_end_n);
-            QWORD mag=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &mag);
-            if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            int64_t off = neg ? -(int64_t)mag : (int64_t)mag;
-            int64_t target_pos = 0;
-            if(t==serialize_pointer_from_start_n || t==serialize_pointer_from_start_p){
-                target_pos = off;
-            }else if(t==serialize_pointer_from_end_n || t==serialize_pointer_from_end_p){
-                target_pos = s_dump_total - off;
-            }else{
-                int64_t anchor = (int64_t)(buf->ptr - buf->base);
-                target_pos = anchor + off;
-            }
-            if(target_pos >= 0 && target_pos <= s_dump_total){
-                int64_t adj = nearest_box_start(target_pos);
-                dump_labels_register(adj, (int)adj);
-                target_pos = adj;
-            }
-            const char *type_str = (t==serialize_pointer_from_start_n || t==serialize_pointer_from_start_p) ? "start" : (t==serialize_pointer_from_end_n || t==serialize_pointer_from_end_p) ? "end" : "current";
-            append_cstr(out, "[pointer "); append_cstr(out, type_str); append_cstr(out, " "); append_int_dec(out, off);
-            if(!(t==serialize_pointer_from_start_n || t==serialize_pointer_from_start_p)){
-                append_cstr(out, " -> start "); append_int_dec(out, target_pos);
-            }
-            append_cstr(out, "]");
-            break;
-        }
-        case serialize_version:
-        {
-            QWORD ver=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            consumed += dump_box_text(buf, out); // transparent: dump inner value only
-            break;
-        }
-        case serialize_version_list:
-        {
-            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            append_cstr(out, "{""versions"":{");
-            for(QWORD i=0;i<cnt;++i){
-                if(i) append_cstr(out, ",");
-                QWORD ver=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(b<=0) return b; consumed+=b; buf_offset(buf,b);
-                append_cstr(out, "\""); append_int_dec(out,(int64_t)ver); append_cstr(out, "\":");
-                consumed += dump_box_text(buf, out);
-            }
-            append_cstr(out, "}}");
-            break;
-        }
-        case 26: /* plugin map table */
-        {
-            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            append_cstr(out, "{\"plugins\":[");
-            for(QWORD i=0;i<cnt;++i){
-                int64_t size = buf->size; if(size < 1) return 0; uint8_t t2 = (uint8_t)buf->ptr[0]; if(t2 != serialize_string) return -1; buf_offset(buf,1); consumed+=1; QWORD sl=0; int l3 = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &sl); if(l3<=0) return l3; buf_offset(buf,l3); consumed+=l3; if(buf->size < (int64_t)sl) return 0; buffer_append(out, "\"", 1); buffer_append(out, buf->ptr, (int)sl); buffer_append(out, "\"", 1); buf_offset(buf,(int)sl); consumed+=(int)sl; if(i+1<cnt) append_cstr(out, ","); }
-            append_cstr(out, "]}");
-            break;
-        }
-        default:
-        {
-            uint8_t raw = (uint8_t)t;
-            int a = tinybuf_plugins_try_dump_by_type(raw, buf, out);
-            if(a>0){ consumed += a; }
-            else{ append_cstr(out, "<unknown>"); }
-            break;
-        }
-    }
-    return consumed;
-}
-
-static int collect_string(buf_ref *buf){
-    QWORD slen=0; int consumed=0; int add=0;
-    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &slen);
-    if(add <= 0) return add;
-    consumed += add; buf_offset(buf, add);
-    if((int64_t)slen <= buf->size){ buf_offset(buf, (int)slen); consumed += (int)slen; }
-    return consumed;
-}
-static int collect_array(buf_ref *buf){
-    QWORD cnt=0; int consumed=0; int add=0;
-    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
-    if(add <= 0) return add;
-    consumed += add; buf_offset(buf, add);
-    for(QWORD i=0;i<cnt;++i){ consumed += collect_box_labels(buf); }
-    return consumed;
-}
-static int collect_map(buf_ref *buf){
-    QWORD cnt=0; int consumed=0; int add=0;
-    add = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
-    if(add <= 0) return add;
-    consumed += add; buf_offset(buf, add);
-    for(QWORD i=0;i<cnt;++i){ consumed += collect_string(buf); consumed += collect_box_labels(buf); }
-    return consumed;
-}
-
-static int collect_box_labels(buf_ref *buf){
-    int consumed=0; int64_t start_pos = (int64_t)(buf->ptr - buf->base);
-    if(s_dump_box_starts_count == s_dump_box_starts_capacity){
-        int newcap = s_dump_box_starts_capacity ? (s_dump_box_starts_capacity * 2) : 32;
-        s_dump_box_starts = (int64_t*)tinybuf_realloc(s_dump_box_starts, sizeof(int64_t) * newcap);
-        s_dump_box_starts_capacity = newcap;
-    }
-    s_dump_box_starts[s_dump_box_starts_count++] = start_pos;
-    serialize_type t=serialize_null; int add=try_read_type(buf,&t); if(add<=0) return add; consumed+=add;
-    switch(t){
-        case serialize_null: break;
-        case serialize_positive_int:
-        case serialize_negtive_int:
-        {
-            QWORD v=0; int a=try_read_int_tovar(t==serialize_negtive_int, buf->ptr, (int)buf->size, &v);
-            if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            break;
-        }
-        case serialize_bool_true: break;
-        case serialize_bool_false: break;
-        case serialize_double:
-        {
-            if(buf->size < 8) return 0; buf_offset(buf,8); consumed+=8; break;
-        }
-        case serialize_string:
-            consumed += collect_string(buf);
-            break;
-        case serialize_map:
-            consumed += collect_map(buf);
-            break;
-        case serialize_array:
-            consumed += collect_array(buf);
-            break;
-        case serialize_pointer_from_current_n:
-        case serialize_pointer_from_start_n:
-        case serialize_pointer_from_end_n:
-        case serialize_pointer_from_current_p:
-        case serialize_pointer_from_start_p:
-        case serialize_pointer_from_end_p:
-        {
-            BOOL neg = (t==serialize_pointer_from_current_n||t==serialize_pointer_from_start_n||t==serialize_pointer_from_end_n);
-            QWORD mag=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &mag);
-            if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            int64_t off = neg ? -(int64_t)mag : (int64_t)mag;
-            int64_t target_pos = 0;
-            if(t==serialize_pointer_from_start_n || t==serialize_pointer_from_start_p){
-                target_pos = off;
-            }else if(t==serialize_pointer_from_end_n || t==serialize_pointer_from_end_p){
-                target_pos = s_dump_total - off;
-            }else{
-                int64_t anchor = (int64_t)(buf->ptr - buf->base);
-                target_pos = anchor + off;
-            }
-            if(target_pos >= 0 && target_pos <= s_dump_total){
-                int64_t adj = nearest_box_start(target_pos);
-                dump_labels_register(adj, (int)adj);
-            }
-            break;
-        }
-        case serialize_version:
-        {
-            QWORD ver=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            consumed += collect_box_labels(buf);
-            break;
-        }
-        case serialize_version_list:
-        {
-            QWORD cnt=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt); if(a<=0) return a; consumed+=a; buf_offset(buf,a);
-            for(QWORD i=0;i<cnt;++i){ QWORD ver=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &ver); if(b<=0) return b; consumed+=b; buf_offset(buf,b); consumed += collect_box_labels(buf); }
-            break;
-        }
-        case serialize_type_idx:
-        {
-            QWORD idx=0; int a=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &idx); if(a<=0) return a; consumed+=a; buf_offset(buf,a); QWORD blen=0; int b=try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &blen); if(b<=0) return b; consumed+=b; buf_offset(buf,b); if(buf->size < (int64_t)blen) return 0; buf_offset(buf,(int)blen); consumed+=(int)blen; break;
-        }
-        default: break;
-    }
-    return consumed;
-}
-
-//--version
-void tinybuf_versionlist_add(tinybuf_value *versionlist, int64_t version, tinybuf_value *value)
-{
-    buffer* key_buf=buffer_alloc();
-    assert(key_buf);
-    dump_int(version, key_buf);
-    tinybuf_value_map_set2(versionlist, key_buf, value);
-}
-void tinybuf_version_set(tinybuf_value *target, int64_t version, tinybuf_value *value)
-{
-    target->_type = tinybuf_version;
-    target->_data._ref = value;
-}
-// forward decl
-int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER target_version);
-static inline int dump_int(uint64_t len, buffer *out);
-static inline int try_write_type(buffer *out, serialize_type type);
-static inline int try_write_int_data(BOOL isneg, buffer *out, QWORD val);
+// forward decls moved to tinybuf_private.h
 static inline int try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset);
 #ifdef _WIN32
 static volatile LONG s_pool_lock_var = 0;
-static inline void pool_lock(){ int spins=0; while(InterlockedCompareExchange(&s_pool_lock_var,1,0)!=0){ if(spins<64){ ++spins; } else if(spins<1024){ Sleep(0); ++spins; } else { Sleep(1); } } }
-static inline void pool_unlock(){ InterlockedExchange(&s_pool_lock_var,0); }
+static inline void pool_lock()
+{
+    // 轻量级自旋锁，避免频繁阻塞
+    int spins=0;
+    while(InterlockedCompareExchange(&s_pool_lock_var,1,0)!=0)
+    {
+        if(spins<64){ ++spins; }
+        else if(spins<1024){ Sleep(0); ++spins; }
+        else { Sleep(1); }
+    }
+}
+static inline void pool_unlock()
+{
+    InterlockedExchange(&s_pool_lock_var,0);
+}
 #else
 static atomic_flag s_pool_lock_var = ATOMIC_FLAG_INIT;
-static inline void pool_lock(){ int spins=0; while(atomic_flag_test_and_set(&s_pool_lock_var)){ if(spins<64){ ++spins; } else if(spins<1024){ sched_yield(); ++spins; } else { struct timespec ts={0,1000000}; nanosleep(&ts,NULL); } } }
-static inline void pool_unlock(){ atomic_flag_clear(&s_pool_lock_var); }
+static inline void pool_lock()
+{
+    int spins=0;
+    while(atomic_flag_test_and_set(&s_pool_lock_var))
+    {
+        if(spins<64){ ++spins; }
+        else if(spins<1024){ sched_yield(); ++spins; }
+        else { struct timespec ts={0,1000000}; nanosleep(&ts,NULL); }
+    }
+}
+static inline void pool_unlock()
+{
+    atomic_flag_clear(&s_pool_lock_var);
+}
 #endif
-static void tinybuf_indexed_tensor_free(void *p){ if(!p) return; tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)p; if(it->tensor) tinybuf_value_free(it->tensor); if(it->indices){ for(int i=0;i<it->dims;++i){ if(it->indices[i]) tinybuf_value_free(it->indices[i]); } tinybuf_free(it->indices);} tinybuf_free(it); }
-int tinybuf_value_init_indexed_tensor(tinybuf_value *value, const tinybuf_value *tensor, const tinybuf_value **indices, int dims){ if(!value || !tensor || dims<0) return -1; tinybuf_value_clear(value); tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)tinybuf_malloc(sizeof(tinybuf_indexed_tensor_t)); it->dims=dims; it->tensor=tinybuf_value_clone(tensor); it->indices=NULL; if(dims>0){ it->indices=(tinybuf_value**)tinybuf_malloc(sizeof(tinybuf_value*)*(size_t)dims); for(int i=0;i<dims;++i){ it->indices[i] = indices ? (indices[i] ? tinybuf_value_clone(indices[i]) : NULL) : NULL; } } value->_type=tinybuf_indexed_tensor; value->_data._custom=it; value->_custom_free=tinybuf_indexed_tensor_free; return 0; }
 static int contain_any(uint64_t v){ (void)v; return 1; }
-const tinybuf_value* tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value *value){ if(!value || value->_type!=tinybuf_indexed_tensor) return NULL; tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)value->_data._custom; return it? it->tensor : NULL; }
-const tinybuf_value* tinybuf_indexed_tensor_get_index_const(const tinybuf_value *value, int dim){ if(!value || value->_type!=tinybuf_indexed_tensor) return NULL; tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)value->_data._custom; if(!it || dim<0 || dim>=it->dims) return NULL; return it->indices ? it->indices[dim] : NULL; }

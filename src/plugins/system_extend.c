@@ -1,8 +1,22 @@
 #include "tinybuf.h"
 #include "tinybuf_plugin.h"
 #include "tinybuf_buffer.h"
+#include <stdio.h>
+#include <string.h>
 
-static tinybuf_value* clone_box(const tinybuf_value *in){ buffer *b = buffer_alloc(); int w = tinybuf_try_write_box(b, in); if(w<=0){ buffer_free(b); return NULL; } buf_ref br = (buf_ref){ buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b) }; tinybuf_value *out = tinybuf_value_alloc(); int r = tinybuf_try_read_box(&br, out, NULL); buffer_free(b); if(r<=0){ tinybuf_value_free(out); return NULL; } return out; }
+static tinybuf_value* clone_box(const tinybuf_value *in)
+{
+    buffer *b = buffer_alloc();
+    tinybuf_result wr = tinybuf_try_write_box(b, in);
+    if(wr.res<=0){ buffer_free(b); return NULL; }
+    buf_ref br = (buf_ref){ buffer_get_data(b), (int64_t)buffer_get_length(b), buffer_get_data(b), (int64_t)buffer_get_length(b) };
+    tinybuf_value *out = tinybuf_value_alloc();
+    tinybuf_result rr = tinybuf_try_read_box(&br, out, NULL);
+    buffer_free(b);
+    if(rr.res<=0){ tinybuf_value_free(out); return NULL; }
+    return out;
+}
+// 插入一个元素到异质列表
 static int op_hlist_insert(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
     int n = tinybuf_value_get_child_size(value);
@@ -24,6 +38,7 @@ static int op_hlist_insert(tinybuf_value *value, const tinybuf_value *args, tiny
     return 0;
 }
 
+// 删除指定索引的元素
 static int op_hlist_delete(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
     int n = tinybuf_value_get_child_size(value);
@@ -35,6 +50,7 @@ static int op_hlist_delete(tinybuf_value *value, const tinybuf_value *args, tiny
     return 0;
 }
 
+// 连接两个异质列表
 static int op_hlist_concat(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){
     if(tinybuf_value_get_type(value) != tinybuf_array){ return -1; }
     const tinybuf_value *other = NULL;
@@ -48,20 +64,22 @@ static int op_hlist_concat(tinybuf_value *value, const tinybuf_value *args, tiny
     return 0;
 }
 
+// 字符串化
 static int op_str(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ (void)args; char buf[64]; int n = tinybuf_value_get_child_size(value); int len = snprintf(buf, sizeof(buf), "hetero_list[%d]", n); if(len<0) len=0; tinybuf_value_init_string(out, buf, len); return 0; }
+// 描述
 static int op_desc(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out){ (void)args; const char *s = "system.extend hetero_list"; tinybuf_value_init_string(out, s, (int)strlen(s)); return 0; }
 
-static int tuple_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }
-static int tuple_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_array) return -1; return tinybuf_try_write_box(out, in); }
-static int tuple_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; return tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); }
+static tinybuf_result tuple_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }
+static tinybuf_result tuple_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_array){ return tinybuf_result_err(-1, "tuple_write type mismatch", NULL); } return tinybuf_try_write_box(out, in); }
+static tinybuf_result tuple_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int r = tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); return r>0 ? tinybuf_result_ok(r) : tinybuf_result_err(r, "tuple_dump failed", NULL); }
 
-static int hlist_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; const char *ptr = (const char*)data; int size = len; tinybuf_value_clear(out); for(;;){ if(size<=0) break; buf_ref br = (buf_ref){ (const char*)ptr, (int64_t)size, (const char*)ptr, (int64_t)size }; tinybuf_value *item = tinybuf_value_alloc(); int r = tinybuf_try_read_box(&br, item, contain_handler); if(r<=0){ tinybuf_value_free(item); return r; } if(tinybuf_value_get_type(out) != tinybuf_array){ tinybuf_value_clear(out); } tinybuf_value_array_append(out, item); ptr += r; size -= r; } return len; }
-static int hlist_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_array) return -1; int before = buffer_get_length(out); int n = tinybuf_value_get_child_size(in); for(int i=0;i<n;++i){ const tinybuf_value *ch = tinybuf_value_get_array_child(in, i); if(!ch) return -1; int w = tinybuf_try_write_box(out, ch); if(w<=0) return w; } int after = buffer_get_length(out); return after - before; }
-static int hlist_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; return tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); }
+static tinybuf_result hlist_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; const char *ptr = (const char*)data; int size = len; tinybuf_value_clear(out); for(;;){ if(size<=0) break; buf_ref br = (buf_ref){ (const char*)ptr, (int64_t)size, (const char*)ptr, (int64_t)size }; tinybuf_value *item = tinybuf_value_alloc(); tinybuf_result rr = tinybuf_try_read_box(&br, item, contain_handler); if(rr.res<=0){ tinybuf_value_free(item); tinybuf_result_add_msg_const(&rr, "hlist_read item failed"); return rr; } if(tinybuf_value_get_type(out) != tinybuf_array){ tinybuf_value_clear(out); } tinybuf_value_array_append(out, item); ptr += rr.res; size -= rr.res; } return tinybuf_result_ok(len); }
+static tinybuf_result hlist_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_array) return tinybuf_result_err(-1, "hlist_write type mismatch", NULL); int before = buffer_get_length(out); int n = tinybuf_value_get_child_size(in); for(int i=0;i<n;++i){ const tinybuf_value *ch = tinybuf_value_get_array_child(in, i); if(!ch) return tinybuf_result_err(-1, "hlist_write null child", NULL); tinybuf_result wr = tinybuf_try_write_box(out, ch); if(wr.res<=0){ tinybuf_result_add_msg_const(&wr, "hlist_write child failed"); return wr; } } int after = buffer_get_length(out); return tinybuf_result_ok(after - before); }
+static tinybuf_result hlist_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int r = tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); return r>0 ? tinybuf_result_ok(r) : tinybuf_result_err(r, "hlist_dump failed", NULL); }
 
-static int dataframe_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }
-static int dataframe_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_indexed_tensor) return -1; return tinybuf_try_write_box(out, in); }
-static int dataframe_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; return tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); }
+static tinybuf_result dataframe_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler){ (void)name; buf_ref br = (buf_ref){ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len }; return tinybuf_try_read_box(&br, out, contain_handler); }
+static tinybuf_result dataframe_write(const char *name, const tinybuf_value *in, buffer *out){ (void)name; if(tinybuf_value_get_type(in) != tinybuf_indexed_tensor) return tinybuf_result_err(-1, "dataframe_write type mismatch", NULL); return tinybuf_try_write_box(out, in); }
+static tinybuf_result dataframe_dump(const char *name, buf_ref *buf, buffer *out){ (void)name; int r = tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out); return r>0 ? tinybuf_result_ok(r) : tinybuf_result_err(r, "dataframe_dump failed", NULL); }
 
 __declspec(dllexport) int tinybuf_plugin_init(void){
     tinybuf_custom_register("hetero_tuple", tuple_read, tuple_write, tuple_dump);

@@ -6,14 +6,16 @@
 static int xjson_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     (void)name;
-    buf_ref br{ (const char*)data, (int64_t)len, (const char*)data, (int64_t)len };
-    return tinybuf_try_read_box(&br, out, contain_handler);
+    buf_ref br{(const char *)data, (int64_t)len, (const char *)data, (int64_t)len};
+    tinybuf_result r = tinybuf_try_read_box(&br, out, contain_handler);
+    return r.res;
 }
 
 static int xjson_write(const char *name, const tinybuf_value *in, buffer *out)
 {
     (void)name;
-    return tinybuf_try_write_box(out, in);
+    tinybuf_result r = tinybuf_try_write_box(out, in);
+    return r.res;
 }
 
 static int xjson_dump(const char *name, buf_ref *buf, buffer *out)
@@ -32,13 +34,14 @@ TEST_CASE("custom string via type_idx", "[custom]")
     tinybuf_value *s = tinybuf_value_alloc();
     tinybuf_value_init_string(s, "hello", 5);
 
-    int w = tinybuf_try_write_custom_id_box(buf, "string", s);
-    REQUIRE(w > 0);
+    tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "string", s);
+    REQUIRE(w.res > 0);
 
-    buf_ref br{ buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf) };
+    buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_value *out = tinybuf_value_alloc();
-    tinybuf_result rr = tinybuf_try_read_box_r(&br, out, NULL);
-    char msgs[128]; tinybuf_result_format_msgs(&rr, msgs, sizeof(msgs));
+    tinybuf_result rr = tinybuf_try_read_box(&br, out, NULL);
+    char msgs[128];
+    tinybuf_result_format_msgs(&rr, msgs, sizeof(msgs));
     CAPTURE(rr.res, msgs);
     REQUIRE(rr.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr) == 0);
@@ -60,7 +63,7 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     tinybuf_plugin_register_from_dll("build-vcpkg/lib/Debug/system_extend.dll");
 
     tinybuf_value *arr = tinybuf_value_alloc();
-    for(int k = 0; k < 5; ++k)
+    for (int k = 0; k < 5; ++k)
     {
         tinybuf_value *i = tinybuf_value_alloc();
         tinybuf_value_init_int(i, k);
@@ -71,13 +74,14 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     tinybuf_value_array_append(arr, s);
 
     buffer *buf = buffer_alloc();
-    int w = tinybuf_try_write_custom_id_box(buf, "hetero_list", arr);
-    REQUIRE(w > 0);
+    tinybuf_result w = tinybuf_try_write_custom_id_box(buf, "hetero_list", arr);
+    REQUIRE(w.res > 0);
 
-    buf_ref br{ buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf) };
+    buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_value *out = tinybuf_value_alloc();
-    tinybuf_result rr2 = tinybuf_try_read_box_r(&br, out, NULL);
-    char msgs2[128]; tinybuf_result_format_msgs(&rr2, msgs2, sizeof(msgs2));
+    tinybuf_result rr2 = tinybuf_try_read_box(&br, out, NULL);
+    char msgs2[128];
+    tinybuf_result_format_msgs(&rr2, msgs2, sizeof(msgs2));
     CAPTURE(rr2.res, msgs2);
     REQUIRE(rr2.res > 0);
     REQUIRE(tinybuf_result_msg_count(&rr2) == 0);

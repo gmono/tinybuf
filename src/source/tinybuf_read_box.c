@@ -15,6 +15,9 @@ static inline BOOL is_simple_pointer_type(serialize_type type);
 static inline bool is_pointer_neg(serialize_type type);
 static inline enum offset_type get_offset_type(serialize_type type);
 
+/* result-only accumulation helper */
+#define OK_AND_ADDTO(r, s) (((r).res > 0) ? ((*(s)) += (r).res, 1) : 0)
+
 const char *buf_end_ptr(buf_ref *buf)
 {
     return buf->base + buf->all_size;
@@ -55,15 +58,16 @@ int buf_offset(buf_ref *buf, int64_t offset)
     return 0;
 }
 
-int try_read_type(buf_ref *buf, serialize_type *type)
+tinybuf_result try_read_type(buf_ref *buf, serialize_type *type)
 {
     if (buf->size < 1)
     {
-        return 0;
+        return tinybuf_result_err(0, "buffer too small", NULL);
     }
-    *type = buf->ptr[0];
-    buf_offset(buf, 1);
-    return 1;
+    *type = (serialize_type)buf->ptr[0];
+    if (buf_offset(buf, 1) != 0)
+        return tinybuf_result_err(-1, "buf_offset failed", NULL);
+    return tinybuf_result_ok(1);
 }
 
 void pointer_to_start(const buf_ref *buf, pointer_value *ptr)
@@ -202,7 +206,7 @@ static inline void set_out_by_mode(tinybuf_value *out, tinybuf_value *target, in
         set_out_ref(out, target);
 }
 
-int _read_box_by_offset(buf_ref *buf, int64_t offset, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
+tinybuf_result _read_box_by_offset(buf_ref *buf, int64_t offset, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     INIT_STATE
     const char *cur = buf->ptr;
@@ -210,64 +214,69 @@ int _read_box_by_offset(buf_ref *buf, int64_t offset, tinybuf_value *out, CONTAI
     buf->ptr = buf->base + offset;
     buf->size = buf->all_size - offset;
     pool_register(offset, out);
-    if (OK_AND_ADDTO(try_read_box(buf, out, contain_handler), &len))
-    {
-        pool_mark_complete(offset);
-        SET_SUCCESS();
-    }
-    else
-        SET_FAILED("read box error");
-    CHECK_FAILED
+    tinybuf_result rr = try_read_box(buf, out, contain_handler);
     buf->ptr = cur;
     buf->size = cursize;
-    READ_RETURN
+    if (rr.res > 0)
+    {
+        pool_mark_complete(offset);
+        return tinybuf_result_ok(rr.res);
+    }
+    return rr;
 }
 
-int read_box_by_pointer(buf_ref *buf, pointer_value pointer, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
+tinybuf_result read_box_by_pointer(buf_ref *buf, pointer_value pointer, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     static int s_read_pointer_depth = 0;
     s_read_pointer_depth++;
-    int len = -1;
+    tinybuf_result rr = tinybuf_result_err(-1, "read_box_by_pointer failed", NULL);
     if (s_read_pointer_depth <= 64)
     {
         pointer_to_start(buf, &pointer);
         assert(pointer.type == start);
-        len = _read_box_by_offset(buf, pointer.offset, out, contain_handler);
+        rr = _read_box_by_offset(buf, pointer.offset, out, contain_handler);
     }
     s_read_pointer_depth--;
-    return len;
+    return rr;
 }
 
-inline int try_read_int_data(BOOL isneg, buf_ref *buf, QWORD *out)
+inline tinybuf_result try_read_int_data(BOOL isneg, buf_ref *buf, QWORD *out)
 {
     INIT_STATE
-    int temp = 0;
-    if (OK_AND_ADDTO(try_read_int_tovar(isneg, buf->ptr, buf->size, out), &temp))
+    int temp = try_read_int_tovar(isneg, buf->ptr, (int)buf->size, out);
+    if (temp > 0)
     {
         len += temp;
-        buf_offset(buf, temp);
+        if (buf_offset(buf, temp) == 0)
+            SET_SUCCESS();
+        else
+            SET_FAILED("buf_offset failed");
     }
     else
         SET_FAILED("read data error");
     CHECK_FAILED
-    READ_RETURN
+    return failed ? tinybuf_result_err(-1, reason, NULL) : tinybuf_result_ok(len);
 }
 
-inline int try_read_intbox(buf_ref *buf, QWORD *saveptr)
+inline tinybuf_result try_read_intbox(buf_ref *buf, QWORD *saveptr)
 {
     serialize_type type;
     INIT_STATE
-    if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
+    tinybuf_result rtype = try_read_type(buf, &type);
+    if (OK_AND_ADDTO(rtype, &len))
     {
         if (type == serialize_positive_int || type == serialize_negtive_int)
         {
             BOOL isneg = type == serialize_negtive_int;
-            if (OK_AND_ADDTO(try_read_int_data(isneg, buf, saveptr), &len))
             {
-                SET_SUCCESS();
+                tinybuf_result rint = try_read_int_data(isneg, buf, saveptr);
+                if (OK_AND_ADDTO(rint, &len))
+                {
+                    SET_SUCCESS();
+                }
+                else
+                    SET_FAILED("read int error");
             }
-            else
-                SET_FAILED("read int error");
         }
         else
             SET_FAILED("type error");
@@ -275,23 +284,27 @@ inline int try_read_intbox(buf_ref *buf, QWORD *saveptr)
     else
         SET_FAILED("read type error");
     CHECK_FAILED
-    READ_RETURN
+    return failed ? tinybuf_result_err(-1, reason, NULL) : tinybuf_result_ok(len);
 }
 
-inline int try_read_pointer_value(buf_ref *buf, QWORD *saveptr)
+inline tinybuf_result try_read_pointer_value(buf_ref *buf, QWORD *saveptr)
 {
     INIT_STATE
     serialize_type type;
-    if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
+    tinybuf_result rtype = try_read_type(buf, &type);
+    if (OK_AND_ADDTO(rtype, &len))
     {
         if (is_simple_pointer_type(type))
         {
-            if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, saveptr), &len))
             {
-                SET_SUCCESS();
+                tinybuf_result rint = try_read_int_data(FALSE, buf, saveptr);
+                if (OK_AND_ADDTO(rint, &len))
+                {
+                    SET_SUCCESS();
+                }
+                else
+                    SET_FAILED("read pointer error");
             }
-            else
-                SET_FAILED("read pointer error");
         }
         else
             SET_FAILED("type error : not simple pointer");
@@ -299,27 +312,31 @@ inline int try_read_pointer_value(buf_ref *buf, QWORD *saveptr)
     else
         SET_FAILED("read type error");
     CHECK_FAILED
-    READ_RETURN
+    return failed ? tinybuf_result_err(-1, reason, NULL) : tinybuf_result_ok(len);
 }
 
-inline int try_read_pointer(buf_ref *buf, pointer_value *pointer)
+inline tinybuf_result try_read_pointer(buf_ref *buf, pointer_value *pointer)
 {
     INIT_STATE
     serialize_type type;
-    if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
+    tinybuf_result rtype = try_read_type(buf, &type);
+    if (OK_AND_ADDTO(rtype, &len))
     {
         if (is_simple_pointer_type(type))
         {
             QWORD offset;
             bool isneg = is_pointer_neg(type);
-            if (OK_AND_ADDTO(try_read_int_data(isneg, buf, &offset), &len))
             {
-                pointer->offset = (int64_t)offset;
-                pointer->type = get_offset_type(type);
-                SET_SUCCESS();
+                tinybuf_result rint = try_read_int_data(isneg, buf, &offset);
+                if (OK_AND_ADDTO(rint, &len))
+                {
+                    pointer->offset = (int64_t)offset;
+                    pointer->type = get_offset_type(type);
+                    SET_SUCCESS();
+                }
+                else
+                    SET_FAILED("read pointer error");
             }
-            else
-                SET_FAILED("read pointer error");
         }
         else
             SET_FAILED("type error : not simple pointer");
@@ -327,7 +344,7 @@ inline int try_read_pointer(buf_ref *buf, pointer_value *pointer)
     else
         SET_FAILED("read type error");
     CHECK_FAILED
-    READ_RETURN
+    return failed ? tinybuf_result_err(-1, reason, NULL) : tinybuf_result_ok(len);
 }
 
 tinybuf_result tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode)
@@ -338,78 +355,76 @@ tinybuf_result tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, 
 tinybuf_result tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
 {
     s_strpool_base_read = buf->base;
-    if (buf->size >= 1 && (uint8_t)buf->ptr[0] == serialize_str_pool_table)
-    {
-        buf_ref hb = *buf;
-        serialize_type t;
-        int c = try_read_type(&hb, &t);
-        if (c > 0 && t == serialize_str_pool_table)
-        {
-            QWORD off;
-            int c2 = try_read_int_data(FALSE, &hb, &off);
-            if (c2 > 0){ s_strpool_offset_read = (int64_t)off; buf_offset(buf, c + c2); }
-        }
-    }
-    tinybuf_result rr = tinybuf_result_err(-1, "tinybuf_try_read_box failed", NULL);
-    tinybuf_result_add_msg_const(&rr, "tinybuf_try_read_box_r");
+    return try_read_box(buf, out, contain_handler);
+}
+
+tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
+{
+    INIT_STATE
+    tinybuf_result rr = tinybuf_result_err(-1, "try_read_box failed", NULL);
+    tinybuf_result_add_msg_const(&rr, "try_read_box");
     tinybuf_result *cur = tinybuf_result_get_current();
     int owns_current = (cur == NULL);
     if (owns_current) tinybuf_result_set_current(&rr);
-    int r = try_read_box(buf, out, contain_handler);
-    if (owns_current) tinybuf_result_set_current(NULL);
-    if (r > 0){ (void)tinybuf_result_unref(&rr); return tinybuf_result_ok(r); }
-    rr.res = r; return rr;
-}
-
-int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler)
-{
-    INIT_STATE
-    /* initialize strpool base on entry */
     if (!s_strpool_base_read) s_strpool_base_read = buf->base;
     if (buf->size >= 1 && (uint8_t)buf->ptr[0] == serialize_str_pool_table)
     {
         buf_ref hb = *buf;
         serialize_type t;
-        int c = try_read_type(&hb, &t);
-        if (c > 0 && t == serialize_str_pool_table)
+        tinybuf_result c = try_read_type(&hb, &t);
+        if (c.res > 0 && t == serialize_str_pool_table)
         {
             QWORD off;
-            int c2 = try_read_int_data(FALSE, &hb, &off);
-            if (c2 > 0){ s_strpool_offset_read = (int64_t)off; buf_offset(buf, c + c2); }
+            tinybuf_result c2 = try_read_int_data(FALSE, &hb, &off);
+            if (c2.res > 0){ s_strpool_offset_read = (int64_t)off; buf_offset(buf, c.res + c2.res); }
         }
     }
     int64_t box_offset = buf_current_offset(buf);
     pool_register(box_offset, out);
     len = tinybuf_value_deserialize(buf->ptr, (int)buf->size, out);
-    if (len == 0) return 0;
+    if (len == 0)
+    {
+        if (owns_current) tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return tinybuf_result_ok(0);
+    }
     if (len > 0)
     {
         buf_offset(buf, len);
         pool_mark_complete(box_offset);
-        return len;
+        if (owns_current) tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return tinybuf_result_ok(len);
     }
     len = 0;
     serialize_type type = serialize_null;
-    if (OK_AND_ADDTO(try_read_type(buf, &type), &len))
     {
-        switch (type)
+        tinybuf_result rt_main = try_read_type(buf, &type);
+        if (OK_AND_ADDTO(rt_main, &len))
         {
+            switch (type)
+            {
         case serialize_version:
         {
             QWORD version;
             if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &version), &len))
             {
-                if (contain_handler(version))
-                {
-                    if (OK_AND_ADDTO(try_read_box(buf, out, contain_handler), &len))
+                    if (contain_handler(version))
                     {
-                        pool_mark_complete(box_offset);
-                        SET_SUCCESS();
-                        break;
+                        {
+                            tinybuf_result rr2 = try_read_box(buf, out, contain_handler);
+                            if (rr2.res > 0)
+                            {
+                                len += rr2.res;
+                                pool_mark_complete(box_offset);
+                                SET_SUCCESS();
+                                break;
+                            }
+                            SET_FAILED("read box failed");
+                            break;
+                        }
+                        
                     }
-                    SET_FAILED("read box failed");
-                    break;
-                }
                 SET_FAILED("version error");
                 break;
             }
@@ -429,10 +444,10 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                     {
                         if (contain_handler(version))
                         {
-                            int inner = try_read_box(buf, out, contain_handler);
-                            if (inner > 0)
+                            tinybuf_result inner = try_read_box(buf, out, contain_handler);
+                            if (inner.res > 0)
                             {
-                                len += inner;
+                                len += inner.res;
                                 pool_mark_complete(box_offset);
                                 SET_SUCCESS();
                                 found = 1;
@@ -444,14 +459,14 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                         else
                         {
                             tinybuf_value *skip = tinybuf_value_alloc();
-                            int consumed = try_read_box(buf, skip, contain_handler);
-                            if (consumed <= 0)
+                            tinybuf_result consumed = try_read_box(buf, skip, contain_handler);
+                            if (consumed.res <= 0)
                             {
                                 tinybuf_value_free(skip);
                                 SET_FAILED("read non-match box failed");
                                 break;
                             }
-                            len += consumed;
+                            len += consumed.res;
                             tinybuf_value_free(skip);
                             continue;
                         }
@@ -474,14 +489,18 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
             QWORD partlen;
             if (OK_AND_ADDTO(try_read_int_data(FALSE, buf, &partlen), &len))
             {
-                if (OK_AND_ADDTO(try_read_box(buf, out, contain_handler), &len))
                 {
-                    pool_mark_complete(box_offset);
-                    SET_SUCCESS();
+                    tinybuf_result rr3 = try_read_box(buf, out, contain_handler);
+                    if (rr3.res > 0)
+                    {
+                        len += rr3.res;
+                        pool_mark_complete(box_offset);
+                        SET_SUCCESS();
+                        break;
+                    }
+                    SET_FAILED("read part failed");
                     break;
                 }
-                SET_FAILED("read part failed");
-                break;
             }
             SET_FAILED("read part header failed");
             break;
@@ -511,10 +530,13 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                         goto part_table_end;
                     }
                 }
-                if (_read_box_by_offset(buf, (int64_t)offs[0], out, contain_handler) > 0)
                 {
-                    pool_mark_complete(box_offset);
-                    SET_SUCCESS();
+                    tinybuf_result rbo = _read_box_by_offset(buf, (int64_t)offs[0], out, contain_handler);
+                    if (rbo.res > 0)
+                    {
+                        pool_mark_complete(box_offset);
+                        SET_SUCCESS();
+                    }
                 }
                 tinybuf_free(offs);
             part_table_end:
@@ -773,7 +795,9 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
             }
             if (!failed)
             {
-                READ_RETURN
+                if (owns_current) tinybuf_result_set_current(NULL);
+                (void)tinybuf_result_unref(&rr);
+                return tinybuf_result_ok(len);
             }
             break;
         }
@@ -785,17 +809,23 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
             break;
         }
         }
-    }
-    else
-    {
-        SET_FAILED("read type failed");
+        }
+        else
+        {
+            SET_FAILED("read type failed");
+        }
     }
     CHECK_FAILED
     if (!failed)
     {
         pool_mark_complete(box_offset);
+        if (owns_current) tinybuf_result_set_current(NULL);
+        (void)tinybuf_result_unref(&rr);
+        return tinybuf_result_ok(len);
     }
-    READ_RETURN
+    rr.res = -1;
+    if (owns_current) tinybuf_result_set_current(NULL);
+    return rr;
 }
 static inline void pool_lock(void)
 {
@@ -829,7 +859,6 @@ static inline void pool_unlock(void)
     atomic_flag_clear(&s_pool_lock_var);
 #endif
 }
-static inline int OK_AND_ADDTO(int x, int *s){ if(x>0){ *s += x; return 1;} return 0; }
 static inline BOOL is_simple_pointer_type(serialize_type type){
     return type == serialize_pointer_from_current_n ||
            type == serialize_pointer_from_start_n ||

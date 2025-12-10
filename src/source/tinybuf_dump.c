@@ -196,9 +196,9 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
     dump_labels_emit_prefix(cur_pos, dst);
 
     serialize_type t = serialize_null;
-    int add = try_read_type(buf, &t);
-    if (add <= 0) return add;
-    consumed += add;
+    tinybuf_result add = try_read_type(buf, &t);
+    if (add.res <= 0) return add.res;
+    consumed += add.res;
 
     switch (t) {
         case serialize_null:
@@ -354,10 +354,10 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
             tinybuf_value tmp;
             memset(&tmp, 0, sizeof(tmp));
             buf_ref hb = *buf;
-            int r1 = try_read_box(&hb, &tmp, contain_any);
-            if (r1 <= 0) return r1;
-            buf_offset(buf, r1);
-            consumed += r1;
+            tinybuf_result r1 = try_read_box(&hb, &tmp, contain_any);
+            if (r1.res <= 0) return r1.res;
+            buf_offset(buf, r1.res);
+            consumed += r1.res;
             tinybuf_value_free(&tmp);
 
             QWORD dims = 0;
@@ -378,10 +378,10 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
                     tinybuf_value tmp2;
                     memset(&tmp2, 0, sizeof(tmp2));
                     buf_ref hb2 = *buf;
-                    int r2 = try_read_box(&hb2, &tmp2, contain_any);
-                    if (r2 <= 0) return r2;
-                    buf_offset(buf, r2);
-                    consumed += r2;
+                    tinybuf_result r2 = try_read_box(&hb2, &tmp2, contain_any);
+                    if (r2.res <= 0) return r2.res;
+                    buf_offset(buf, r2.res);
+                    consumed += r2.res;
                     tinybuf_value_free(&tmp2);
                 }
             }
@@ -687,9 +687,9 @@ static int collect_box_labels(buf_ref *br)
     s_dump_box_starts[s_dump_box_starts_count++] = start_pos;
 
     serialize_type t = serialize_null;
-    int add = try_read_type(br, &t);
-    if (add <= 0) return add;
-    consumed += add;
+    tinybuf_result add = try_read_type(br, &t);
+    if (add.res <= 0) return add.res;
+    consumed += add.res;
 
     switch (t) {
         case serialize_null:

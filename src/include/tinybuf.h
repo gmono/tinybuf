@@ -2,6 +2,7 @@
 #define TINYBUF_H
 #include <stdint.h>
 #include "tinybuf_buffer.h"
+#include "tinybuf_common.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -157,9 +158,9 @@ extern "C"
 
     int tinybuf_dump_buffer_as_text(const char *data, int len, buffer *out);
 
-    int tinybuf_try_write_array_header(buffer *out, int count);
-    int tinybuf_try_write_map_header(buffer *out, int count);
-    int tinybuf_try_write_string_raw(buffer *out, const char *str, int len);
+    tinybuf_result tinybuf_try_write_array_header(buffer *out, int count);
+    tinybuf_result tinybuf_try_write_map_header(buffer *out, int count);
+    tinybuf_result tinybuf_try_write_string_raw(buffer *out, const char *str, int len);
 
     typedef enum {
         tinybuf_read_pointer_ref = 0,
@@ -264,7 +265,7 @@ extern "C"
      * @param out 字节流存放地址
      * @return
      */
-    int tinybuf_value_serialize(const tinybuf_value *value, buffer *out);
+    tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out);
 
     /**
      * 对象序列化成json字节流

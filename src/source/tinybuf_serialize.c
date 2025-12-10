@@ -51,7 +51,7 @@ static int avl_tree_for_each_node_dump_array(void *user_data, AVLTreeNode *node)
     return 0;
 }
 
-int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
+tinybuf_result tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
 {
     assert(value);
     assert(out);
@@ -62,7 +62,7 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         {
             s_last_error_msg = "plugin write failed";
         }
-        return rr.res;
+        return rr;
     }
     if (tinybuf_precache_is_redirect() && value)
     {
@@ -299,14 +299,14 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         }
         char type = serialize_indexed_tensor;
         buffer_append(out, &type, 1);
-        try_write_box(out, it->tensor);
+        { tinybuf_result r = try_write_box(out, it->tensor); (void)r; }
         dump_int((uint64_t)it->dims, out);
         for (int i = 0; i < it->dims; ++i)
         {
             if (it->indices && it->indices[i])
             {
                 dump_int(1, out);
-                try_write_box(out, it->indices[i]);
+                { tinybuf_result r2 = try_write_box(out, it->indices[i]); (void)r2; }
             }
             else
             {
@@ -321,5 +321,5 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out)
         break;
     }
 
-    return 0;
+    return tinybuf_result_ok(0);
 }

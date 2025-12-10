@@ -1,5 +1,6 @@
 // plugin system implementation compatible with core tryread/trywrite
 #include "tinybuf_plugin.h"
+#include "tinybuf.h"
 #include "tinybuf_buffer.h"
 #include "tinybuf_memory.h"
 #include <string.h>

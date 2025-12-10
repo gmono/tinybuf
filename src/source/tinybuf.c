@@ -1582,10 +1582,10 @@ static int tinybuf_value_deserialize_impl(const char *ptr, int size, tinybuf_val
         if (rr.res <= 0)
         {
             buf_ref br3 = (buf_ref){(char *)ptr, (int64_t)blen, (char *)ptr, (int64_t)blen};
-            int ir = try_read_box(&br3, out, contain_any);
-            if (ir > 0)
+            tinybuf_result ir = tinybuf_try_read_box(&br3, out, contain_any);
+            if (ir.res > 0)
             {
-                return 1 + a + b + ir;
+                return 1 + a + b + ir.res;
             }
             return rr.res;
         }
@@ -1811,15 +1811,16 @@ static inline void set_out_by_mode(tinybuf_value *out, tinybuf_value *target, in
 
 
 
-int try_write_type(buffer *out, serialize_type type)
+tinybuf_result try_write_type(buffer *out, serialize_type type)
 {
     buffer_append(out, (char *)&type, 1);
-    return 1;
+    return tinybuf_result_ok(1);
 }
 
-int try_write_int_data(BOOL isneg, buffer *out, QWORD val)
+tinybuf_result try_write_int_data(BOOL isneg, buffer *out, QWORD val)
 {
-    return dump_int(val, out);
+    int n = dump_int(val, out);
+    return tinybuf_result_ok(n);
 }
 
  
@@ -1839,18 +1840,20 @@ static inline serialize_type make_pointer_type(enum offset_type t, BOOL neg)
     }
 }
 
-static inline int try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset)
+static inline tinybuf_result try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset)
 {
     BOOL neg = offset < 0;
     serialize_type pt = make_pointer_type(t, neg);
     int len = 0;
-    len += try_write_type(out, pt);
+    tinybuf_result r1 = try_write_type(out, pt);
+    if (r1.res <= 0) return r1; len += r1.res;
     QWORD mag = neg ? (QWORD)(-offset) : (QWORD)offset;
-    len += try_write_int_data(FALSE, out, mag);
-    return len;
+    tinybuf_result r2 = try_write_int_data(FALSE, out, mag);
+    if (r2.res <= 0) return r2; len += r2.res;
+    return tinybuf_result_ok(len);
 }
 
-static inline int try_write_pointer(buffer *out, pointer_value pointer)
+static inline tinybuf_result try_write_pointer(buffer *out, pointer_value pointer)
 {
     return try_write_pointer_value(out, pointer.type, pointer.offset);
 }
@@ -1898,7 +1901,7 @@ static int avl_tree_for_each_node_is_same(void *user_data, AVLTreeNode *node)
 
 /////////////////////////////读接口//////////////////////////////////
 
-static inline int try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset);
+static inline tinybuf_result try_write_pointer_value(buffer *out, enum offset_type t, SQWORD offset);
 
 static int contain_any(uint64_t v)
 {

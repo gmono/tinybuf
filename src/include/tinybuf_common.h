@@ -46,10 +46,15 @@ int tinybuf_result_unref(tinybuf_result *r);
 void tinybuf_result_set_current(tinybuf_result *r);
 tinybuf_result *tinybuf_result_get_current(void);
 int tinybuf_result_append_merge(tinybuf_result *dst, tinybuf_result *src, int (*mergeres)(int,int));
+int tinybuf_merger_sum(int a, int b);
+int tinybuf_merger_max(int a, int b);
+int tinybuf_merger_left(int a, int b);
+int tinybuf_merger_right(int a, int b);
 
 tinybuf_result tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_read_pointer_mode mode);
 tinybuf_result tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 tinybuf_result tinybuf_try_write_box(buffer *out, const tinybuf_value *value);
+tinybuf_result tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 
 typedef tinybuf_result (*tinybuf_custom_read_fn)(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 typedef tinybuf_result (*tinybuf_custom_write_fn)(const char *name, const tinybuf_value *in, buffer *out);
@@ -61,6 +66,7 @@ tinybuf_result tinybuf_custom_try_dump(const char *name, buf_ref *buf, buffer *o
 
 tinybuf_result tinybuf_try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box);
 tinybuf_result tinybuf_try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count);
+tinybuf_result tinybuf_try_write_plugin_map_table(buffer *out);
 
 tinybuf_result tinybuf_try_write_part(buffer *out, const tinybuf_value *value);
 tinybuf_result tinybuf_try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybuf_value **subs, int count);

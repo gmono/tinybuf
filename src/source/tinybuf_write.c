@@ -20,31 +20,31 @@ static inline int int_serialize_local(uint64_t in, uint8_t *out_bytes){
 
 tinybuf_result try_write_version_box(buffer *out, uint64_t version, const tinybuf_value *box)
 {
-    int len = 0;
+    tinybuf_result acc = tinybuf_result_ok(0);
     tinybuf_result r1 = try_write_type(out, serialize_version);
-    if (r1.res <= 0) return r1; len += r1.res;
+    if (r1.res <= 0) return r1; tinybuf_result_append_merge(&acc, &r1, tinybuf_merger_sum);
     tinybuf_result r2 = try_write_int_data(0, out, version);
-    if (r2.res <= 0) return r2; len += r2.res;
+    if (r2.res <= 0) return r2; tinybuf_result_append_merge(&acc, &r2, tinybuf_merger_sum);
     tinybuf_result r3 = try_write_box(out, box);
-    if (r3.res <= 0) return r3; len += r3.res;
-    return tinybuf_result_ok(len);
+    if (r3.res <= 0) return r3; tinybuf_result_append_merge(&acc, &r3, tinybuf_merger_sum);
+    return acc;
 }
 
 tinybuf_result try_write_version_list(buffer *out, const uint64_t *versions, const tinybuf_value **boxes, int count)
 {
-    int len = 0;
+    tinybuf_result acc = tinybuf_result_ok(0);
     tinybuf_result r0 = try_write_type(out, serialize_version_list);
-    if (r0.res <= 0) return r0; len += r0.res;
+    if (r0.res <= 0) return r0; tinybuf_result_append_merge(&acc, &r0, tinybuf_merger_sum);
     tinybuf_result rcnt = try_write_int_data(0, out, (uint64_t)count);
-    if (rcnt.res <= 0) return rcnt; len += rcnt.res;
+    if (rcnt.res <= 0) return rcnt; tinybuf_result_append_merge(&acc, &rcnt, tinybuf_merger_sum);
     for (int i = 0; i < count; ++i)
     {
         tinybuf_result ra = try_write_int_data(0, out, versions[i]);
-        if (ra.res <= 0) return ra; len += ra.res;
+        if (ra.res <= 0) return ra; tinybuf_result_append_merge(&acc, &ra, tinybuf_merger_sum);
         tinybuf_result rb = try_write_box(out, boxes[i]);
-        if (rb.res <= 0) return rb; len += rb.res;
+        if (rb.res <= 0) return rb; tinybuf_result_append_merge(&acc, &rb, tinybuf_merger_sum);
     }
-    return tinybuf_result_ok(len);
+    return acc;
 }
 
 tinybuf_result try_write_box(buffer *out, const tinybuf_value *value)
@@ -228,13 +228,13 @@ tinybuf_result try_write_pointer_value(buffer *out, enum offset_type t, int64_t 
 {
     int neg = offset < 0;
     serialize_type pt = make_pointer_type(t, neg);
-    int len = 0;
+    tinybuf_result acc = tinybuf_result_ok(0);
     tinybuf_result r1 = try_write_type(out, pt);
-    if (r1.res <= 0) return r1; len += r1.res;
+    if (r1.res <= 0) return r1; tinybuf_result_append_merge(&acc, &r1, tinybuf_merger_sum);
     uint64_t mag = neg ? (uint64_t)(-offset) : (uint64_t)offset;
     tinybuf_result r2 = try_write_int_data(0, out, mag);
-    if (r2.res <= 0) return r2; len += r2.res;
-    return tinybuf_result_ok(len);
+    if (r2.res <= 0) return r2; tinybuf_result_append_merge(&acc, &r2, tinybuf_merger_sum);
+    return acc;
 }
 static inline tinybuf_result _err_with(const char *msg, int rc)
 {
@@ -284,19 +284,19 @@ tinybuf_result tinybuf_try_write_pointer(buffer *out, int t, int64_t offset)
 
 tinybuf_result tinybuf_try_write_sub_ref(buffer *out, int t, int64_t offset)
 {
-    int len = 0; tinybuf_result r0 = try_write_type(out, serialize_sub_ref); if (r0.res <= 0) return r0; len += r0.res;
+    tinybuf_result acc = tinybuf_result_ok(0); tinybuf_result r0 = try_write_type(out, serialize_sub_ref); if (r0.res <= 0) return r0; tinybuf_result_append_merge(&acc, &r0, tinybuf_merger_sum);
     enum offset_type et = (t == 1 ? end : (t == 2 ? current : start));
     tinybuf_result r = try_write_pointer_value(out, et, offset); if (r.res <= 0) return r;
-    len += r.res; return tinybuf_result_ok(len);
+    tinybuf_result_append_merge(&acc, &r, tinybuf_merger_sum); return acc;
 }
 
 tinybuf_result tinybuf_try_write_array_header(buffer *out, int count)
 {
-    int len = 0; tinybuf_result r1 = try_write_type(out, serialize_array); if (r1.res <= 0) return r1; len += r1.res; tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)count); if (r2.res <= 0) return r2; len += r2.res; return tinybuf_result_ok(len);
+    tinybuf_result acc = tinybuf_result_ok(0); tinybuf_result r1 = try_write_type(out, serialize_array); if (r1.res <= 0) return r1; tinybuf_result_append_merge(&acc, &r1, tinybuf_merger_sum); tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)count); if (r2.res <= 0) return r2; tinybuf_result_append_merge(&acc, &r2, tinybuf_merger_sum); return acc;
 }
 tinybuf_result tinybuf_try_write_map_header(buffer *out, int count)
 {
-    int len = 0; tinybuf_result r1 = try_write_type(out, serialize_map); if (r1.res <= 0) return r1; len += r1.res; tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)count); if (r2.res <= 0) return r2; len += r2.res; return tinybuf_result_ok(len);
+    tinybuf_result acc = tinybuf_result_ok(0); tinybuf_result r1 = try_write_type(out, serialize_map); if (r1.res <= 0) return r1; tinybuf_result_append_merge(&acc, &r1, tinybuf_merger_sum); tinybuf_result r2 = try_write_int_data(0, out, (uint64_t)count); if (r2.res <= 0) return r2; tinybuf_result_append_merge(&acc, &r2, tinybuf_merger_sum); return acc;
 }
 tinybuf_result tinybuf_try_write_string_raw(buffer *out, const char *str, int len)
 {
@@ -310,13 +310,16 @@ tinybuf_result tinybuf_try_write_custom_id_box(buffer *out, const char *name, co
     int idx = strpool_add(name, (int)strlen(name)); uint8_t ty = serialize_type_idx; buffer_append(body, (const char *)&ty, 1); dump_int((uint64_t)idx, body);
     buffer *payload = buffer_alloc(); tinybuf_result wr = tinybuf_custom_try_write(name, in, payload); dump_int((uint64_t)(wr.res > 0 ? wr.res : 0), body);
     if (wr.res > 0){ buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload)); }
-    strpool_write_tail(pool);
+    tinybuf_result rpool = strpool_write_tail(pool); if (rpool.res <= 0){ buffer_free(payload); buffer_free(body); buffer_free(pool); return rpool; }
     uint64_t body_len = (uint64_t)buffer_get_length_inline(body); uint64_t offset_guess_len = 1; uint8_t tmpv[16];
     while (1){ uint64_t off = 1 + offset_guess_len + body_len; int l = int_serialize(off, tmpv); if ((uint64_t)l == offset_guess_len) break; offset_guess_len = (uint64_t)l; }
     uint64_t final_off = 1 + offset_guess_len + body_len;
-    try_write_type(out, serialize_str_pool_table); try_write_int_data(0, out, final_off); buffer_append(out, buffer_get_data_inline(body), (int)body_len);
+    tinybuf_result acc = tinybuf_result_ok(0);
+    tinybuf_result rtype = try_write_type(out, serialize_str_pool_table); if (rtype.res <= 0){ buffer_free(payload); buffer_free(body); buffer_free(pool); return rtype; } tinybuf_result_append_merge(&acc, &rtype, tinybuf_merger_sum);
+    tinybuf_result rlen = try_write_int_data(0, out, final_off); if (rlen.res <= 0){ buffer_free(payload); buffer_free(body); buffer_free(pool); return rlen; } tinybuf_result_append_merge(&acc, &rlen, tinybuf_merger_sum);
+    buffer_append(out, buffer_get_data_inline(body), (int)body_len);
     int pool_len = buffer_get_length_inline(pool); if (pool_len){ buffer_append(out, buffer_get_data_inline(pool), pool_len); }
     buffer_free(payload); buffer_free(body); buffer_free(pool);
     if (wr.res <= 0){ tinybuf_result rr = tinybuf_result_err(wr.res, "write custom payload failed", NULL); char *m = (char *)tinybuf_malloc(64); snprintf(m, 64, "name=%s", name ? name : "(null)"); tinybuf_result_add_msg(&rr, m, (tinybuf_deleter_fn)tinybuf_free); return rr; }
-    int total = 1 + (int)offset_guess_len + (int)body_len + pool_len; return tinybuf_result_ok(total);
+    int total = 1 + (int)offset_guess_len + (int)body_len + pool_len; tinybuf_result rt = tinybuf_result_ok(total); tinybuf_result_append_merge(&rt, &acc, tinybuf_merger_left); return rt;
 }

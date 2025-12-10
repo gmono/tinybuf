@@ -397,6 +397,7 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
         return tinybuf_result_ok(len);
     }
     len = 0;
+    tinybuf_result acc = tinybuf_result_ok(0);
     serialize_type type = serialize_null;
     {
         tinybuf_result rt_main = try_read_type(buf, &type);
@@ -415,7 +416,8 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                             tinybuf_result rr2 = try_read_box(buf, out, contain_handler);
                             if (rr2.res > 0)
                             {
-                                len += rr2.res;
+                                tinybuf_result_append_merge(&acc, &rr2, tinybuf_merger_sum);
+                                len = acc.res;
                                 pool_mark_complete(box_offset);
                                 SET_SUCCESS();
                                 break;
@@ -447,7 +449,8 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                             tinybuf_result inner = try_read_box(buf, out, contain_handler);
                             if (inner.res > 0)
                             {
-                                len += inner.res;
+                                tinybuf_result_append_merge(&acc, &inner, tinybuf_merger_sum);
+                                len = acc.res;
                                 pool_mark_complete(box_offset);
                                 SET_SUCCESS();
                                 found = 1;
@@ -466,7 +469,8 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                                 SET_FAILED("read non-match box failed");
                                 break;
                             }
-                            len += consumed.res;
+                            tinybuf_result_append_merge(&acc, &consumed, tinybuf_merger_sum);
+                            len = acc.res;
                             tinybuf_value_free(skip);
                             continue;
                         }
@@ -493,7 +497,8 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                     tinybuf_result rr3 = try_read_box(buf, out, contain_handler);
                     if (rr3.res > 0)
                     {
-                        len += rr3.res;
+                        tinybuf_result_append_merge(&acc, &rr3, tinybuf_merger_sum);
+                        len = acc.res;
                         pool_mark_complete(box_offset);
                         SET_SUCCESS();
                         break;
@@ -562,7 +567,11 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                 r1 = rr1.res;
             }
             buf_offset(buf, r1);
-            len += r1;
+            {
+                tinybuf_result t = tinybuf_result_ok(r1);
+                tinybuf_result_append_merge(&acc, &t, tinybuf_merger_sum);
+                len = acc.res;
+            }
             QWORD dims = 0;
             if (!OK_AND_ADDTO(try_read_int_data(FALSE, buf, &dims), &len))
             {
@@ -616,13 +625,18 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                             break;
                         }
                         buf_offset(buf, rr3.res);
-                        len += rr3.res;
+                        tinybuf_result_append_merge(&acc, &rr3, tinybuf_merger_sum);
+                        len = acc.res;
                         r2 = 0; /* already advanced */
                     }
                     else
                     {
                         buf_offset(buf, r2);
-                        len += r2;
+                        {
+                            tinybuf_result t2 = tinybuf_result_ok(r2);
+                            tinybuf_result_append_merge(&acc, &t2, tinybuf_merger_sum);
+                            len = acc.res;
+                        }
                     }
                     it->indices[i] = idx;
                 }
@@ -767,7 +781,11 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                 if (cr.res > 0)
                 {
                     buf_offset(buf, (int)blen);
-                    len += (int)blen;
+                    {
+                        tinybuf_result tb = tinybuf_result_ok((int)blen);
+                        tinybuf_result_append_merge(&acc, &tb, tinybuf_merger_sum);
+                        len = acc.res;
+                    }
                     pool_mark_complete(box_offset);
                     SET_SUCCESS();
                 }
@@ -778,7 +796,8 @@ tinybuf_result try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER co
                     if (ir2.res > 0)
                     {
                         buf_offset(buf, ir2.res);
-                        len += ir2.res;
+                        tinybuf_result_append_merge(&acc, &ir2, tinybuf_merger_sum);
+                        len = acc.res;
                         pool_mark_complete(box_offset);
                         SET_SUCCESS();
                     }

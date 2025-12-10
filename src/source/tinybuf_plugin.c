@@ -224,6 +224,11 @@ int tinybuf_result_append_merge(tinybuf_result *dst, tinybuf_result *src, int (*
     return dst->res;
 }
 
+int tinybuf_merger_sum(int a, int b){ return a + b; }
+int tinybuf_merger_max(int a, int b){ return a > b ? a : b; }
+int tinybuf_merger_left(int a, int b){ (void)b; return a; }
+int tinybuf_merger_right(int a, int b){ (void)a; return b; }
+
 int tinybuf_plugin_unregister_all(void){
     for(int i=0;i<s_plugins_count;++i){ tinybuf_free(s_plugins[i].types); }
     tinybuf_free(s_plugins); s_plugins = NULL; s_plugins_count = 0; s_plugins_capacity = 0; return 0;

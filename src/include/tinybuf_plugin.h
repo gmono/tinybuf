@@ -34,12 +34,9 @@ int tinybuf_plugin_get_runtime_index_by_type(uint8_t type);
 int tinybuf_plugin_do_value_op(int plugin_runtime_index, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out);
 int tinybuf_plugin_do_value_op_by_type(uint8_t type, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out);
 
-tinybuf_result tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler);
 int tinybuf_register_builtin_plugins(void);
 int tinybuf_plugin_register_from_dll(const char *dll_path);
 int tinybuf_plugin_scan_dir(const char *dir);
-
-tinybuf_result tinybuf_try_write_plugin_map_table(buffer *out);
 
  
 

@@ -591,7 +591,7 @@ int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *
         }
         /* OOP provided but returned <=0, fall back to legacy */
     }
-    int fb = try_write_box(out, in, r);
+    int fb = tinybuf_try_write_box(out, in, r);
     if (fb > 0)
     {
         tinybuf_error ok = tinybuf_result_ok(fb);

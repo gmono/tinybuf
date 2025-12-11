@@ -985,8 +985,12 @@ static inline int tinybuf_json_load_for_number(const char *ptr, int size, tinybu
     //这是double
     //确保最后一个字节为'\0'
     buffer *buf = buffer_alloc();
-    buffer_assign(buf,ptr,p - ptr);
-    tinybuf_value_init_double(number, atof(buffer_get_data_inline(buf)));
+    buffer_assign(buf, ptr, p - ptr);
+    const char *s = buffer_get_data_inline(buf);
+    double dv = 0.0;
+    if (s && *s)
+        dv = atof(s);
+    tinybuf_value_init_double(number, dv);
     buffer_free(buf);
     return p - ptr;
 }

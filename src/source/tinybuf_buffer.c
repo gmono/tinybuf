@@ -9,7 +9,7 @@
 #define RESERVED_SIZE 64
 
 
-static inline void my_memcpy(char *dst,const char *src,int len){
+static inline void my_memcpy(char *dst, const char *src, size_t len){
     assert(dst);
     assert(src);
     switch (len){
@@ -19,7 +19,7 @@ static inline void my_memcpy(char *dst,const char *src,int len){
             dst[0] = *src;
             return;
         default:
-            memcpy(dst,src,len);
+            memcpy(dst, src, len);
             return;
     }
 }

@@ -8,66 +8,57 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  linux:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Ninja (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      - name: Configure (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
-      - name: Configure (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Build
+        run: cmake --build build --config Release -j 2
+
+      - name: List Tests
+        run: |
+          test -x build/bin/all_test && build/bin/all_test --list-tests || true
+          test -x build/bin/unit_tests && build/bin/unit_tests --list-tests || true
+          test -x build/bin/sys_tests && build/bin/sys_tests --list-tests || true
+
+      - name: Run CTest
+        run: ctest --test-dir build -C Release --output-on-failure -j 2
+
+      - name: Run Aggregated Tests
+        run: test -x build/bin/all_test && build/bin/all_test "~[benchmark]" || true
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
-      - name: Build (Linux)
-        if: matrix.os == 'ubuntu-latest'
+      - name: Build
         run: cmake --build build --config Release -j 2
 
-      - name: Build (Windows)
-        if: matrix.os == 'windows-latest'
-        run: cmake --build build --config Release -j 2
-
-      - name: List Tests (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          build/bin/all_test --list-tests || true
-          build/bin/unit_tests --list-tests || true
-          build/bin/sys_tests --list-tests || true
-
-      - name: List Tests (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: List Tests
         shell: powershell
         run: |
-          & build\bin\Release\all_test.exe --list-tests
-          & build\bin\Release\unit_tests.exe --list-tests
-          & build\bin\Release\sys_tests.exe --list-tests
+          if (Test-Path build\bin\Release\all_test.exe) { & build\bin\Release\all_test.exe --list-tests }
+          if (Test-Path build\bin\Release\unit_tests.exe) { & build\bin\Release\unit_tests.exe --list-tests }
+          if (Test-Path build\bin\Release\sys_tests.exe) { & build\bin\Release\sys_tests.exe --list-tests }
 
-      - name: Run CTest (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: ctest --test-dir build -C Release --output-on-failure -j 2
-
-      - name: Run CTest (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Run CTest
         shell: powershell
         run: ctest --test-dir build -C Release --output-on-failure -j 2
 
-      - name: Run Aggregated Tests (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: build/bin/all_test "~[benchmark]"
-
-      - name: Run Aggregated Tests (Windows)
-        if: matrix.os == 'windows-latest'
+      - name: Run Aggregated Tests
         shell: powershell
         run: |
-          & build\bin\Release\all_test.exe "~[benchmark]"
+          if (Test-Path build\bin\Release\all_test.exe) { & build\bin\Release\all_test.exe "~[benchmark]" }

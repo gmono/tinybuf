@@ -26,7 +26,7 @@ const char *buf_end_ptr(buf_ref *buf)
 }
 int64_t s_strpool_offset_read = -1;
 const char *s_strpool_base_read = NULL;
-int64_t buf_current_offset(buf_ref *buf)
+int64_t buf_current_offset(const buf_ref *buf)
 {
     return buf->ptr - buf->base;
 }

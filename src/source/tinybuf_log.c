@@ -72,7 +72,7 @@ void log_print(e_log_lev lev, const char *file, int line, const char *func, cons
     if(lev < get_log_level()){
         return;
     }
-    char time_str[26];
+    char time_str[64];
     get_now_time_str(time_str,sizeof(time_str));
     printf_ptr p = get_printf_ptr();
     p("%s %s | %s ", time_str, LOG_CONST_TABLE[lev][2], func);

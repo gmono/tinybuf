@@ -307,7 +307,7 @@ int tinybuf_value_deserialize_basic(const char *ptr, int size, tinybuf_value *ou
         tinybuf_value_init_string(out, ptr, (int)bytes_len);
         return 1 + len + (int)bytes_len;
     }
-    /* str_pool index and type_idx branches remain in tinybuf.c to use shared state */
+    /* str_pool index and name_idx branches remain in tinybuf.c to use shared state */
     default:
         s_last_error_msg = "deserialize type unknown";
         return -1;

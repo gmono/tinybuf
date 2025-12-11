@@ -643,28 +643,28 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                 SET_SUCCESS();
                 break;
             }
-            case serialize_type_idx:
+            case serialize_name_idx:
             {
                 QWORD idx = 0;
                 {
                     int ni = try_read_int_data(FALSE, buf, &idx, r);
                     if (!(ni > 0))
                     {
-                        SET_FAILED("read type_idx index failed");
+                        SET_FAILED("read name_idx index failed");
                         break;
                     }
                     len += ni;
                 }
                 {
                     char *dbg = (char *)tinybuf_malloc(64);
-                    snprintf(dbg, 64, "type_idx idx=%llu", (unsigned long long)idx);
+                    snprintf(dbg, 64, "name_idx idx=%llu", (unsigned long long)idx);
                     tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
                 }
                 QWORD blen = 0;
                 int blen_read = try_read_int_data(FALSE, buf, &blen, r);
                 if (!(blen_read > 0))
                 {
-                    SET_FAILED("read type_idx length failed");
+                    SET_FAILED("read name_idx length failed");
                     break;
                 }
                 len += blen_read;
@@ -682,7 +682,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                 }
                 {
                     char *dbg2 = (char *)tinybuf_malloc(64);
-                    snprintf(dbg2, 64, "type_idx blen=%llu", (unsigned long long)blen);
+                    snprintf(dbg2, 64, "name_idx blen=%llu", (unsigned long long)blen);
                     tinybuf_result_add_msg(r, dbg2, (tinybuf_deleter_fn)tinybuf_free);
                 }
                 if (buf->size < (int64_t)blen)
@@ -743,7 +743,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                             }
                         }
                     }
-                    else if ((uint8_t)q[0] == 27)
+                    else if ((uint8_t)q[0] == serialize_str_trie_pool)
                     {
                         tinybuf_result_add_msg_const(r, "pool=trie");
                         ++q;
@@ -992,7 +992,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                     }
                     else
                     {
-                        SET_FAILED("type_idx name not found");
+                        SET_FAILED("name_idx name not found");
                     }
                 }
                 if (!failed)

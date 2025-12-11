@@ -30,7 +30,7 @@ struct T_tinybuf_value
     free_handler _custom_free;
     tinybuf_type _type;
     int _plugin_index;
-    int _custom_box_type;
+    int _custom_box_tag;
 };
 
 // internal types for tensor and advanced values
@@ -83,8 +83,8 @@ typedef enum
     serialize_str_index = 23,
     serialize_str_pool = 24,
     serialize_str_pool_table = 25,
-    serialize_uri = 26,
-    serialize_router_link = 27,
+    serialize_plugin_map_table = 26,
+    serialize_str_trie_pool = 27,
     serialize_text_ref = 28,
     serialize_bin_ref = 29,
     serialize_embed_file = 30,
@@ -105,7 +105,9 @@ typedef enum
     serialize_sparse_tensor = 45,
     serialize_bool_map = 46,
     serialize_indexed_tensor = 47,
-    serialize_type_idx = 48,
+    serialize_name_idx = 48,
+    serialize_uri = 52,
+    serialize_router_link = 53,
     serialize_extern_str_idx = 253,
     serialize_extern_str = 254,
     serialize_extern_int = 255

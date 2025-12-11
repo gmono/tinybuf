@@ -1499,7 +1499,7 @@ static void plugin_dll_tests()
     { tinybuf_error sr = tinybuf_result_ok(0); (void)tinybuf_try_write_string_raw(b, "world", 5, &sr); tinybuf_result_unref(&sr); }
     tinybuf_value *sv = tinybuf_value_alloc();
     tinybuf_value_init_string(sv, "AbCd", 4);
-    tinybuf_plugin_do_value_op_by_type(201, "to_lower", sv, NULL, sv);
+    tinybuf_plugin_do_value_op_by_tag(201, "to_lower", sv, NULL, sv);
     {
         tinybuf_error wr = tinybuf_result_ok(0);
         int wn = tinybuf_try_write_box(b, sv, &wr);
@@ -1549,7 +1549,7 @@ static void plugin_custom_box_tests()
 #endif
     tinybuf_value *v = tinybuf_value_alloc();
     tinybuf_value_init_string(v, "hello", 5);
-    tinybuf_value_set_custom_box_type(v, 201);
+    tinybuf_value_set_custom_box_tag(v, 201);
     buffer *b = buffer_alloc();
     {
         tinybuf_error wr = tinybuf_result_ok(0);

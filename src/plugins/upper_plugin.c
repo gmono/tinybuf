@@ -36,7 +36,7 @@ static int dll_upper_read(uint8_t type, buf_ref *buf, tinybuf_value *out, CONTAI
         tmp[i] = c;
     }
     tinybuf_value_init_string(out, tmp, len);
-    tinybuf_value_set_plugin_index(out, tinybuf_plugin_get_runtime_index_by_type(DLL_UPPER_TYPE));
+    tinybuf_value_set_plugin_index(out, tinybuf_plugin_get_runtime_index_by_tag(DLL_UPPER_TYPE));
     tinybuf_free(tmp);
     buf->ptr += 2 + len;
     buf->size -= 2 + len;
@@ -150,14 +150,14 @@ static int dll_to_lower(tinybuf_value *value, const tinybuf_value *args, tinybuf
 }
 TB_EXPORT tinybuf_plugin_descriptor *tinybuf_get_plugin_descriptor(void)
 {
-    static uint8_t types[1] = {DLL_UPPER_TYPE};
+    static uint8_t tags[1] = {DLL_UPPER_TYPE};
     static const char *names[1] = {"to_lower"};
     static const char *sigs[1] = {"string->string"};
     static const char *descs[1] = {"lowercase"};
     static tinybuf_plugin_value_op_fn fns[1] = {dll_to_lower};
     static tinybuf_plugin_descriptor d;
-    d.types = types;
-    d.type_count = 1;
+    d.tags = tags;
+    d.tag_count = 1;
     d.guid = "dll:upper-string";
     d.read = dll_upper_read;
     d.write = dll_upper_write;

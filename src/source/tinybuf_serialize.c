@@ -71,9 +71,9 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out, tinybuf_err
     assert(value);
     assert(out);
     int before = buffer_get_length_inline(out);
-    if (value && value->_custom_box_type >= 0)
+    if (value && value->_custom_box_tag >= 0)
     {
-        int w = tinybuf_plugins_try_write((uint8_t)value->_custom_box_type, value, out, r);
+        int w = tinybuf_plugins_try_write((uint8_t)value->_custom_box_tag, value, out, r);
         if (w <= 0)
         {
             s_last_error_msg = "plugin write failed";

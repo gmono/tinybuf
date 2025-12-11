@@ -39,7 +39,7 @@ static int plugin_upper_read(uint8_t type, buf_ref *buf, tinybuf_value *out, CON
         tmp[i] = c;
     }
     tinybuf_value_init_string(out, tmp, len);
-    int pidx = tinybuf_plugin_get_runtime_index_by_type(TINYBUF_PLUGIN_UPPER_STRING);
+    int pidx = tinybuf_plugin_get_runtime_index_by_tag(TINYBUF_PLUGIN_UPPER_STRING);
     tinybuf_value_set_plugin_index(out, pidx);
     tinybuf_free(tmp);
     buf_offset_local(buf, 2 + len);
@@ -126,14 +126,14 @@ static int plugin_upper_to_lower(tinybuf_value *value, const tinybuf_value *args
     return 0;
 }
 
-static const uint8_t g_types[] = { TINYBUF_PLUGIN_UPPER_STRING };
+static const uint8_t g_tags[] = { TINYBUF_PLUGIN_UPPER_STRING };
 static const char *g_op_names[] = { "to_lower" };
 static const char *g_op_sigs[] = { "string->string" };
 static const char *g_op_descs[] = { "lowercase" };
 static tinybuf_plugin_value_op_fn g_op_fns[] = { plugin_upper_to_lower };
 
 static tinybuf_plugin_descriptor g_desc = {
-    g_types,
+    g_tags,
     1,
     "builtin:upper-string",
     plugin_upper_read,

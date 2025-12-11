@@ -405,14 +405,14 @@ TB_EXPORT int tinybuf_plugin_init_with_host(int (*host_custom_register)(const ch
 
 TB_EXPORT tinybuf_plugin_descriptor *tinybuf_get_plugin_descriptor(void)
 {
-    static uint8_t types[1] = {0};
+    static uint8_t tags[1] = {0};
     static const char *op_names[] = {"hlist_insert", "hlist_delete", "hlist_concat", "__str__", "__desc__"};
     static const char *op_sigs[] = {"(list,int,value)->list", "(list,int)->list", "(list,list)->list", "(list)->string", "(list)->string"};
     static const char *op_descs[] = {"insert element", "delete element", "concat lists", "stringify", "describe"};
     static tinybuf_plugin_value_op_fn op_fns[] = {op_hlist_insert, op_hlist_delete, op_hlist_concat, op_str, op_desc};
     static tinybuf_plugin_descriptor d;
-    d.types = types;
-    d.type_count = 0;
+    d.tags = tags;
+    d.tag_count = 0;
     d.guid = "plugin:system.extend";
     d.read = NULL;
     d.write = NULL;

@@ -176,20 +176,32 @@ int try_write_box(buffer *out, const tinybuf_value *value, tinybuf_error *r)
 
 int try_write_plugin_map_table(buffer *out, tinybuf_error *r)
 {
-    int before = buffer_get_length_inline(out);
+    if (!s_use_strpool)
+    {
+        tinybuf_error er = tinybuf_result_err(-1, "strpool disabled", NULL);
+        tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
+        return -1;
+    }
+    buffer *body = buffer_alloc();
+    buffer *pool = buffer_alloc();
+    strpool_reset_write(body);
     int pc = tinybuf_plugin_get_count();
     {
-        int r1 = try_write_type(out, 26, r);
-        if (r1 <= 0)
+        int rt = try_write_type(body, serialize_plugin_map_table, r);
+        if (rt <= 0)
         {
-            return r1;
+            buffer_free(body);
+            buffer_free(pool);
+            return rt;
         }
     }
     {
-        int r2 = try_write_int_data(0, out, (uint64_t)pc, r);
-        if (r2 <= 0)
+        int rc = try_write_int_data(0, body, (uint64_t)pc, r);
+        if (rc <= 0)
         {
-            return r2;
+            buffer_free(body);
+            buffer_free(pool);
+            return rc;
         }
     }
     for (int i = 0; i < pc; ++i)
@@ -197,27 +209,59 @@ int try_write_plugin_map_table(buffer *out, tinybuf_error *r)
         const char *g = tinybuf_plugin_get_guid(i);
         if (!g)
             g = "";
-        int gl = (int)strlen(g);
+        int idx = strpool_add(g, (int)strlen(g));
+        uint8_t ty = serialize_name_idx;
+        buffer_append(body, (const char *)&ty, 1);
+        dump_int((uint64_t)idx, body);
+        dump_int(0, body);
+    }
+    int rpool = strpool_write_tail(pool, r);
+    if (rpool < 0)
+    {
+        buffer_free(body);
+        buffer_free(pool);
+        return rpool;
+    }
+    int body_len = buffer_get_length_inline(body);
+    int pool_len = buffer_get_length_inline(pool);
+    uint64_t offset_guess_len = 1;
+    uint8_t tmp[16];
+    while (1)
+    {
+        uint64_t off = 1 + offset_guess_len + (uint64_t)body_len;
+        int l = int_serialize_local(off, tmp);
+        if ((uint64_t)l == offset_guess_len)
+            break;
+        offset_guess_len = (uint64_t)l;
+    }
+    uint64_t final_off = 1 + offset_guess_len + (uint64_t)body_len;
+    int before = buffer_get_length_inline(out);
+    {
+        int rtype = try_write_type(out, serialize_str_pool_table, r);
+        if (rtype <= 0)
         {
-            int r3 = try_write_type(out, serialize_string, r);
-            if (r3 <= 0)
-            {
-                return r3;
-            }
-        }
-        {
-            int r4 = try_write_int_data(0, out, (uint64_t)gl, r);
-            if (r4 <= 0)
-            {
-                return r4;
-            }
-        }
-        if (gl)
-        {
-            buffer_append(out, g, gl);
+            buffer_free(body);
+            buffer_free(pool);
+            return rtype;
         }
     }
+    {
+        int rlen = try_write_int_data(0, out, final_off, r);
+        if (rlen <= 0)
+        {
+            buffer_free(body);
+            buffer_free(pool);
+            return rlen;
+        }
+    }
+    buffer_append(out, buffer_get_data_inline(body), body_len);
+    if (pool_len)
+    {
+        buffer_append(out, buffer_get_data_inline(pool), pool_len);
+    }
     int after = buffer_get_length_inline(out);
+    buffer_free(body);
+    buffer_free(pool);
     return after - before;
 }
 
@@ -547,7 +591,7 @@ int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf
     buffer *pool = buffer_alloc();
     strpool_reset_write(body);
     int idx = strpool_add(name, (int)strlen(name));
-    uint8_t ty = serialize_type_idx;
+    uint8_t ty = serialize_name_idx;
     buffer_append(body, (const char *)&ty, 1);
     dump_int((uint64_t)idx, body);
     buffer *payload = buffer_alloc();

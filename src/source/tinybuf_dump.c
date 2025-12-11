@@ -385,7 +385,7 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
             }
             return consumed;
         }
-        case serialize_type_idx:
+        case serialize_name_idx:
         {
             QWORD idx = 0;
             int a = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &idx);
@@ -426,6 +426,72 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
                                 break;
                             }
                             q += sl; r -= sl;
+                        }
+                    }
+                } else if ((uint8_t)q[0] == serialize_str_trie_pool) {
+                    ++q; --r;
+                    QWORD ncount = 0;
+                    int l2 = try_read_int_tovar(FALSE, q, (int)r, &ncount);
+                    if (l2 > 0) {
+                        const char *nodes_base = q + l2;
+                        int64_t nodes_size = r - l2;
+                        const char *p = nodes_base;
+                        int64_t rr = nodes_size;
+                        int found = -1;
+                        for (QWORD i = 0; i < ncount; ++i) {
+                            QWORD parent = 0;
+                            int lp = try_read_int_tovar(FALSE, p, (int)rr, &parent);
+                            if (lp <= 0) break;
+                            p += lp; rr -= lp;
+                            if (rr < 2) break;
+                            unsigned char ch = (unsigned char)p[0];
+                            unsigned char flag = (unsigned char)p[1];
+                            p += 2; rr -= 2;
+                            if (flag) {
+                                QWORD leaf = 0;
+                                int ll = try_read_int_tovar(FALSE, p, (int)rr, &leaf);
+                                if (ll <= 0) break;
+                                p += ll; rr -= ll;
+                                if (leaf == (QWORD)idx) { found = (int)i; break; }
+                            }
+                        }
+                        if (found >= 0) {
+                            buffer *tmp = buffer_alloc();
+                            int current = found;
+                            while (1) {
+                                const char *p2 = nodes_base;
+                                int64_t rr2 = nodes_size;
+                                int node_index = 0;
+                                int parent_index = -1;
+                                unsigned char ch = 0;
+                                unsigned char flag = 0;
+                                QWORD leaf = 0;
+                                while (node_index <= current) {
+                                    QWORD parent = 0;
+                                    int lp = try_read_int_tovar(FALSE, p2, (int)rr2, &parent);
+                                    p2 += lp; rr2 -= lp;
+                                    if (rr2 < 2) break;
+                                    ch = (unsigned char)p2[0];
+                                    flag = (unsigned char)p2[1];
+                                    p2 += 2; rr2 -= 2;
+                                    if (flag) {
+                                        int ll = try_read_int_tovar(FALSE, p2, (int)rr2, &leaf);
+                                        p2 += ll; rr2 -= ll;
+                                    }
+                                    parent_index = (int)parent - 1;
+                                    ++node_index;
+                                }
+                                if (ch) { buffer_append(tmp, (const char *)&ch, 1); }
+                                if (parent_index < 0) break;
+                                current = parent_index;
+                            }
+                            int tlen = buffer_get_length_inline(tmp);
+                            const char *td = buffer_get_data_inline(tmp);
+                            char *name_out2 = (char*)tinybuf_malloc(tlen + 1);
+                            for (int i = 0; i < tlen; ++i) name_out2[i] = td[tlen - 1 - i];
+                            name_out2[tlen] = '\0';
+                            name_out = name_out2; name_len = tlen;
+                            buffer_free(tmp);
                         }
                     }
                 }
@@ -585,7 +651,7 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
             append_cstr(dst, "}}");
             break;
         }
-        case 26: /* plugin map table */
+        case serialize_plugin_map_table:
         {
             QWORD cnt = 0;
             int a = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &cnt);
@@ -594,23 +660,61 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
             buf_offset(buf, a);
             append_cstr(dst, "{\"plugins\":[");
             for (QWORD i = 0; i < cnt; ++i) {
-                int64_t size = buf->size;
-                if (size < 1) return 0;
+                if (buf->size < 1) return 0;
                 uint8_t t2 = (uint8_t)buf->ptr[0];
-                if (t2 != serialize_string) return -1;
+                if (t2 != serialize_name_idx) return -1;
                 buf_offset(buf, 1);
                 consumed += 1;
-                QWORD sl = 0;
-                int l3 = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &sl);
-                if (l3 <= 0) return l3;
-                buf_offset(buf, l3);
-                consumed += l3;
-                if (buf->size < (int64_t)sl) return 0;
+                QWORD idx = 0;
+                int l1 = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &idx);
+                if (l1 <= 0) return l1;
+                buf_offset(buf, l1);
+                consumed += l1;
+                QWORD blen = 0;
+                int l2 = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &blen);
+                if (l2 <= 0) return l2;
+                buf_offset(buf, l2);
+                consumed += l2;
+                const char *pool_start = s_strpool_base_read + s_strpool_offset_read;
+                const char *q = pool_start;
+                int64_t rleft = ((const char*)buf->ptr + buf->size) - pool_start;
+                char *name_out = NULL;
+                int name_len = 0;
+                if (rleft > 0 && (uint8_t)q[0] == serialize_str_pool) {
+                    ++q; --rleft;
+                    QWORD scnt = 0;
+                    int lsc = try_read_int_tovar(FALSE, q, (int)rleft, &scnt);
+                    if (lsc > 0) {
+                        q += lsc; rleft -= lsc;
+                        for (QWORD si = 0; si < scnt; ++si) {
+                            if (rleft < 1) break;
+                            if ((uint8_t)q[0] != serialize_string) break;
+                            ++q; --rleft;
+                            QWORD sl = 0;
+                            int lsl = try_read_int_tovar(FALSE, q, (int)rleft, &sl);
+                            if (lsl <= 0) break;
+                            q += lsl; rleft -= lsl;
+                            if (rleft < (int64_t)sl) break;
+                            if (si == idx) {
+                                name_out = (char*)tinybuf_malloc((int)sl + 1);
+                                memcpy(name_out, q, (size_t)sl);
+                                name_out[sl] = '\0';
+                                name_len = (int)sl;
+                                break;
+                            }
+                            q += sl; rleft -= sl;
+                        }
+                    }
+                }
                 buffer_append(dst, "\"", 1);
-                buffer_append(dst, buf->ptr, (int)sl);
+                if (name_out) {
+                    buffer_append(dst, name_out, name_len);
+                    tinybuf_free(name_out);
+                }
                 buffer_append(dst, "\"", 1);
-                buf_offset(buf, (int)sl);
-                consumed += (int)sl;
+                if ((int64_t)blen > buf->size) return 0;
+                buf_offset(buf, (int)blen);
+                consumed += (int)blen;
                 if (i + 1 < cnt) append_cstr(dst, ",");
             }
             append_cstr(dst, "]}");
@@ -620,7 +724,7 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
         {
             uint8_t raw = (uint8_t)t;
             tinybuf_error r1 = tinybuf_result_ok(0);
-            int n1 = tinybuf_plugins_try_dump_by_type(raw, buf, dst, &r1);
+            int n1 = tinybuf_plugins_try_dump_by_tag(raw, buf, dst, &r1);
             if (n1 > 0) {
                 consumed += n1;
             } else {
@@ -780,7 +884,7 @@ static int collect_box_labels(buf_ref *br)
             }
             break;
         }
-        case serialize_type_idx:
+        case serialize_name_idx:
         {
             QWORD idx = 0;
             int a = try_read_int_tovar(FALSE, br->ptr, (int)br->size, &idx);

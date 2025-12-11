@@ -105,7 +105,7 @@ tinybuf_value *tinybuf_value_alloc(void)
     memset(ret, 0, sizeof(tinybuf_value));
     ret->_type = tinybuf_null;
     ret->_plugin_index = -1;
-    ret->_custom_box_type = -1;
+    ret->_custom_box_tag = -1;
     return ret;
 }
 
@@ -442,17 +442,17 @@ int tinybuf_value_get_plugin_index(const tinybuf_value *value)
     return value->_plugin_index;
 }
 
-int tinybuf_value_set_custom_box_type(tinybuf_value *value, int type)
+int tinybuf_value_set_custom_box_tag(tinybuf_value *value, int tag)
 {
     assert(value);
-    value->_custom_box_type = type;
+    value->_custom_box_tag = tag;
     return 0;
 }
 
-int tinybuf_value_get_custom_box_type(const tinybuf_value *value)
+int tinybuf_value_get_custom_box_tag(const tinybuf_value *value)
 {
     if(!value) return -1;
-    return value->_custom_box_type;
+    return value->_custom_box_tag;
 }
 
 int tinybuf_value_init_double(tinybuf_value *value, double db_val)

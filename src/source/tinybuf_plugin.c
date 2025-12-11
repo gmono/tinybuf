@@ -15,8 +15,8 @@ struct hole_string;
 
 typedef struct
 {
-    uint8_t *types;
-    int type_count;
+    uint8_t *tags;
+    int tag_count;
     const char *guid;
     tinybuf_plugin_read_fn read;
     tinybuf_plugin_write_fn write;
@@ -44,9 +44,9 @@ static inline int buf_offset_local(buf_ref *buf, int64_t offset)
     return 0;
 }
 
-int tinybuf_plugin_register(const uint8_t *types, int type_count, tinybuf_plugin_read_fn read, tinybuf_plugin_write_fn write, tinybuf_plugin_dump_fn dump, tinybuf_plugin_show_value_fn show_value)
+int tinybuf_plugin_register(const uint8_t *tags, int tag_count, tinybuf_plugin_read_fn read, tinybuf_plugin_write_fn write, tinybuf_plugin_dump_fn dump, tinybuf_plugin_show_value_fn show_value)
 {
-    if (!types || type_count <= 0 || !read)
+    if (!tags || tag_count <= 0 || !read)
         return -1;
     if (s_plugins_count == s_plugins_capacity)
     {
@@ -55,9 +55,9 @@ int tinybuf_plugin_register(const uint8_t *types, int type_count, tinybuf_plugin
         s_plugins_capacity = newcap;
     }
     plugin_entry e;
-    e.types = (uint8_t *)tinybuf_malloc(type_count);
-    memcpy(e.types, types, (size_t)type_count);
-    e.type_count = type_count;
+    e.tags = (uint8_t *)tinybuf_malloc(tag_count);
+    memcpy(e.tags, tags, (size_t)tag_count);
+    e.tag_count = tag_count;
     e.guid = NULL;
     e.read = read;
     e.write = write;
@@ -80,7 +80,7 @@ int tinybuf_plugin_unregister_all(void)
 {
     for (int i = 0; i < s_plugins_count; ++i)
     {
-        tinybuf_free(s_plugins[i].types);
+        tinybuf_free(s_plugins[i].tags);
     }
     tinybuf_free(s_plugins);
     s_plugins = NULL;
@@ -97,15 +97,15 @@ static inline void _push_plugin_msg(tinybuf_error *rr, int li)
     }
 }
 
-int tinybuf_plugins_try_read_by_type(uint8_t type, buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
+int tinybuf_plugins_try_read_by_tag(uint8_t tag, buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
 {
     for (int i = 0; i < s_plugins_count; ++i)
     {
-        for (int k = 0; k < s_plugins[i].type_count; ++k)
+        for (int k = 0; k < s_plugins[i].tag_count; ++k)
         {
-            if (s_plugins[i].types[k] == type)
+            if (s_plugins[i].tags[k] == tag)
             {
-                int n = s_plugins[i].read(type, buf, out, contain_handler, r);
+                int n = s_plugins[i].read(tag, buf, out, contain_handler, r);
                 if (n > 0)
                     return n;
                 tinybuf_error er = tinybuf_result_err(n, "plugin read failed", NULL);
@@ -115,20 +115,20 @@ int tinybuf_plugins_try_read_by_type(uint8_t type, buf_ref *buf, tinybuf_value *
             }
         }
     }
-    tinybuf_error er = tinybuf_result_err(-1, "plugin type not found", NULL);
+    tinybuf_error er = tinybuf_result_err(-1, "plugin tag not found", NULL);
     tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
     return -1;
 }
 
-int tinybuf_plugins_try_write(uint8_t type, const tinybuf_value *in, buffer *out, tinybuf_error *r)
+int tinybuf_plugins_try_write(uint8_t tag, const tinybuf_value *in, buffer *out, tinybuf_error *r)
 {
     for (int i = 0; i < s_plugins_count; ++i)
     {
-        for (int k = 0; k < s_plugins[i].type_count; ++k)
+        for (int k = 0; k < s_plugins[i].tag_count; ++k)
         {
-            if (s_plugins[i].types[k] == type)
+            if (s_plugins[i].tags[k] == tag)
             {
-                int n = s_plugins[i].write(type, in, out, r);
+                int n = s_plugins[i].write(tag, in, out, r);
                 if (n >= 0)
                     return n;
                 tinybuf_error er = tinybuf_result_err(n, "plugin write failed", NULL);
@@ -138,20 +138,20 @@ int tinybuf_plugins_try_write(uint8_t type, const tinybuf_value *in, buffer *out
             }
         }
     }
-    tinybuf_error er = tinybuf_result_err(-1, "plugin type not found", NULL);
+    tinybuf_error er = tinybuf_result_err(-1, "plugin tag not found", NULL);
     tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
     return -1;
 }
 
-int tinybuf_plugins_try_dump_by_type(uint8_t type, buf_ref *buf, buffer *out, tinybuf_error *r)
+int tinybuf_plugins_try_dump_by_tag(uint8_t tag, buf_ref *buf, buffer *out, tinybuf_error *r)
 {
     for (int i = 0; i < s_plugins_count; ++i)
     {
-        for (int k = 0; k < s_plugins[i].type_count; ++k)
+        for (int k = 0; k < s_plugins[i].tag_count; ++k)
         {
-            if (s_plugins[i].types[k] == type)
+            if (s_plugins[i].tags[k] == tag)
             {
-                int n = s_plugins[i].dump(type, buf, out, r);
+                int n = s_plugins[i].dump(tag, buf, out, r);
                 if (n > 0)
                     return n;
                 tinybuf_error er = tinybuf_result_err(n, "plugin dump failed", NULL);
@@ -161,20 +161,20 @@ int tinybuf_plugins_try_dump_by_type(uint8_t type, buf_ref *buf, buffer *out, ti
             }
         }
     }
-    tinybuf_error er = tinybuf_result_err(-1, "plugin type not found", NULL);
+    tinybuf_error er = tinybuf_result_err(-1, "plugin tag not found", NULL);
     tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
     return -1;
 }
 
-int tinybuf_plugins_try_show_value(uint8_t type, const tinybuf_value *in, buffer *out, tinybuf_error *r)
+int tinybuf_plugins_try_show_value(uint8_t tag, const tinybuf_value *in, buffer *out, tinybuf_error *r)
 {
     for (int i = 0; i < s_plugins_count; ++i)
     {
-        for (int k = 0; k < s_plugins[i].type_count; ++k)
+        for (int k = 0; k < s_plugins[i].tag_count; ++k)
         {
-            if (s_plugins[i].types[k] == type)
+            if (s_plugins[i].tags[k] == tag)
             {
-                int n = s_plugins[i].show_value(type, in, out, r);
+                int n = s_plugins[i].show_value(tag, in, out, r);
                 if (n > 0)
                     return n;
                 tinybuf_error er = tinybuf_result_err(n, "plugin show failed", NULL);
@@ -184,7 +184,7 @@ int tinybuf_plugins_try_show_value(uint8_t type, const tinybuf_value *in, buffer
             }
         }
     }
-    tinybuf_error er = tinybuf_result_err(-1, "plugin type not found", NULL);
+    tinybuf_error er = tinybuf_result_err(-1, "plugin tag not found", NULL);
     tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
     return -1;
 }
@@ -213,13 +213,13 @@ int tinybuf_plugin_set_runtime_map(const char **guids, int count)
     return 0;
 }
 
-static int plugin_list_index_by_type(uint8_t type)
+static int plugin_list_index_by_tag(uint8_t tag)
 {
     for (int i = 0; i < s_plugins_count; ++i)
     {
-        for (int k = 0; k < s_plugins[i].type_count; ++k)
+        for (int k = 0; k < s_plugins[i].tag_count; ++k)
         {
-            if (s_plugins[i].types[k] == type)
+            if (s_plugins[i].tags[k] == tag)
                 return i;
         }
     }
@@ -236,9 +236,9 @@ static int runtime_index_by_guid(const char *guid)
     }
     return -1;
 }
-int tinybuf_plugin_get_runtime_index_by_type(uint8_t type)
+int tinybuf_plugin_get_runtime_index_by_tag(uint8_t tag)
 {
-    int li = plugin_list_index_by_type(type);
+    int li = plugin_list_index_by_tag(tag);
     if (li < 0)
         return -1;
     const char *g = s_plugins[li].guid;
@@ -276,9 +276,9 @@ int tinybuf_plugin_do_value_op(int plugin_runtime_index, const char *name, tinyb
     }
     return -1;
 }
-int tinybuf_plugin_do_value_op_by_type(uint8_t type, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out)
+int tinybuf_plugin_do_value_op_by_tag(uint8_t tag, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out)
 {
-    int li = plugin_list_index_by_type(type);
+    int li = plugin_list_index_by_tag(tag);
     if (li < 0)
         return -1;
     plugin_entry *pe = &s_plugins[li];
@@ -303,7 +303,7 @@ int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_
         return 0;
     }
     uint8_t t = (uint8_t)buf->ptr[0];
-    int pr = tinybuf_plugins_try_read_by_type(t, buf, out, contain_handler, r);
+    int pr = tinybuf_plugins_try_read_by_tag(t, buf, out, contain_handler, r);
     if (pr != -1)
         return pr;
     int len = tinybuf_try_read_box(buf, out, contain_handler, r);
@@ -331,9 +331,9 @@ int tinybuf_plugin_register_from_dll(const char *dll_path)
         tinybuf_plugin_descriptor *d = getter();
         if (d)
         {
-            if (d->types && d->type_count > 0 && d->read)
+            if (d->tags && d->tag_count > 0 && d->read)
             {
-                r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
+                r = tinybuf_plugin_register(d->tags, d->tag_count, d->read, d->write, d->dump, d->show_value);
                 if (r == 0 && s_plugins_count > 0)
                 {
                     s_plugins[s_plugins_count - 1].guid = d->guid;
@@ -384,9 +384,9 @@ int tinybuf_plugin_register_from_dll(const char *dll_path)
         tinybuf_plugin_descriptor *d = getter();
         if (d)
         {
-            if (d->types && d->type_count > 0 && d->read)
+            if (d->tags && d->tag_count > 0 && d->read)
             {
-                r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
+                r = tinybuf_plugin_register(d->tags, d->tag_count, d->read, d->write, d->dump, d->show_value);
                 if (r == 0 && s_plugins_count > 0)
                 {
                     s_plugins[s_plugins_count - 1].guid = d->guid;
@@ -432,9 +432,9 @@ const char *tinybuf_plugin_get_guid(int index)
 }
 int tinybuf_plugin_register_descriptor(const tinybuf_plugin_descriptor *d)
 {
-    if (!d || !d->types || d->type_count <= 0 || !d->read)
+    if (!d || !d->tags || d->tag_count <= 0 || !d->read)
         return -1;
-    int r = tinybuf_plugin_register(d->types, d->type_count, d->read, d->write, d->dump, d->show_value);
+    int r = tinybuf_plugin_register(d->tags, d->tag_count, d->read, d->write, d->dump, d->show_value);
     if (r == 0 && s_plugins_count > 0)
     {
         s_plugins[s_plugins_count - 1].guid = d->guid;

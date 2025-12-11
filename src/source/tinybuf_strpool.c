@@ -93,7 +93,7 @@ int strpool_write_tail(buffer *out, tinybuf_error *r)
     }
     int before = buffer_get_length_inline(out);
     {
-        int r0 = try_write_type(out, 27, r);
+        int r0 = try_write_type(out, serialize_str_trie_pool, r);
         if (r0 <= 0)
             return r0;
     } /* trie pool */

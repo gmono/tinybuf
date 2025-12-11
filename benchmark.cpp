@@ -9,6 +9,7 @@ extern "C"{
     #include "static_oop.h"
     #include "dyn_sys.h"
 }
+#include "tb_lock.h"
 #include <catch2/catch_test_macros.hpp>
 
 // OOP infra demonstration types and trait (pure C-style macros)

@@ -136,6 +136,7 @@ TEST_CASE("system.extend plugin handles dataframe", "[plugin]")
 }
 #endif
 
+#ifndef DISABLE_INDEXED_TENSOR_TEST
 TEST_CASE("indexed_tensor roundtrip", "[tensor]")
 {
     tinybuf_set_use_strpool(1);
@@ -200,6 +201,7 @@ TEST_CASE("indexed_tensor roundtrip", "[tensor]")
     tinybuf_set_use_strpool(0);
     LOGI("case end: unit dataframe");
 }
+#endif
 
 TEST_CASE("custom result wrappers", "[result]")
 {

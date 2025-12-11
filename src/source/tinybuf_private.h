@@ -156,8 +156,8 @@ static inline void maybe_validate(buf_ref *buf)
 }
 
 // internal write helpers used across modules
-tinybuf_error try_write_type(buffer *out, serialize_type type);
-tinybuf_error try_write_int_data(int isneg, buffer *out, uint64_t val);
+int try_write_type(buffer *out, serialize_type type, tinybuf_error *r);
+int try_write_int_data(int isneg, buffer *out, uint64_t val, tinybuf_error *r);
 int try_write_pointer_value(buffer *out, enum offset_type t, int64_t offset, tinybuf_error *r);
 int tinybuf_value_serialize(const tinybuf_value *value, buffer *out, tinybuf_error *r);
 int dump_int(uint64_t len, buffer *out);

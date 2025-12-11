@@ -15,7 +15,9 @@
 # 测试结果截图
 ![image](https://user-images.githubusercontent.com/11495632/65878363-8076b500-e3c0-11e9-807a-c2ef51efe11c.png)
 
-
+# 系统支持
+1. Windows上首选支持VC
+2. Linux使用Gcc测试
 # 计划 
 1. 完成基本系统
 2. 完善oop类型系统 trait系统 函数签名系统 （参数表对象  函数描述子对象 支持参数类型校验）

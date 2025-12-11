@@ -2,9 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ "**" ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ "**" ]
+  workflow_dispatch:
 
 jobs:
   build-and-test:
@@ -68,4 +69,5 @@ jobs:
       - name: Run Aggregated Tests (Windows)
         if: matrix.os == 'windows-latest'
         shell: powershell
-        run: & build\bin\Release\all_test.exe "~[benchmark]"
+        run: |
+          & build\bin\Release\all_test.exe "~[benchmark]"

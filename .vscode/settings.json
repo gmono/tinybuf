@@ -107,6 +107,7 @@
         "tinybuf_buffer.h": "c",
         "regex": "cpp",
         "common.h": "c",
-        "*.inc": "c"
+        "*.inc": "c",
+        "dyncall.h": "c"
     }
 }

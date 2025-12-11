@@ -1,6 +1,7 @@
 #include "tinybuf.h"
 #include "tinybuf_plugin.h"
 #include "tinybuf_buffer.h"
+#include "tinybuf_memory.h"
 #include <stdio.h>
 #include <string.h>
 #include "kvec.h"
@@ -200,7 +201,7 @@ static int tuple_write(const char *name, const tinybuf_value *in, buffer *out, t
         tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
         return -1;
     }
-    int n = try_write_box(out, in, r);
+    int n = tinybuf_value_serialize(in, out, r);
     return n;
 }
 static int tuple_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error *r)
@@ -305,12 +306,61 @@ static int hlist_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error
 static int dataframe_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
 {
     (void)name;
-    buf_ref br = (buf_ref){(const char *)data, (int64_t)len, (const char *)data, (int64_t)len};
-    tinybuf_result_add_msg_const(r, "dataframe_read begin");
-    int n = tinybuf_try_read_box(&br, out, contain_handler, r);
+    {
+    }
+    tinybuf_value *tmp = tinybuf_value_alloc();
+    int n = tinybuf_value_deserialize((const char *)data, len, tmp, r);
     if (n <= 0)
+    {
         tinybuf_result_add_msg_const(r, "dataframe_read_r");
-    return n;
+        tinybuf_value_free(tmp);
+        return n;
+    }
+    if (tinybuf_value_get_type(tmp) == tinybuf_indexed_tensor)
+    {
+        *out = *tmp;
+        return n;
+    }
+    if (tinybuf_value_get_type(tmp) == tinybuf_tensor)
+    {
+        tinybuf_value_init_indexed_tensor(out, tmp, NULL, 0);
+        tinybuf_value_free(tmp);
+        return n;
+    }
+    if (tinybuf_value_get_type(tmp) == tinybuf_array)
+    {
+        tinybuf_error rr = tinybuf_result_ok(0);
+        int nchild = tinybuf_value_get_child_size(tmp, &rr);
+        if (nchild <= 0)
+        {
+            tinybuf_result_add_msg_const(r, "dataframe_read array has no children");
+            tinybuf_value_free(tmp);
+            return -1;
+        }
+        tinybuf_value *ten = tinybuf_value_get_array_child(tmp, 0, &rr);
+        if (!ten)
+        {
+            tinybuf_value_free(tmp);
+            return -1;
+        }
+        int dims = nchild - 1;
+        const tinybuf_value **indices = NULL;
+        if (dims > 0)
+        {
+            indices = (const tinybuf_value **)tinybuf_malloc(sizeof(const tinybuf_value *) * (size_t)dims);
+            for (int i = 0; i < dims; ++i)
+            {
+                const tinybuf_value *idx = tinybuf_value_get_array_child(tmp, i + 1, &rr);
+                indices[i] = idx;
+            }
+        }
+        tinybuf_value_init_indexed_tensor(out, ten, indices, dims);
+        if (indices) tinybuf_free((void *)indices);
+        return n;
+    }
+    /* unsupported payload type */
+    tinybuf_value_free(tmp);
+    return -1;
 }
 static int dataframe_write(const char *name, const tinybuf_value *in, buffer *out, tinybuf_error *r)
 {
@@ -321,8 +371,9 @@ static int dataframe_write(const char *name, const tinybuf_value *in, buffer *ou
         tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
         return -1;
     }
-    tinybuf_result_add_msg_const(r, "dataframe_write begin");
-    int n2 = try_write_box(out, in, r);
+    {
+    }
+    int n2 = tinybuf_value_serialize(in, out, r);
     if (n2 <= 0)
         tinybuf_result_add_msg_const(r, "dataframe_write_r");
     return n2;
@@ -342,7 +393,6 @@ TB_EXPORT int tinybuf_plugin_init(void)
 {
     tinybuf_custom_register("hetero_tuple", tuple_read, tuple_write, tuple_dump);
     tinybuf_custom_register("hetero_list", hlist_read, hlist_write, hlist_dump);
-    tinybuf_custom_register("dataframe", dataframe_read, dataframe_write, dataframe_dump);
     return 0;
 }
 
@@ -350,7 +400,6 @@ TB_EXPORT int tinybuf_plugin_init_with_host(int (*host_custom_register)(const ch
 {
     host_custom_register("hetero_tuple", tuple_read, tuple_write, tuple_dump);
     host_custom_register("hetero_list", hlist_read, hlist_write, hlist_dump);
-    host_custom_register("dataframe", dataframe_read, dataframe_write, dataframe_dump);
     return 0;
 }
 

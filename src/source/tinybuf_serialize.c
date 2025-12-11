@@ -321,14 +321,20 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out, tinybuf_err
         }
         char type = serialize_indexed_tensor;
         buffer_append(out, &type, 1);
-        { (void)try_write_box(out, it->tensor, r); }
+        {
+            int nt = tinybuf_value_serialize(it->tensor, out, r);
+            if (nt <= 0) return nt;
+        }
         dump_int((uint64_t)it->dims, out);
         for (int i = 0; i < it->dims; ++i)
         {
             if (it->indices && it->indices[i])
             {
                 dump_int(1, out);
-                { (void)try_write_box(out, it->indices[i], r); }
+                {
+                    int ni = tinybuf_value_serialize(it->indices[i], out, r);
+                    if (ni <= 0) return ni;
+                }
             }
             else
             {

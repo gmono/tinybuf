@@ -554,9 +554,7 @@ int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf
     tinybuf_error wr_local = tinybuf_result_ok(0);
     int wlen = tinybuf_custom_try_write(name, in, payload, &wr_local);
     {
-        char *dbg = (char *)tinybuf_malloc(64);
-        snprintf(dbg, 64, "custom payload %s wlen=%d", (wlen > 0 ? "ok" : "fail"), wlen);
-        tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+        (void)wlen;
     }
     dump_int((uint64_t)(wlen > 0 ? wlen : 0), body);
     if (wlen > 0)

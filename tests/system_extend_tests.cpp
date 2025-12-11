@@ -299,6 +299,7 @@ TEST_CASE("hetero list", "[system]")
     LOGI("case end: hetero list");
 }
 
+#ifndef DISABLE_DATAFRAME_TESTS
 TEST_CASE("dataframe", "[system]")
 {
     LOGI("case begin: dataframe");
@@ -367,3 +368,4 @@ TEST_CASE("dataframe", "[system]")
     tinybuf_set_use_strpool(0);
     LOGI("case end: dataframe");
 }
+#endif

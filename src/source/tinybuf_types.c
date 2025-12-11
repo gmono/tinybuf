@@ -7,32 +7,64 @@
 int tinybuf_tensor_get_dtype(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
-    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: not tensor"); return -1; }
-    tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
+    const tinybuf_value *v = value;
+    if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: null"); return -1; }
+    if(v->_type == tinybuf_indexed_tensor)
+    {
+        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)v->_data._custom;
+        v = it ? it->tensor : NULL;
+        if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: no inner tensor"); return -1; }
+    }
+    if(v->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: not tensor"); return -1; }
+    tinybuf_tensor_t *t = (tinybuf_tensor_t*)v->_data._custom;
     return t ? t->dtype : -1;
 }
 
 int tinybuf_tensor_get_ndim(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
-    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: not tensor"); return -1; }
-    tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
+    const tinybuf_value *v = value;
+    if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: null"); return -1; }
+    if(v->_type == tinybuf_indexed_tensor)
+    {
+        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)v->_data._custom;
+        v = it ? it->tensor : NULL;
+        if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: no inner tensor"); return -1; }
+    }
+    if(v->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: not tensor"); return -1; }
+    tinybuf_tensor_t *t = (tinybuf_tensor_t*)v->_data._custom;
     return t ? t->dims : -1;
 }
 
 const int64_t* tinybuf_tensor_get_shape(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
-    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: not tensor"); return NULL; }
-    tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
+    const tinybuf_value *v = value;
+    if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: null"); return NULL; }
+    if(v->_type == tinybuf_indexed_tensor)
+    {
+        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)v->_data._custom;
+        v = it ? it->tensor : NULL;
+        if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: no inner tensor"); return NULL; }
+    }
+    if(v->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: not tensor"); return NULL; }
+    tinybuf_tensor_t *t = (tinybuf_tensor_t*)v->_data._custom;
     return t ? t->shape : NULL;
 }
 
 int64_t tinybuf_tensor_get_count(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
-    if(!value || value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: not tensor"); return -1; }
-    tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
+    const tinybuf_value *v = value;
+    if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: null"); return -1; }
+    if(v->_type == tinybuf_indexed_tensor)
+    {
+        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)v->_data._custom;
+        v = it ? it->tensor : NULL;
+        if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: no inner tensor"); return -1; }
+    }
+    if(v->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: not tensor"); return -1; }
+    tinybuf_tensor_t *t = (tinybuf_tensor_t*)v->_data._custom;
     return t ? t->count : -1;
 }
 

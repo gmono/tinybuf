@@ -663,6 +663,7 @@ static int plugin_upper_show_value(uint8_t type, const tinybuf_value *in, buffer
 
 #ifdef _WIN32
 #include <windows.h>
+#include <crtdbg.h>
 typedef tinybuf_plugin_descriptor *(*get_desc_fn)(void);
 int tinybuf_plugin_register_from_dll(const char *dll_path)
 {
@@ -864,9 +865,6 @@ int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tiny
     if (idx >= 0 && s_customs[idx].read)
     {
         {
-            char *dbg = (char *)tinybuf_malloc(64);
-            snprintf(dbg, 64, "custom_read begin name=%s len=%d", name ? name : "(null)", len);
-            tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
         }
         int rr = s_customs[idx].read(name, data, len, out, contain_handler, r);
         if (rr > 0)
@@ -888,9 +886,6 @@ int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tiny
     if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && oread)
     {
         {
-            char *dbg = (char *)tinybuf_malloc(64);
-            snprintf(dbg, 64, "oop_read begin name=%s len=%d", name ? name : "(null)", len);
-            tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
         }
         int rr = oread(name, data, len, out, contain_handler, r);
         if (rr > 0)
@@ -918,7 +913,8 @@ int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *
     int idx = custom_index_by_name(name);
     if (idx >= 0 && s_customs[idx].write)
     {
-        tinybuf_result_add_msg_const(r, "custom_write begin");
+        {
+        }
         int rr = s_customs[idx].write(name, in, out, r);
         if (rr > 0)
         {
@@ -934,7 +930,8 @@ int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *
     tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
     if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && owrite)
     {
-        tinybuf_result_add_msg_const(r, "oop_write begin");
+        {
+        }
         int rr = owrite(name, in, out, r);
         if (rr > 0)
         {
@@ -1179,6 +1176,19 @@ static void register_system_extend(void) { /* moved to DLL plugin: system_extend
 
 int tinybuf_register_builtin_plugins(void)
 {
+    {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+#if defined(_MSC_VER)
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+        _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+        _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+        _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
+        _set_error_mode(_OUT_TO_STDERR);
+#endif
+    }
     uint8_t types[1] = {TINYBUF_PLUGIN_UPPER_STRING};
     int r = tinybuf_plugin_register(types, 1, plugin_upper_read, plugin_upper_write, plugin_upper_dump, plugin_upper_show_value);
     if (r == 0)

@@ -108,6 +108,7 @@
         "regex": "cpp",
         "common.h": "c",
         "*.inc": "c",
-        "dyncall.h": "c"
+        "dyncall.h": "c",
+        "*.txt": "cpp"
     }
 }

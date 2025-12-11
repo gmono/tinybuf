@@ -30,6 +30,10 @@ if(NOT Catch2_FOUND)
     FetchContent_MakeAvailable(Catch2)
 endif()
 
+if(WIN32 AND NOT MSVC)
+    message(FATAL_ERROR "Windows仅支持MSVC编译")
+endif()
+
 
 
 
@@ -80,7 +84,7 @@ endif()
 add_executable(benchmark benchmark.cpp tests/catch_test_logger.cpp)
 add_executable(sys_tests tests/system_extend_tests.cpp tests/catch_test_logger.cpp)
 add_executable(unit_tests tests/unit/system_extend_plugin_tests.cpp tests/catch_test_logger.cpp)
-add_executable(all_tests tests/system_extend_tests.cpp tests/unit/system_extend_plugin_tests.cpp benchmark.cpp tests/catch_test_logger.cpp)
+add_executable(all_test tests/system_extend_tests.cpp tests/unit/system_extend_plugin_tests.cpp tests/unit/hole_string_tests.cpp tests/catch_test_logger.cpp)
 
 add_library(upper_plugin SHARED ${Source_Root}/../src/plugins/upper_plugin.c)
 add_library(system_extend SHARED ${Source_Root}/../src/plugins/system_extend.c)
@@ -98,9 +102,9 @@ if(MSVC)
     target_link_libraries(benchmark jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
     target_link_libraries(sys_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
     target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain ws2_32)
-    target_link_libraries(all_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
+    target_link_libraries(all_test jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
     target_compile_definitions(sys_tests PRIVATE DISABLE_DATAFRAME_TESTS)
-    target_compile_definitions(all_tests PRIVATE DISABLE_DATAFRAME_TESTS DISABLE_INDEXED_TENSOR_TEST)
+    target_compile_definitions(all_test PRIVATE DISABLE_DATAFRAME_TESTS DISABLE_INDEXED_TENSOR_TEST)
     target_link_libraries(upper_plugin tinybuf dyn_sys ws2_32)
     target_link_libraries(system_extend tinybuf dyn_sys ws2_32)
 else()
@@ -113,9 +117,9 @@ else()
     target_link_libraries(benchmark jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ${EXTRA_LIBS})
     target_link_libraries(sys_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ${EXTRA_LIBS})
     target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain ${EXTRA_LIBS})
-    target_link_libraries(all_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ${EXTRA_LIBS})
+    target_link_libraries(all_test jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ${EXTRA_LIBS})
     target_compile_definitions(sys_tests PRIVATE DISABLE_DATAFRAME_TESTS)
-    target_compile_definitions(all_tests PRIVATE DISABLE_DATAFRAME_TESTS DISABLE_INDEXED_TENSOR_TEST)
+    target_compile_definitions(all_test PRIVATE DISABLE_DATAFRAME_TESTS DISABLE_INDEXED_TENSOR_TEST)
     target_link_libraries(upper_plugin tinybuf dyn_sys ${EXTRA_LIBS})
     target_link_libraries(system_extend tinybuf dyn_sys ${EXTRA_LIBS})
 endif()
@@ -123,8 +127,8 @@ endif()
 add_custom_command(TARGET system_extend POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins"
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
-    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:all_tests>/../tinybuf_plugins"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:all_tests>/../tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:all_test>/../tinybuf_plugins"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:all_test>/../tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:sys_tests>/../tinybuf_plugins"
     COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:sys_tests>/../tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:unit_tests>/../tinybuf_plugins"
@@ -144,8 +148,8 @@ add_test(NAME benchmark COMMAND $<TARGET_FILE:benchmark>)
 set_tests_properties(benchmark PROPERTIES LABELS "benchmark;performance" DISABLED TRUE TIMEOUT 120)
 
 # 汇总所有测试一次性运行
-add_test(NAME all_tests COMMAND $<TARGET_FILE:all_tests> "~[benchmark]" "~[plugin]")
-set_tests_properties(all_tests PROPERTIES TIMEOUT 120 LABELS "all")
+add_test(NAME all_test COMMAND $<TARGET_FILE:all_test> "~[benchmark]")
+set_tests_properties(all_test PROPERTIES TIMEOUT 180 LABELS "all")
 
 
 

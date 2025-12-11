@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "tinybuf.h"
 #include "tinybuf_plugin.h"
+#include "dyn_sys.h"
 #include "tinybuf_buffer.h"
 #include "tinybuf_log.h"
 #include <sstream>
@@ -14,13 +15,16 @@ TEST_CASE("system.extend plugin loads and handles hetero_tuple", "[plugin]")
 {
     LOGI("case begin: unit hetero_tuple");
     tinybuf_set_use_strpool(1);
-    tinybuf_register_builtin_plugins();
+    tinybuf_init();
 #ifdef _WIN32
-    int pl = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    const char *plugin_path = "../tinybuf_plugins/system_extend.dll";
+#else
+    const char *plugin_path = "../tinybuf_plugins/libsystem_extend.so";
+#endif
+    int pl = tinybuf_plugin_register_from_dll(plugin_path);
     INFO("plugin_load_ret=" << pl);
     LOGI("plugin register ret=%d", pl);
     REQUIRE(pl == 0);
-#endif
     tinybuf_value *arr = tinybuf_value_alloc();
     tinybuf_value *i = tinybuf_value_alloc();
     tinybuf_value_init_int(i, 7);
@@ -69,13 +73,16 @@ TEST_CASE("system.extend plugin handles dataframe", "[plugin]")
 {
     LOGI("case begin: unit dataframe");
     tinybuf_set_use_strpool(1);
-    tinybuf_register_builtin_plugins();
+    tinybuf_init();
 #ifdef _WIN32
-    int pl = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    const char *plugin_path2 = "../tinybuf_plugins/system_extend.dll";
+#else
+    const char *plugin_path2 = "../tinybuf_plugins/libsystem_extend.so";
+#endif
+    int pl = tinybuf_plugin_register_from_dll(plugin_path2);
     INFO("plugin_load_ret=" << pl);
     LOGI("plugin register ret=%d", pl);
     REQUIRE(pl == 0);
-#endif
     int64_t shape[2] = {2, 2};
     double data[4] = {1.0, 2.0, 3.0, 4.0};
     tinybuf_value *ten = tinybuf_value_alloc();

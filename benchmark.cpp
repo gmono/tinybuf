@@ -5,33 +5,31 @@
 #include "tinybuf.h"
 #include "tinybuf_plugin.h"
 #include "tinybuf_log.h"
-#include "tinybuf_oop.h"
+extern "C"{
+    #include "static_oop.h"
+    #include "dyn_sys.h"
+}
 #include <catch2/catch_test_macros.hpp>
 
-// OOP infra demonstration types and trait
+// OOP infra demonstration types and trait (pure C-style macros)
 TB_STRUCT_BEGIN(Counter)
 int v;
 tb_spinlock_t lk;
 TB_STRUCT_END(Counter)
 
-TB_STATIC_DEF(Counter, Counter, make)
+TB_STATIC_DEF(Counter, Counter_make)
 {
     Counter c;
     c.v = 0;
     tb_spinlock_init(&c.lk);
     return c;
 }
-TB_METHOD_DEF(Counter, void, add, int x)
+TB_METHOD_DEF(Counter, void, Counter_add, int x)
 {
     TB_WITH_LOCK(self->lk) { self->v += x; }
 }
 
-TB_TRAIT_BEGIN(Addable)
-TB_TRAIT_METHOD(void, add, int x)
-TB_TRAIT_END(Addable)
-
-static const Addable_vtable Counter_Addable_vt = {(void (*)(void *, int))Counter_add};
-TB_TRAIT_IMPL(Counter, Addable, Counter_Addable_vt);
+TB_TRAIT(Addable);
 #include "jsoncpp/json.h"
 #include <sstream>
 #ifndef _WIN32

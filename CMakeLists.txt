@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.10)
 project(tinybuf)
 
 
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE AND DEFINED ENV{VCPKG_ROOT})
     set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
 endif()
@@ -10,19 +18,16 @@ endif()
 if(DEFINED ENV{VCPKG_ROOT})
     if(DEFINED ENV{VCPKG_DEFAULT_TRIPLET})
         list(APPEND CMAKE_PREFIX_PATH "$ENV{VCPKG_ROOT}/installed/$ENV{VCPKG_DEFAULT_TRIPLET}")
-    else()
-        list(APPEND CMAKE_PREFIX_PATH "$ENV{VCPKG_ROOT}/installed/x64-windows")
     endif()
 endif()
-if(MINGW)
-    include(FetchContent)
+include(FetchContent)
+find_package(Catch2 QUIET)
+if(NOT Catch2_FOUND)
     FetchContent_Declare(
         Catch2
         URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.5.0.zip
     )
     FetchContent_MakeAvailable(Catch2)
-else()
-    find_package(Catch2 REQUIRED)
 endif()
 
 
@@ -41,6 +46,12 @@ set(Source_Root ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 #设置头文件目录
 INCLUDE_DIRECTORIES(${Source_Root}/include)
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/dyncall-1.4)
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/dyncall-1.4/dyncall)
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/dyncall-1.4/dyncallback)
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/dyncall-1.4/dynload)
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys)
+INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/src/static_oop)
 INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/)
 
 
@@ -49,7 +60,20 @@ file(GLOB tinybuf_src_Root ${Source_Root}/source/*.c)
 file(GLOB json_src_Root ${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/jsoncpp/*.cpp)
 
 add_library(tinybuf STATIC ${tinybuf_src_Root})
+add_library(dyn_sys STATIC src/dyn_sys/dyn_sys.c)
+target_link_libraries(tinybuf PUBLIC dyn_sys)
 add_library(jsoncpp STATIC ${json_src_Root})
+set(DYNCALL_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/dyncall-1.4)
+if(EXISTS ${DYNCALL_ROOT}/CMakeLists.txt)
+    add_subdirectory(${DYNCALL_ROOT} ${CMAKE_CURRENT_BINARY_DIR}/3rdpart/dyncall)
+    target_link_libraries(tinybuf PUBLIC dyncall_s dyncallback_s dynload_s)
+endif()
+set(DYNCALL_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/dyncall-1.4)
+if(EXISTS ${DYNCALL_ROOT}/dyncall/dyncall.h)
+    message(STATUS "Using local dyncall at ${DYNCALL_ROOT}")
+else()
+    message(WARNING "dyncall not found under 3rdpart/dyncall-1.4; headers configured, library not built")
+endif()
 
 add_executable(benchmark benchmark.cpp tests/catch_test_logger.cpp)
 add_executable(sys_tests tests/system_extend_tests.cpp tests/catch_test_logger.cpp)
@@ -73,8 +97,8 @@ if(MSVC)
     target_link_libraries(sys_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
     target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain ws2_32)
     target_link_libraries(all_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ws2_32)
-    target_link_libraries(upper_plugin tinybuf ws2_32)
-    target_link_libraries(system_extend tinybuf ws2_32)
+    target_link_libraries(upper_plugin tinybuf dyn_sys ws2_32)
+    target_link_libraries(system_extend tinybuf dyn_sys ws2_32)
 else()
     set(EXTRA_LIBS)
     if(UNIX)
@@ -86,24 +110,21 @@ else()
     target_link_libraries(sys_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ${EXTRA_LIBS})
     target_link_libraries(unit_tests jsoncpp tinybuf Catch2::Catch2WithMain ${EXTRA_LIBS})
     target_link_libraries(all_tests jsoncpp tinybuf Catch2::Catch2WithMain ${LINK_LIST} ${EXTRA_LIBS})
-    target_link_libraries(upper_plugin tinybuf ${EXTRA_LIBS})
-    target_link_libraries(system_extend tinybuf ${EXTRA_LIBS})
+    target_link_libraries(upper_plugin tinybuf dyn_sys ${EXTRA_LIBS})
+    target_link_libraries(system_extend tinybuf dyn_sys ${EXTRA_LIBS})
 endif()
 
 add_custom_command(TARGET system_extend POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins/"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:benchmark>/../tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:all_tests>/../tinybuf_plugins"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:all_tests>/../tinybuf_plugins/"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:all_tests>/../tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:sys_tests>/../tinybuf_plugins"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:sys_tests>/../tinybuf_plugins/"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:sys_tests>/../tinybuf_plugins/system_extend.dll"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:sys_tests>/../tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:unit_tests>/../tinybuf_plugins"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:unit_tests>/../tinybuf_plugins/"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:unit_tests>/../tinybuf_plugins/system_extend.dll"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "$<TARGET_FILE_DIR:unit_tests>/../tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
     COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_SOURCE_DIR}/tinybuf_plugins"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "${CMAKE_CURRENT_SOURCE_DIR}/tinybuf_plugins/"
-    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "${CMAKE_CURRENT_SOURCE_DIR}/tinybuf_plugins/system_extend.dll"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:system_extend>" "${CMAKE_CURRENT_SOURCE_DIR}/tinybuf_plugins/$<TARGET_FILE_NAME:system_extend>"
 )
 
 enable_testing()
@@ -125,6 +146,3 @@ set_tests_properties(all_tests PROPERTIES TIMEOUT 120 LABELS "all")
 
 
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)

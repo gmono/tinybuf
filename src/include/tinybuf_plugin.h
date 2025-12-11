@@ -12,7 +12,6 @@ extern "C"
     typedef int (*tinybuf_plugin_write_fn)(uint8_t type, const tinybuf_value *in, buffer *out, tinybuf_error *r);
     typedef int (*tinybuf_plugin_dump_fn)(uint8_t type, buf_ref *buf, buffer *out, tinybuf_error *r);
     typedef int (*tinybuf_plugin_show_value_fn)(uint8_t type, const tinybuf_value *in, buffer *out, tinybuf_error *r);
-    typedef int (*tinybuf_plugin_value_op_fn)(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out);
     typedef struct
     {
         const uint8_t *types;
@@ -47,16 +46,6 @@ extern "C"
     int tinybuf_plugin_register_from_dll(const char *dll_path);
     int tinybuf_plugin_scan_dir(const char *dir);
 
-    int tinybuf_oop_register_type(const char *type_name);
-    int tinybuf_oop_get_type_count(void);
-    const char *tinybuf_oop_get_type_name(int index);
-    int tinybuf_oop_register_op(const char *type_name, const char *op_name, const char *sig, const char *desc, tinybuf_plugin_value_op_fn fn);
-    int tinybuf_oop_get_op_count(const char *type_name);
-    int tinybuf_oop_get_op_meta(const char *type_name, int index, const char **name, const char **sig, const char **desc);
-    int tinybuf_oop_do_op(const char *type_name, const char *op_name, tinybuf_value *self, const tinybuf_value *args, tinybuf_value *out);
-    int tinybuf_oop_attach_serializers(const char *type_name, tinybuf_custom_read_fn read, tinybuf_custom_write_fn write, tinybuf_custom_dump_fn dump);
-    int tinybuf_oop_register_types_to_custom(void);
-    int tinybuf_oop_set_serializable(const char *type_name, int serializable);
 
 #ifdef __cplusplus
 }
@@ -69,4 +58,11 @@ extern "C"
 /* compatibility macros for _r suffixed plugin APIs used in tests */
 #define tinybuf_try_read_box_with_plugins_r(buf, out, contain) tinybuf_try_read_box_with_plugins((buf), (out), (contain))
 #define tinybuf_plugins_try_write_r(out, val, r) tinybuf_try_write_box((out), (val), (r))
+#endif
+#if !defined(TB_EXPORT)
+#  if defined(_WIN32) || defined(__CYGWIN__)
+#    define TB_EXPORT __declspec(dllexport)
+#  else
+#    define TB_EXPORT __attribute__((visibility("default")))
+#  endif
 #endif

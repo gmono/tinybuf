@@ -91,6 +91,8 @@ extern "C"
 
     int tinybuf_init(void);
 
+    typedef int (*tinybuf_plugin_value_op_fn)(tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out);
+
 /* compatibility macros for _r suffixed APIs used in C++ tests */
 #define tinybuf_try_read_box_r(buf, out, contain, res) tinybuf_try_read_box((buf), (out), (contain), (res))
 #define tinybuf_try_read_box_with_mode_r(buf, out, contain, mode, res) tinybuf_try_read_box_with_mode((buf), (out), (contain), (mode), (res))

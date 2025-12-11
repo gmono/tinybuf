@@ -38,3 +38,43 @@ jobs:
       - name: Build
         run: |
           ninja -C build
+
+      - name: Test
+        run: |
+          ctest --test-dir build --output-on-failure
+
+  windows-build:
+    runs-on: windows-latest
+    env:
+      VCPKG_ROOT: ${{ github.workspace }}\\vcpkg
+      VCPKG_DEFAULT_TRIPLET: x64-windows
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        shell: powershell
+        run: |
+          choco install ninja --no-progress -y
+
+      - name: Install vcpkg
+        shell: powershell
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
+          & "$env:VCPKG_ROOT\\bootstrap-vcpkg.bat" -disableMetrics
+          & "$env:VCPKG_ROOT\\vcpkg.exe" install catch2:x64-windows
+
+      - name: Configure
+        shell: powershell
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\\scripts\\buildsystems\\vcpkg.cmake" -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        shell: powershell
+        run: |
+          ninja -C build
+
+      - name: Test
+        shell: powershell
+        run: |
+          ctest --test-dir build --output-on-failure

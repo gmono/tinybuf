@@ -1,5 +1,6 @@
 // plugin system implementation compatible with core tryread/trywrite
 #include "tinybuf_plugin.h"
+#include "dyn_sys.h"
 #include "tinybuf.h"
 #include "tinybuf_buffer.h"
 #include "tinybuf_memory.h"
@@ -808,24 +809,7 @@ static custom_entry *s_customs = NULL;
 static int s_customs_count = 0;
 static int s_customs_capacity = 0;
 
-typedef struct
-{
-    char *name;
-    char **op_names;
-    char **op_sigs;
-    char **op_descs;
-    tinybuf_plugin_value_op_fn *op_fns;
-    int op_count;
-    int op_cap;
-    tinybuf_custom_read_fn read;
-    tinybuf_custom_write_fn write;
-    tinybuf_custom_dump_fn dump;
-    int is_serializable;
-} oop_entry;
-static oop_entry *s_oop = NULL;
-static int s_oop_count = 0;
-static int s_oop_cap = 0;
-static int oop_index_by_name(const char *name);
+/* runtime OOP moved to dyn_sys */
 
 static int custom_index_by_name(const char *name)
 {
@@ -876,11 +860,10 @@ static inline tinybuf_error _make_err(const char *msg, int res) { return tinybuf
 
 int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
 {
-    int idx = custom_index_by_name(name);
-    int oi = oop_index_by_name(name);
-    if (oi >= 0 && s_oop[oi].is_serializable && s_oop[oi].read)
+    tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
+    if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && oread)
     {
-        int rr = s_oop[oi].read(name, data, len, out, contain_handler, r);
+        int rr = oread(name, data, len, out, contain_handler, r);
         if (rr > 0)
         {
             tinybuf_error ok = tinybuf_result_ok(rr);
@@ -896,6 +879,7 @@ int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tiny
         tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
         return rr;
     }
+    int idx = custom_index_by_name(name);
     if (idx >= 0 && s_customs[idx].read)
     {
         int rr = s_customs[idx].read(name, data, len, out, contain_handler, r);
@@ -921,11 +905,10 @@ int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tiny
 
 int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *out, tinybuf_error *r)
 {
-    int idx = custom_index_by_name(name);
-    int oi = oop_index_by_name(name);
-    if (oi >= 0 && s_oop[oi].is_serializable && s_oop[oi].write)
+    tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
+    if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && owrite)
     {
-        int rr = s_oop[oi].write(name, in, out, r);
+        int rr = owrite(name, in, out, r);
         if (rr >= 0)
         {
             tinybuf_error ok = tinybuf_result_ok(rr);
@@ -937,6 +920,7 @@ int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *
         tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
         return rr;
     }
+    int idx = custom_index_by_name(name);
     if (idx >= 0 && s_customs[idx].write)
     {
         int rr = s_customs[idx].write(name, in, out, r);
@@ -958,11 +942,10 @@ int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *
 
 int tinybuf_custom_try_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error *r)
 {
-    int idx = custom_index_by_name(name);
-    int oi = oop_index_by_name(name);
-    if (oi >= 0 && s_oop[oi].is_serializable && s_oop[oi].dump)
+    tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
+    if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && odump)
     {
-        int rr = s_oop[oi].dump(name, buf, out, r);
+        int rr = odump(name, buf, out, r);
         if (rr > 0)
         {
             tinybuf_error ok = tinybuf_result_ok(rr);
@@ -974,6 +957,7 @@ int tinybuf_custom_try_dump(const char *name, buf_ref *buf, buffer *out, tinybuf
         tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
         return rr;
     }
+    int idx = custom_index_by_name(name);
     if (idx >= 0 && s_customs[idx].dump)
     {
         int rr = s_customs[idx].dump(name, buf, out, r);
@@ -1203,217 +1187,26 @@ int tinybuf_register_builtin_plugins(void)
     return r;
 }
 
-static int oop_index_by_name(const char *name)
-{
-    if (!name)
-        return -1;
-    for (int i = 0; i < s_oop_count; ++i)
-    {
-        if (s_oop[i].name && strcmp(s_oop[i].name, name) == 0)
-            return i;
-    }
-    return -1;
-}
-int tinybuf_oop_register_type(const char *type_name)
-{
-    if (!type_name)
-        return -1;
-    int idx = oop_index_by_name(type_name);
-    if (idx >= 0)
-        return 0;
-    if (s_oop_count == s_oop_cap)
-    {
-        int nc = s_oop_cap ? s_oop_cap * 2 : 8;
-        s_oop = (oop_entry *)tinybuf_realloc(s_oop, sizeof(oop_entry) * nc);
-        s_oop_cap = nc;
-    }
-    int tl = (int)strlen(type_name);
-    oop_entry e;
-    e.name = (char *)tinybuf_malloc(tl + 1);
-    memcpy(e.name, type_name, tl);
-    e.name[tl] = '\0';
-    e.op_names = NULL;
-    e.op_sigs = NULL;
-    e.op_descs = NULL;
-    e.op_fns = NULL;
-    e.op_count = 0;
-    e.op_cap = 0;
-    e.read = NULL;
-    e.write = NULL;
-    e.dump = NULL;
-    e.is_serializable = 0;
-    s_oop[s_oop_count++] = e;
-    return 0;
-}
-int tinybuf_oop_get_type_count(void) { return s_oop_count; }
-const char *tinybuf_oop_get_type_name(int index)
-{
-    if (index < 0 || index >= s_oop_count)
-        return NULL;
-    return s_oop[index].name;
-}
-static int oop_ensure_cap(int idx)
-{
-    if (idx < 0 || idx >= s_oop_count)
-        return -1;
-    if (s_oop[idx].op_count == s_oop[idx].op_cap)
-    {
-        int nc = s_oop[idx].op_cap ? s_oop[idx].op_cap * 2 : 4;
-        s_oop[idx].op_names = (char **)tinybuf_realloc(s_oop[idx].op_names, sizeof(char *) * nc);
-        s_oop[idx].op_sigs = (char **)tinybuf_realloc(s_oop[idx].op_sigs, sizeof(char *) * nc);
-        s_oop[idx].op_descs = (char **)tinybuf_realloc(s_oop[idx].op_descs, sizeof(char *) * nc);
-        s_oop[idx].op_fns = (tinybuf_plugin_value_op_fn *)tinybuf_realloc(s_oop[idx].op_fns, sizeof(tinybuf_plugin_value_op_fn) * nc);
-        s_oop[idx].op_cap = nc;
-    }
-    return 0;
-}
-int tinybuf_oop_register_op(const char *type_name, const char *op_name, const char *sig, const char *desc, tinybuf_plugin_value_op_fn fn)
-{
-    if (!type_name || !op_name || !fn)
-        return -1;
-    int idx = oop_index_by_name(type_name);
-    if (idx < 0)
-    {
-        if (tinybuf_oop_register_type(type_name) < 0)
-            return -1;
-        idx = oop_index_by_name(type_name);
-    }
-    for (int i = 0; i < s_oop[idx].op_count; ++i)
-    {
-        if (s_oop[idx].op_names[i] && strcmp(s_oop[idx].op_names[i], op_name) == 0)
-        {
-            s_oop[idx].op_sigs[i] = NULL;
-            if (sig)
-            {
-                int sl = (int)strlen(sig);
-                s_oop[idx].op_sigs[i] = (char *)tinybuf_malloc(sl + 1);
-                memcpy(s_oop[idx].op_sigs[i], sig, sl);
-                s_oop[idx].op_sigs[i][sl] = '\0';
-            }
-            s_oop[idx].op_descs[i] = NULL;
-            if (desc)
-            {
-                int dl = (int)strlen(desc);
-                s_oop[idx].op_descs[i] = (char *)tinybuf_malloc(dl + 1);
-                memcpy(s_oop[idx].op_descs[i], desc, dl);
-                s_oop[idx].op_descs[i][dl] = '\0';
-            }
-            s_oop[idx].op_fns[i] = fn;
-            return 0;
-        }
-    }
-    if (oop_ensure_cap(idx) < 0)
-        return -1;
-    int nl = (int)strlen(op_name);
-    s_oop[idx].op_names[s_oop[idx].op_count] = (char *)tinybuf_malloc(nl + 1);
-    memcpy(s_oop[idx].op_names[s_oop[idx].op_count], op_name, nl);
-    s_oop[idx].op_names[s_oop[idx].op_count][nl] = '\0';
-    s_oop[idx].op_sigs[s_oop[idx].op_count] = NULL;
-    if (sig)
-    {
-        int sl = (int)strlen(sig);
-        s_oop[idx].op_sigs[s_oop[idx].op_count] = (char *)tinybuf_malloc(sl + 1);
-        memcpy(s_oop[idx].op_sigs[s_oop[idx].op_count], sig, sl);
-        s_oop[idx].op_sigs[s_oop[idx].op_count][sl] = '\0';
-    }
-    s_oop[idx].op_descs[s_oop[idx].op_count] = NULL;
-    if (desc)
-    {
-        int dl = (int)strlen(desc);
-        s_oop[idx].op_descs[s_oop[idx].op_count] = (char *)tinybuf_malloc(dl + 1);
-        memcpy(s_oop[idx].op_descs[s_oop[idx].op_count], desc, dl);
-        s_oop[idx].op_descs[s_oop[idx].op_count][dl] = '\0';
-    }
-    s_oop[idx].op_fns[s_oop[idx].op_count] = fn;
-    s_oop[idx].op_count++;
-    return 0;
-}
-int tinybuf_oop_get_op_count(const char *type_name)
-{
-    int idx = oop_index_by_name(type_name);
-    if (idx < 0)
-        return -1;
-    return s_oop[idx].op_count;
-}
-int tinybuf_oop_get_op_meta(const char *type_name, int index, const char **name, const char **sig, const char **desc)
-{
-    int idx = oop_index_by_name(type_name);
-    if (idx < 0)
-        return -1;
-    if (index < 0 || index >= s_oop[idx].op_count)
-        return -1;
-    if (name)
-        *name = s_oop[idx].op_names[index];
-    if (sig)
-        *sig = s_oop[idx].op_sigs[index];
-    if (desc)
-        *desc = s_oop[idx].op_descs[index];
-    return 0;
-}
-static int oop_find_op_index(int idx, const char *op_name)
-{
-    if (idx < 0 || idx >= s_oop_count || !op_name)
-        return -1;
-    for (int i = 0; i < s_oop[idx].op_count; ++i)
-    {
-        if (s_oop[idx].op_names[i] && strcmp(s_oop[idx].op_names[i], op_name) == 0)
-            return i;
-    }
-    return -1;
-}
-int tinybuf_oop_do_op(const char *type_name, const char *op_name, tinybuf_value *self, const tinybuf_value *args, tinybuf_value *out)
-{
-    int idx = oop_index_by_name(type_name);
-    if (idx < 0)
-        return -1;
-    int oi = oop_find_op_index(idx, op_name);
-    if (oi < 0)
-        return -1;
-    if (!s_oop[idx].op_fns[oi])
-        return -1;
-    return s_oop[idx].op_fns[oi](self, args, out);
-}
-int tinybuf_oop_attach_serializers(const char *type_name, tinybuf_custom_read_fn read, tinybuf_custom_write_fn write, tinybuf_custom_dump_fn dump)
-{
-    if (!type_name || !read)
-        return -1;
-    int idx = oop_index_by_name(type_name);
-    if (idx < 0)
-    {
-        if (tinybuf_oop_register_type(type_name) < 0)
-            return -1;
-        idx = oop_index_by_name(type_name);
-    }
-    s_oop[idx].read = read;
-    s_oop[idx].write = write;
-    s_oop[idx].dump = dump;
-    return 0;
-}
-/* removed int-style OOP adapters */
 int tinybuf_oop_register_types_to_custom(void)
 {
     int count = 0;
-    for (int i = 0; i < s_oop_count; ++i)
+    int n = tinybuf_oop_get_type_count();
+    for (int i = 0; i < n; ++i)
     {
-        if (s_oop[i].name && s_oop[i].read)
+        const char *name = tinybuf_oop_get_type_name(i);
+        if (!name)
+            continue;
+        tinybuf_custom_read_fn read = NULL;
+        tinybuf_custom_write_fn write = NULL;
+        tinybuf_custom_dump_fn dump = NULL;
+        int serializable = 0;
+        if (tinybuf_oop_get_serializers(name, &read, &write, &dump, &serializable) == 0 && serializable && read)
         {
-            tinybuf_custom_register(s_oop[i].name, s_oop[i].read, s_oop[i].write, s_oop[i].dump);
+            tinybuf_custom_register(name, read, write, dump);
             ++count;
         }
     }
     return count;
-}
-int tinybuf_oop_set_serializable(const char *type_name, int serializable)
-{
-    int idx = oop_index_by_name(type_name);
-    if (idx < 0)
-    {
-        if (tinybuf_oop_register_type(type_name) < 0)
-            return -1;
-        idx = oop_index_by_name(type_name);
-    }
-    s_oop[idx].is_serializable = serializable ? 1 : 0;
-    return 0;
 }
 int tinybuf_plugin_scan_dir(const char *dir)
 {

@@ -330,7 +330,7 @@ static int dataframe_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_e
     return rlen;
 }
 
-__declspec(dllexport) int tinybuf_plugin_init(void)
+TB_EXPORT int tinybuf_plugin_init(void)
 {
     tinybuf_custom_register("hetero_tuple", tuple_read, tuple_write, tuple_dump);
     tinybuf_custom_register("hetero_list", hlist_read, hlist_write, hlist_dump);
@@ -338,7 +338,7 @@ __declspec(dllexport) int tinybuf_plugin_init(void)
     return 0;
 }
 
-__declspec(dllexport) int tinybuf_plugin_init_with_host(int (*host_custom_register)(const char *, tinybuf_custom_read_fn, tinybuf_custom_write_fn, tinybuf_custom_dump_fn))
+TB_EXPORT int tinybuf_plugin_init_with_host(int (*host_custom_register)(const char *, tinybuf_custom_read_fn, tinybuf_custom_write_fn, tinybuf_custom_dump_fn))
 {
     host_custom_register("hetero_tuple", tuple_read, tuple_write, tuple_dump);
     host_custom_register("hetero_list", hlist_read, hlist_write, hlist_dump);
@@ -346,7 +346,7 @@ __declspec(dllexport) int tinybuf_plugin_init_with_host(int (*host_custom_regist
     return 0;
 }
 
-__declspec(dllexport) tinybuf_plugin_descriptor *tinybuf_get_plugin_descriptor(void)
+TB_EXPORT tinybuf_plugin_descriptor *tinybuf_get_plugin_descriptor(void)
 {
     static uint8_t types[1] = {0};
     static const char *op_names[] = {"hlist_insert", "hlist_delete", "hlist_concat", "__str__", "__desc__"};

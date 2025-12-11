@@ -104,6 +104,8 @@
         "iostream": "cpp",
         "typeindex": "cpp",
         "xfacet": "cpp",
-        "tinybuf_buffer.h": "c"
+        "tinybuf_buffer.h": "c",
+        "regex": "cpp",
+        "common.h": "c"
     }
 }

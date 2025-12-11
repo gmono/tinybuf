@@ -2,6 +2,7 @@
 #include "tinybuf.h"
 #include "tinybuf_buffer.h"
 #include "tinybuf_plugin.h"
+#include "dyn_sys.h"
 #include "tinybuf_log.h"
 #include <sstream>
 #include <chrono>
@@ -54,7 +55,7 @@ TEST_CASE("custom string", "[system]")
 {
     LOGI("case begin: custom string");
     tinybuf_set_use_strpool(1);
-    tinybuf_register_builtin_plugins();
+    tinybuf_init();
     buffer *buf = buffer_alloc();
     tinybuf_value *s = tinybuf_value_alloc();
     tinybuf_value_init_string(s, "hello", 5);
@@ -96,7 +97,7 @@ TEST_CASE("oop fallback", "[system]")
     tinybuf_set_use_strpool(1);
     tinybuf_oop_attach_serializers("xjson", xjson_read, xjson_write, xjson_dump);
     tinybuf_oop_set_serializable("xjson", 1);
-    tinybuf_register_builtin_plugins();
+    tinybuf_init();
     tinybuf_value *m = tinybuf_value_alloc();
     tinybuf_value_init_int(m, 42);
     buffer *buf = buffer_alloc();
@@ -174,12 +175,15 @@ TEST_CASE("hetero tuple", "[system]")
 {
     LOGI("case begin: hetero tuple");
     tinybuf_set_use_strpool(1);
-    tinybuf_register_builtin_plugins();
+    tinybuf_init();
 #ifdef _WIN32
-    int pr = tinybuf_plugin_register_from_dll("../tinybuf_plugins/system_extend.dll");
+    const char *plugin_path = "../tinybuf_plugins/system_extend.dll";
+#else
+    const char *plugin_path = "../tinybuf_plugins/libsystem_extend.so";
+#endif
+    int pr = tinybuf_plugin_register_from_dll(plugin_path);
     LOGI("plugin register ret=%d", pr);
     REQUIRE(pr == 0);
-#endif
     tinybuf_value *arr = tinybuf_value_alloc();
     tinybuf_value *i = tinybuf_value_alloc();
     tinybuf_value_init_int(i, 123);

@@ -148,7 +148,7 @@ static int dll_to_lower(tinybuf_value *value, const tinybuf_value *args, tinybuf
     tinybuf_free(tmp);
     return 0;
 }
-__declspec(dllexport) tinybuf_plugin_descriptor *tinybuf_get_plugin_descriptor(void)
+TB_EXPORT tinybuf_plugin_descriptor *tinybuf_get_plugin_descriptor(void)
 {
     static uint8_t types[1] = {DLL_UPPER_TYPE};
     static const char *names[1] = {"to_lower"};

@@ -860,10 +860,10 @@ static inline tinybuf_error _make_err(const char *msg, int res) { return tinybuf
 
 int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
 {
-    tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
-    if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && oread)
+    int idx = custom_index_by_name(name);
+    if (idx >= 0 && s_customs[idx].read)
     {
-        int rr = oread(name, data, len, out, contain_handler, r);
+        int rr = s_customs[idx].read(name, data, len, out, contain_handler, r);
         if (rr > 0)
         {
             tinybuf_error ok = tinybuf_result_ok(rr);
@@ -879,10 +879,10 @@ int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tiny
         tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
         return rr;
     }
-    int idx = custom_index_by_name(name);
-    if (idx >= 0 && s_customs[idx].read)
+    tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
+    if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && oread)
     {
-        int rr = s_customs[idx].read(name, data, len, out, contain_handler, r);
+        int rr = oread(name, data, len, out, contain_handler, r);
         if (rr > 0)
         {
             tinybuf_error ok = tinybuf_result_ok(rr);
@@ -905,26 +905,11 @@ int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tiny
 
 int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *out, tinybuf_error *r)
 {
-    tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
-    if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && owrite)
-    {
-        int rr = owrite(name, in, out, r);
-        if (rr >= 0)
-        {
-            tinybuf_error ok = tinybuf_result_ok(rr);
-            tinybuf_result_append_merge(r, &ok, tinybuf_merger_sum);
-            return rr;
-        }
-        tinybuf_error er = _make_err("custom write failed", rr);
-        tinybuf_result_add_msg_const(&er, name);
-        tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
-        return rr;
-    }
     int idx = custom_index_by_name(name);
     if (idx >= 0 && s_customs[idx].write)
     {
         int rr = s_customs[idx].write(name, in, out, r);
-        if (rr >= 0)
+        if (rr > 0)
         {
             tinybuf_error ok = tinybuf_result_ok(rr);
             tinybuf_result_append_merge(r, &ok, tinybuf_merger_sum);
@@ -935,9 +920,28 @@ int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *
         tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
         return rr;
     }
-    tinybuf_error er = _make_err("custom type not found", -1);
+    tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
+    if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && owrite)
+    {
+        int rr = owrite(name, in, out, r);
+        if (rr > 0)
+        {
+            tinybuf_error ok = tinybuf_result_ok(rr);
+            tinybuf_result_append_merge(r, &ok, tinybuf_merger_sum);
+            return rr;
+        }
+        /* OOP provided but returned <=0, fall back to legacy */
+    }
+    int fb = try_write_box(out, in, r);
+    if (fb > 0)
+    {
+        tinybuf_error ok = tinybuf_result_ok(fb);
+        tinybuf_result_append_merge(r, &ok, tinybuf_merger_sum);
+        return fb;
+    }
+    tinybuf_error er = _make_err("custom type not found", fb);
     tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
-    return -1;
+    return fb;
 }
 
 int tinybuf_custom_try_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error *r)

@@ -367,7 +367,10 @@ int tinybuf_try_read_box_with_mode(buf_ref *buf, tinybuf_value *out, CONTAIN_HAN
     (void)mode;
     int n = try_read_box(buf, out, contain_handler, r);
     if (n > 0)
+    {
+        r->res = n;
         return n;
+    }
     tinybuf_result_add_msg_const(r, "tinybuf_try_read_box_with_mode_r");
     return n;
 }
@@ -377,7 +380,10 @@ int tinybuf_try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER conta
     s_strpool_base_read = buf->base;
     int n = try_read_box(buf, out, contain_handler, r);
     if (n > 0)
+    {
+        r->res = n;
         return n;
+    }
     tinybuf_result_add_msg_const(r, "tinybuf_try_read_box_r");
     return n;
 }
@@ -972,7 +978,19 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                 }
                 else
                 {
-                    SET_FAILED("type_idx name not found");
+                    buf_ref br3 = (buf_ref){(char *)buf->ptr, (int64_t)blen, (char *)buf->ptr, (int64_t)blen};
+                    int rl2 = tinybuf_try_read_box(&br3, out, contain_any, r);
+                    if (rl2 > 0)
+                    {
+                        buf_offset(buf, rl2);
+                        len += rl2;
+                        pool_mark_complete(box_offset);
+                        SET_SUCCESS();
+                    }
+                    else
+                    {
+                        SET_FAILED("type_idx name not found");
+                    }
                 }
                 if (!failed)
                 {

@@ -98,9 +98,13 @@ int try_write_box(buffer *out, const tinybuf_value *value, tinybuf_error *r)
     if (!s_use_strpool)
     {
         int before = buffer_get_length_inline(out);
-        int n = tinybuf_value_serialize(value, out, r);
+        tinybuf_error rr_local = tinybuf_result_ok(0);
+        int n = tinybuf_value_serialize(value, out, &rr_local);
         if (n <= 0)
+        {
+            tinybuf_result_append_merge(r, &rr_local, tinybuf_merger_left);
             return n;
+        }
         int after = buffer_get_length_inline(out);
         return after - before;
     }
@@ -108,9 +112,11 @@ int try_write_box(buffer *out, const tinybuf_value *value, tinybuf_error *r)
     buffer *pool = buffer_alloc();
     strpool_reset_write(body);
     {
-        int n2 = tinybuf_value_serialize(value, body, r);
+        tinybuf_error rr_body = tinybuf_result_ok(0);
+        int n2 = tinybuf_value_serialize(value, body, &rr_body);
         if (n2 <= 0)
         {
+            tinybuf_result_append_merge(r, &rr_body, tinybuf_merger_left);
             buffer_free(body);
             buffer_free(pool);
             return n2;
@@ -118,7 +124,7 @@ int try_write_box(buffer *out, const tinybuf_value *value, tinybuf_error *r)
     }
     {
         int rt = strpool_write_tail(pool, r);
-        if (rt <= 0)
+        if (rt < 0)
         {
             buffer_free(body);
             buffer_free(pool);
@@ -545,14 +551,20 @@ int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf
     buffer_append(body, (const char *)&ty, 1);
     dump_int((uint64_t)idx, body);
     buffer *payload = buffer_alloc();
-    int wlen = tinybuf_custom_try_write(name, in, payload, r);
+    tinybuf_error wr_local = tinybuf_result_ok(0);
+    int wlen = tinybuf_custom_try_write(name, in, payload, &wr_local);
+    {
+        char *dbg = (char *)tinybuf_malloc(64);
+        snprintf(dbg, 64, "custom payload %s wlen=%d", (wlen > 0 ? "ok" : "fail"), wlen);
+        tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+    }
     dump_int((uint64_t)(wlen > 0 ? wlen : 0), body);
     if (wlen > 0)
     {
         buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload));
     }
     int rpool = strpool_write_tail(pool, r);
-    if (rpool <= 0)
+    if (rpool < 0)
     {
         buffer_free(payload);
         buffer_free(body);
@@ -603,6 +615,7 @@ int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf
     buffer_free(pool);
     if (wlen < 0)
     {
+        tinybuf_result_append_merge(r, &wr_local, tinybuf_merger_left);
         tinybuf_result_add_msg_const(r, "write custom payload failed");
         char *m = (char *)tinybuf_malloc(64);
         snprintf(m, 64, "name=%s", name ? name : "(null)");
@@ -611,7 +624,6 @@ int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf
         return wlen;
     }
     int total = 1 + (int)offset_guess_len + (int)body_len + pool_len;
-    tinybuf_error rt = tinybuf_result_ok(total);
-    tinybuf_result_append_merge(r, &rt, tinybuf_merger_sum);
+    r->res = total;
     return total;
 }

@@ -106,6 +106,7 @@
         "xfacet": "cpp",
         "tinybuf_buffer.h": "c",
         "regex": "cpp",
-        "common.h": "c"
+        "common.h": "c",
+        "*.inc": "c"
     }
 }

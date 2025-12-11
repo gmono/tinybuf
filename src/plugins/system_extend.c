@@ -3,6 +3,8 @@
 #include "tinybuf_buffer.h"
 #include <stdio.h>
 #include <string.h>
+#include "kvec.h"
+#include "klist.h"
 
 static tinybuf_value *clone_box(const tinybuf_value *in)
 {
@@ -304,7 +306,10 @@ static int dataframe_read(const char *name, const uint8_t *data, int len, tinybu
 {
     (void)name;
     buf_ref br = (buf_ref){(const char *)data, (int64_t)len, (const char *)data, (int64_t)len};
+    tinybuf_result_add_msg_const(r, "dataframe_read begin");
     int n = tinybuf_try_read_box(&br, out, contain_handler, r);
+    if (n <= 0)
+        tinybuf_result_add_msg_const(r, "dataframe_read_r");
     return n;
 }
 static int dataframe_write(const char *name, const tinybuf_value *in, buffer *out, tinybuf_error *r)
@@ -316,7 +321,10 @@ static int dataframe_write(const char *name, const tinybuf_value *in, buffer *ou
         tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
         return -1;
     }
+    tinybuf_result_add_msg_const(r, "dataframe_write begin");
     int n2 = try_write_box(out, in, r);
+    if (n2 <= 0)
+        tinybuf_result_add_msg_const(r, "dataframe_write_r");
     return n2;
 }
 static int dataframe_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error *r)

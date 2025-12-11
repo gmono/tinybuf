@@ -863,6 +863,11 @@ int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tiny
     int idx = custom_index_by_name(name);
     if (idx >= 0 && s_customs[idx].read)
     {
+        {
+            char *dbg = (char *)tinybuf_malloc(64);
+            snprintf(dbg, 64, "custom_read begin name=%s len=%d", name ? name : "(null)", len);
+            tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+        }
         int rr = s_customs[idx].read(name, data, len, out, contain_handler, r);
         if (rr > 0)
         {
@@ -882,6 +887,11 @@ int tinybuf_custom_try_read(const char *name, const uint8_t *data, int len, tiny
     tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
     if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && oread)
     {
+        {
+            char *dbg = (char *)tinybuf_malloc(64);
+            snprintf(dbg, 64, "oop_read begin name=%s len=%d", name ? name : "(null)", len);
+            tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+        }
         int rr = oread(name, data, len, out, contain_handler, r);
         if (rr > 0)
         {
@@ -908,6 +918,7 @@ int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *
     int idx = custom_index_by_name(name);
     if (idx >= 0 && s_customs[idx].write)
     {
+        tinybuf_result_add_msg_const(r, "custom_write begin");
         int rr = s_customs[idx].write(name, in, out, r);
         if (rr > 0)
         {
@@ -923,6 +934,7 @@ int tinybuf_custom_try_write(const char *name, const tinybuf_value *in, buffer *
     tinybuf_custom_read_fn oread = NULL; tinybuf_custom_write_fn owrite = NULL; tinybuf_custom_dump_fn odump = NULL; int serializable = 0;
     if (name && tinybuf_oop_get_serializers(name, &oread, &owrite, &odump, &serializable) == 0 && serializable && owrite)
     {
+        tinybuf_result_add_msg_const(r, "oop_write begin");
         int rr = owrite(name, in, out, r);
         if (rr > 0)
         {

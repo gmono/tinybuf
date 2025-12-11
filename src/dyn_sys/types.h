@@ -23,3 +23,16 @@ struct bin_value
 
 void call(void* funcptr,bin_value* valueptr,size_t valuelen){
 }
+
+
+//基本字符串
+
+struct bin_str{
+    const char* dataptr;
+    int size; //-1表示没有计算长度
+};
+
+//1 带有deleter的纯字符串 2 纯字符串列表 3 带有hole的纯字符串 中间可以穿插binvalue
+// struct hole_str{
+
+// }

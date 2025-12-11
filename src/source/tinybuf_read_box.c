@@ -638,7 +638,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                 {
                     buf_ref br_fallback = *buf;
                     tinybuf_error rr1 = tinybuf_result_ok(0);
-                    int rlen1 = tinybuf_try_read_box(&br_fallback, ten, contain_any, &rr1);
+                    int rlen1 = tinybuf_try_read_box(&br_fallback, ten, contain_handler, &rr1);
                     if (rlen1 <= 0)
                     {
                         tinybuf_value_free(ten);
@@ -659,6 +659,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                     if (!(nd > 0))
                     {
                         tinybuf_value_free(ten);
+                        tinybuf_result_add_msg_const(r, "indexed_tensor dims read failed");
                         SET_FAILED("read indexed_tensor dims failed");
                         break;
                     }
@@ -692,6 +693,11 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                             }
                             tinybuf_value_free(ten);
                             tinybuf_free(it);
+                            {
+                                char *dbg = (char *)tinybuf_malloc(64);
+                                snprintf(dbg, 64, "indexed_tensor has read failed i=%llu", (unsigned long long)i);
+                                tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+                            }
                             SET_FAILED("read indexed_tensor has failed");
                             break;
                         }
@@ -705,7 +711,13 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                         {
                             buf_ref br2 = *buf;
                             tinybuf_error rr3 = tinybuf_result_ok(0);
-                            int rl3 = tinybuf_try_read_box(&br2, idx, contain_any, &rr3);
+                            {
+                                unsigned char nt = (unsigned char)buf->ptr[0];
+                                char *dbg = (char *)tinybuf_malloc(64);
+                                snprintf(dbg, 64, "indexed_tensor next_type=%u at i=%llu", (unsigned)nt, (unsigned long long)i);
+                                tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+                            }
+                            int rl3 = tinybuf_try_read_box(&br2, idx, contain_handler, &rr3);
                             if (rl3 <= 0)
                             {
                                 if (it->indices)
@@ -719,6 +731,11 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                                 }
                                 tinybuf_value_free(ten);
                                 tinybuf_free(it);
+                                {
+                                    char *dbg = (char *)tinybuf_malloc(64);
+                                    snprintf(dbg, 64, "indexed_tensor index try_read_box failed i=%llu", (unsigned long long)i);
+                                    tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+                                }
                                 SET_FAILED("read indexed_tensor index failed");
                                 break;
                             }
@@ -726,6 +743,11 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                             tinybuf_result_append_merge(&acc, &rr3, tinybuf_merger_sum);
                             len = acc.res;
                             r2 = 0; /* already advanced */
+                            {
+                                char *dbg = (char *)tinybuf_malloc(64);
+                                snprintf(dbg, 64, "indexed_tensor index via box i=%llu len=%d", (unsigned long long)i, rl3);
+                                tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+                            }
                         }
                         else
                         {
@@ -735,8 +757,18 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                                 tinybuf_result_append_merge(&acc, &t2, tinybuf_merger_sum);
                                 len = acc.res;
                             }
+                            {
+                                char *dbg = (char *)tinybuf_malloc(64);
+                                snprintf(dbg, 64, "indexed_tensor index deserialized i=%llu len=%d", (unsigned long long)i, r2);
+                                tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+                            }
                         }
                         it->indices[i] = idx;
+                        {
+                            char *dbg = (char *)tinybuf_malloc(64);
+                            snprintf(dbg, 64, "indexed_tensor index parsed i=%llu", (unsigned long long)i);
+                            tinybuf_result_add_msg(r, dbg, (tinybuf_deleter_fn)tinybuf_free);
+                        }
                     }
                 }
                 if (!failed)
@@ -950,7 +982,7 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                 if (name_out)
                 {
                     tinybuf_error cr = tinybuf_result_ok(0);
-                    int crlen = tinybuf_custom_try_read(name_out, (const uint8_t *)buf->ptr, (int)blen, out, contain_any, &cr);
+                    int crlen = tinybuf_custom_try_read(name_out, (const uint8_t *)buf->ptr, (int)blen, out, contain_handler, &cr);
                     if (crlen > 0)
                     {
                         buf_offset(buf, (int)blen);
@@ -960,8 +992,9 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                     }
                     else
                     {
-                        buf_ref br3 = (buf_ref){(char *)buf->ptr, (int64_t)blen, (char *)buf->ptr, (int64_t)blen};
-                        int rl2 = tinybuf_try_read_box(&br3, out, contain_any, r);
+                        int64_t prefix = (int64_t)(buf->ptr - buf->base);
+                        buf_ref br3 = (buf_ref){(char *)buf->base, prefix + (int64_t)blen, (char *)buf->ptr, (int64_t)blen};
+                        int rl2 = tinybuf_try_read_box(&br3, out, contain_handler, r);
                         if (rl2 > 0)
                         {
                             buf_offset(buf, rl2);
@@ -978,8 +1011,9 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                 }
                 else
                 {
-                    buf_ref br3 = (buf_ref){(char *)buf->ptr, (int64_t)blen, (char *)buf->ptr, (int64_t)blen};
-                    int rl2 = tinybuf_try_read_box(&br3, out, contain_any, r);
+                    int64_t prefix2 = (int64_t)(buf->ptr - buf->base);
+                    buf_ref br3 = (buf_ref){(char *)buf->base, prefix2 + (int64_t)blen, (char *)buf->ptr, (int64_t)blen};
+                    int rl2 = tinybuf_try_read_box(&br3, out, contain_handler, r);
                     if (rl2 > 0)
                     {
                         buf_offset(buf, rl2);

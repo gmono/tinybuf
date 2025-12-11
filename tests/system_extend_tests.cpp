@@ -79,7 +79,7 @@ TEST_CASE("custom string", "[system]")
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     tinybuf_error gr = tinybuf_result_ok(0);
     buffer *sv = tinybuf_value_get_string(out, &gr);
-    REQUIRE(sv != NULL);
+    REQUIRE(sv != nullptr);
     REQUIRE(buffer_get_length(sv) == 5);
     tinybuf_result_unref(&r);
     tinybuf_result_unref(&w);
@@ -159,7 +159,7 @@ TEST_CASE("custom vs oop priority", "[system]")
     REQUIRE(tinybuf_value_get_type(out) == tinybuf_string);
     tinybuf_error gr3 = tinybuf_result_ok(0);
     buffer *sv = tinybuf_value_get_string(out, &gr3);
-    REQUIRE(sv != NULL);
+    REQUIRE(sv != nullptr);
     REQUIRE(buffer_get_length(sv) == 8);
     tinybuf_result_unref(&r);
     tinybuf_result_unref(&w);

@@ -1,6 +1,7 @@
 #include "tinybuf.h"
 #include "tinybuf_buffer.h"
 #include "tinybuf_private.h"
+#include <stdlib.h>
 
 static tinybuf_value **s_clear_stack = NULL;
 static int s_clear_stack_count = 0;
@@ -54,13 +55,13 @@ static inline void clear_stack_pop(tinybuf_value *v)
     }
 }
 
-inline bool has_sub_ref(const tinybuf_value *value)
+static inline bool has_sub_ref(const tinybuf_value *value)
 {
     return value->_data._ref != NULL && (value->_type == tinybuf_value_ref || value->_type == tinybuf_version);
 }
 
 int tinybuf_value_clear(tinybuf_value *value);
-inline bool maybe_free_sub_ref(tinybuf_value *value)
+static inline bool maybe_free_sub_ref(tinybuf_value *value)
 {
     if (has_sub_ref(value))
     {
@@ -72,11 +73,11 @@ inline bool maybe_free_sub_ref(tinybuf_value *value)
     return false;
 }
 
-inline bool need_custom_free(const tinybuf_value *value)
+static inline bool need_custom_free(const tinybuf_value *value)
 {
     return value->_data._custom != NULL && (value->_type == tinybuf_custom || value->_type == tinybuf_tensor || value->_type == tinybuf_bool_map || value->_type == tinybuf_indexed_tensor);
 }
-inline bool maybe_free_custom(tinybuf_value *value)
+static inline bool maybe_free_custom(tinybuf_value *value)
 {
     if (need_custom_free(value))
     {

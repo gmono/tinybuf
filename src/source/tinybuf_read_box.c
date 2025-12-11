@@ -235,7 +235,7 @@ int read_box_by_pointer(buf_ref *buf, pointer_value pointer, tinybuf_value *out,
     return rr;
 }
 
-inline tinybuf_error try_read_int_data(BOOL isneg, buf_ref *buf, QWORD *out)
+static inline tinybuf_error try_read_int_data(BOOL isneg, buf_ref *buf, QWORD *out)
 {
     INIT_STATE
     int temp = try_read_int_tovar(isneg, buf->ptr, (int)buf->size, out);
@@ -685,36 +685,36 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                 }
                 const char *pool_start = s_strpool_base_read + s_strpool_offset_read;
                 const char *q = pool_start;
-                int64_t r = ((const char *)buf->ptr + buf->size) - pool_start;
+                int64_t rem = ((const char *)buf->ptr + buf->size) - pool_start;
                 char *name_out = NULL;
                 int name_len = 0;
-                if (r > 0)
+                if (rem > 0)
                 {
                     if ((uint8_t)q[0] == serialize_str_pool)
                     {
                         ++q;
-                        --r;
+                        --rem;
                         QWORD cnt = 0;
-                        int l2 = try_read_int_tovar(FALSE, q, (int)r, &cnt);
+                        int l2 = try_read_int_tovar(FALSE, q, (int)rem, &cnt);
                         if (l2 > 0)
                         {
                             q += l2;
-                            r -= l2;
+                            rem -= l2;
                             for (QWORD i = 0; i < cnt; ++i)
                             {
-                                if (r < 1)
+                                if (rem < 1)
                                     break;
                                 if ((uint8_t)q[0] != serialize_string)
                                     break;
                                 ++q;
-                                --r;
+                                --rem;
                                 QWORD sl = 0;
-                                int l3 = try_read_int_tovar(FALSE, q, (int)r, &sl);
+                                int l3 = try_read_int_tovar(FALSE, q, (int)rem, &sl);
                                 if (l3 <= 0)
                                     break;
                                 q += l3;
-                                r -= l3;
-                                if (r < (int64_t)sl)
+                                rem -= l3;
+                                if (rem < (int64_t)sl)
                                     break;
                                 if (i == idx)
                                 {
@@ -725,20 +725,20 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                                     break;
                                 }
                                 q += sl;
-                                r -= sl;
+                                rem -= sl;
                             }
                         }
                     }
                     else if ((uint8_t)q[0] == 27)
                     {
                         ++q;
-                        --r;
+                        --rem;
                         QWORD ncount = 0;
-                        int l2 = try_read_int_tovar(FALSE, q, (int)r, &ncount);
+                        int l2 = try_read_int_tovar(FALSE, q, (int)rem, &ncount);
                         if (l2 > 0)
                         {
                             const char *nodes_base = q + l2;
-                            int64_t nodes_size = r - l2;
+                            int64_t nodes_size = rem - l2;
                             const char *p = nodes_base;
                             int64_t rr = nodes_size;
                             int found = -1;

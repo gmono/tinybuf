@@ -1,5 +1,7 @@
 #include <memory.h>
 #include <assert.h>
+#include <string.h>
+#include <stddef.h>
 #include "tinybuf_buffer.h"
 #include "tinybuf_memory.h"
 #include "tinybuf_buffer_private.h"

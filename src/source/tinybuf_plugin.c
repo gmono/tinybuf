@@ -5,6 +5,9 @@
 #include "tinybuf_memory.h"
 #include <string.h>
 #include <stdio.h>
+#ifndef _WIN32
+#include <dirent.h>
+#endif
 
 typedef struct
 {

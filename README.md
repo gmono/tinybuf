@@ -35,4 +35,4 @@
          2. 有一个void*指针 现在要实现对这个void指针的调用 运行时动态调用
          3. 此处有一个叫dynamic_call(void*,list of bin_value)的函数
          4. 核心在于实现这个叫dynamic_call的函数 这里假设调用协议只关心二进制数据参数的大小而不关心其实际类型例如一个i32和一个f32的传参方式完全一样 如果不一样 必须做相应处理
-         5. 
+         5. 使用dyncall封装实现 通过代理tinybuf_value 为bin_value可实现动态类型与序列化系统兼容

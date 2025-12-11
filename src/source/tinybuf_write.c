@@ -117,13 +117,12 @@ int try_write_box(buffer *out, const tinybuf_value *value, tinybuf_error *r)
         }
     }
     {
-        tinybuf_error rt = strpool_write_tail(pool);
-        if (rt.res <= 0)
+        int rt = strpool_write_tail(pool, r);
+        if (rt <= 0)
         {
             buffer_free(body);
             buffer_free(pool);
-            tinybuf_result_append_merge(r, &rt, tinybuf_merger_left);
-            return rt.res;
+            return rt;
         }
     }
     int body_len = buffer_get_length_inline(body);
@@ -552,14 +551,13 @@ int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf
     {
         buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload));
     }
-    tinybuf_error rpool = strpool_write_tail(pool);
-    if (rpool.res <= 0)
+    int rpool = strpool_write_tail(pool, r);
+    if (rpool <= 0)
     {
         buffer_free(payload);
         buffer_free(body);
         buffer_free(pool);
-        tinybuf_result_append_merge(r, &rpool, tinybuf_merger_left);
-        return rpool.res;
+        return rpool;
     }
     uint64_t body_len = (uint64_t)buffer_get_length_inline(body);
     uint64_t offset_guess_len = 1;

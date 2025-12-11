@@ -191,9 +191,10 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
     dump_labels_emit_prefix(cur_pos, dst);
 
     serialize_type t = serialize_null;
-    tinybuf_error add = try_read_type(buf, &t);
-    if (add.res <= 0) return add.res;
-    consumed += add.res;
+    tinybuf_error rr = tinybuf_result_ok(0);
+    int add = try_read_type(buf, &t, &rr);
+    if (add <= 0) return add;
+    consumed += add;
 
     switch (t) {
         case serialize_null:
@@ -685,9 +686,10 @@ static int collect_box_labels(buf_ref *br)
     s_dump_box_starts[s_dump_box_starts_count++] = start_pos;
 
     serialize_type t = serialize_null;
-    tinybuf_error add = try_read_type(br, &t);
-    if (add.res <= 0) return add.res;
-    consumed += add.res;
+    tinybuf_error rr = tinybuf_result_ok(0);
+    int add = try_read_type(br, &t, &rr);
+    if (add <= 0) return add;
+    consumed += add;
 
     switch (t) {
         case serialize_null:

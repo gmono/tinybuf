@@ -1082,19 +1082,24 @@ static int hlist_read(const char *name, const uint8_t *data, int len, tinybuf_va
     }
     return len;
 }
-static tinybuf_error hlist_write(const char *name, const tinybuf_value *in, buffer *out)
+static int hlist_write(const char *name, const tinybuf_value *in, buffer *out, tinybuf_error *r)
 {
     (void)name;
     if (tinybuf_value_get_type(in) != tinybuf_array)
-        return tinybuf_result_err(-1, "hlist write: not array", NULL);
+    {
+        tinybuf_error er = tinybuf_result_err(-1, "hlist write: not array", NULL);
+        tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
+        return -1;
+    }
     int before = buffer_get_length(out);
     tinybuf_error cr = tinybuf_result_ok(0);
     int n = tinybuf_value_get_child_size(in, &cr);
     if (tinybuf_result_msg_count(&cr) > 0)
     {
         tinybuf_error er = tinybuf_result_err(-1, "hlist write: bad container", NULL);
-        tinybuf_result_append_merge(&er, &cr, tinybuf_merger_left);
-        return er;
+        tinybuf_result_append_merge(r, &cr, tinybuf_merger_left);
+        tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
+        return -1;
     }
     for (int i = 0; i < n; ++i)
     {
@@ -1102,17 +1107,17 @@ static tinybuf_error hlist_write(const char *name, const tinybuf_value *in, buff
         const tinybuf_value *ch = tinybuf_value_get_array_child(in, i, &rr);
         if (!ch)
         {
+            tinybuf_result_append_merge(r, &rr, tinybuf_merger_left);
             tinybuf_error er = tinybuf_result_err(-1, "hlist write: null child", NULL);
-            tinybuf_result_append_merge(&er, &rr, tinybuf_merger_left);
-            return er;
+            tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
+            return -1;
         }
-        tinybuf_error wr = tinybuf_result_ok(0);
-        (void)tinybuf_try_write_box(out, ch, &wr);
-        if (wr.res <= 0)
-            return wr;
+        int wn = try_write_box(out, ch, r);
+        if (wn <= 0)
+            return wn;
     }
     int after = buffer_get_length(out);
-    return tinybuf_result_ok(after - before);
+    return after - before;
 }
 static int hlist_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error *r)
 {

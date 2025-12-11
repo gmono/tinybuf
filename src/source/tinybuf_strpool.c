@@ -58,46 +58,44 @@ typedef struct
     int leaf_id;
 } trie_node;
 
-tinybuf_error strpool_write_tail(buffer *out)
+int strpool_write_tail(buffer *out, tinybuf_error *r)
 {
-    tinybuf_error acc = tinybuf_result_ok(0);
     if (s_strpool_count == 0)
-        return acc;
+        return 0;
     if (!s_use_strpool_trie)
     {
         int len = 0;
-        int r1 = try_write_type(out, serialize_str_pool, &acc);
+        int r1 = try_write_type(out, serialize_str_pool, r);
         if (r1 <= 0)
-            return acc;
+            return r1;
         len += r1;
-        int r2 = try_write_int_data(0, out, (uint64_t)s_strpool_count, &acc);
+        int r2 = try_write_int_data(0, out, (uint64_t)s_strpool_count, r);
         if (r2 <= 0)
-            return acc;
+            return r2;
         len += r2;
         for (int i = 0; i < s_strpool_count; ++i)
         {
             int sl = buffer_get_length_inline(s_strpool[i].buf);
-            int r3 = try_write_type(out, serialize_string, &acc);
+            int r3 = try_write_type(out, serialize_string, r);
             if (r3 <= 0)
-                return acc;
+                return r3;
             len += r3;
-            int r4 = try_write_int_data(0, out, (uint64_t)sl, &acc);
+            int r4 = try_write_int_data(0, out, (uint64_t)sl, r);
             if (r4 <= 0)
-                return acc;
+                return r4;
             len += r4;
             if (sl)
             {
                 buffer_append(out, buffer_get_data_inline(s_strpool[i].buf), sl);
             }
         }
-        acc.res = len;
-        return acc;
+        return len;
     }
     int before = buffer_get_length_inline(out);
     {
-        int r0 = try_write_type(out, 27, &acc);
+        int r0 = try_write_type(out, 27, r);
         if (r0 <= 0)
-            return acc;
+            return r0;
     } /* trie pool */
     trie_node *nodes = NULL;
     int ncount = 1;
@@ -139,30 +137,29 @@ tinybuf_error strpool_write_tail(buffer *out)
         nodes[cur].leaf_id = i;
     }
     {
-        int rn = try_write_int_data(0, out, (uint64_t)ncount, &acc);
+        int rn = try_write_int_data(0, out, (uint64_t)ncount, r);
         if (rn <= 0)
-            return acc;
+            return rn;
     }
     for (int i = 0; i < ncount; ++i)
     {
         {
             uint64_t enc_parent = (nodes[i].parent < 0) ? 0 : (uint64_t)nodes[i].parent + 1;
-            int rp = try_write_int_data(0, out, enc_parent, &acc);
+            int rp = try_write_int_data(0, out, enc_parent, r);
             if (rp <= 0)
-                return acc;
+                return rp;
         }
         buffer_append(out, (const char *)&nodes[i].ch, 1);
         uint8_t flag = nodes[i].is_leaf ? 1 : 0;
         buffer_append(out, (const char *)&flag, 1);
         if (nodes[i].is_leaf)
         {
-            int rl = try_write_int_data(0, out, (uint64_t)nodes[i].leaf_id, &acc);
+            int rl = try_write_int_data(0, out, (uint64_t)nodes[i].leaf_id, r);
             if (rl <= 0)
-                return acc;
+                return rl;
         }
     }
     tinybuf_free(nodes);
     int after = buffer_get_length_inline(out);
-    acc.res = after - before;
-    return acc;
+    return after - before;
 }

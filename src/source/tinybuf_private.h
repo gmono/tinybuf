@@ -164,7 +164,7 @@ int dump_int(uint64_t len, buffer *out);
 
 // internal read helpers used across modules
 int buf_offset(buf_ref *buf, int64_t offset);
-tinybuf_error try_read_type(buf_ref *buf, serialize_type *type);
+int try_read_type(buf_ref *buf, serialize_type *type, tinybuf_error *r);
 int try_read_int_tovar(BOOL isneg, const char *ptr, int size, QWORD *out_val);
 int int_deserialize(const uint8_t *in, int in_size, uint64_t *out);
 int optional_add(int x, int addx);
@@ -212,6 +212,6 @@ int try_write_partitions(buffer *out, const tinybuf_value *mainbox, const tinybu
 extern int s_use_strpool;
 void strpool_reset_write(const buffer *out);
 int strpool_add(const char *data, int len);
-tinybuf_error strpool_write_tail(buffer *out);
+int strpool_write_tail(buffer *out, tinybuf_error *r);
 
 #endif // TINYBUF_PRIVATE_H

@@ -44,16 +44,20 @@ int buf_offset(buf_ref *buf, int64_t offset)
     return 0;
 }
 
-tinybuf_error try_read_type(buf_ref *buf, serialize_type *type)
+int try_read_type(buf_ref *buf, serialize_type *type, tinybuf_error *r)
 {
     if (buf->size < 1)
     {
-        return tinybuf_result_err(0, "buffer too small", NULL);
+        tinybuf_result_add_msg_const(r, "buffer too small");
+        return 0;
     }
     *type = (serialize_type)buf->ptr[0];
     if (buf_offset(buf, 1) != 0)
-        return tinybuf_result_err(-1, "buf_offset failed", NULL);
-    return tinybuf_result_ok(1);
+    {
+        tinybuf_result_add_msg_const(r, "buf_offset failed");
+        return -1;
+    }
+    return 1;
 }
 
 void pointer_to_start(const buf_ref *buf, pointer_value *ptr)
@@ -267,9 +271,10 @@ inline int try_read_intbox(buf_ref *buf, QWORD *saveptr, tinybuf_error *r)
 {
     serialize_type type;
     INIT_STATE
-    tinybuf_error rtype = try_read_type(buf, &type);
-    if (OK_AND_ADDTO(rtype, &len))
+    int ntype = try_read_type(buf, &type, r);
+    if (ntype > 0)
     {
+        len += ntype;
         if (type == serialize_positive_int || type == serialize_negtive_int)
         {
             BOOL isneg = type == serialize_negtive_int;
@@ -297,9 +302,10 @@ inline int try_read_pointer_value(buf_ref *buf, QWORD *saveptr, tinybuf_error *r
 {
     INIT_STATE
     serialize_type type;
-    tinybuf_error rtype = try_read_type(buf, &type);
-    if (OK_AND_ADDTO(rtype, &len))
+    int ntype = try_read_type(buf, &type, r);
+    if (ntype > 0)
     {
+        len += ntype;
         if (is_simple_pointer_type(type))
         {
             {
@@ -326,9 +332,10 @@ inline int try_read_pointer(buf_ref *buf, pointer_value *pointer, tinybuf_error 
 {
     INIT_STATE
     serialize_type type;
-    tinybuf_error rtype = try_read_type(buf, &type);
-    if (OK_AND_ADDTO(rtype, &len))
+    int ntype = try_read_type(buf, &type, r);
+    if (ntype > 0)
     {
+        len += ntype;
         if (is_simple_pointer_type(type))
         {
             QWORD offset;
@@ -385,38 +392,41 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
     {
         buf_ref hb = *buf;
         serialize_type t;
-        tinybuf_error c = try_read_type(&hb, &t);
-        if (c.res > 0 && t == serialize_str_pool_table)
+        int c = try_read_type(&hb, &t, r);
+        if (c > 0 && t == serialize_str_pool_table)
         {
             QWORD off;
             int c2 = try_read_int_data(FALSE, &hb, &off, r);
             if (c2 > 0)
             {
                 s_strpool_offset_read = (int64_t)off;
-                buf_offset(buf, c.res + c2);
+                buf_offset(buf, c + c2);
             }
         }
     }
     int64_t box_offset = buf_current_offset(buf);
     pool_register(box_offset, out);
-    len = tinybuf_value_deserialize(buf->ptr, (int)buf->size, out, r);
-    if (len == 0)
     {
-        return 0;
-    }
-    if (len > 0)
-    {
-        buf_offset(buf, len);
-        pool_mark_complete(box_offset);
-        return len;
+        tinybuf_error rr_local = tinybuf_result_ok(0);
+        int l0 = tinybuf_value_deserialize(buf->ptr, (int)buf->size, out, &rr_local);
+        if (l0 > 0)
+        {
+            buf_offset(buf, l0);
+            pool_mark_complete(box_offset);
+            return l0;
+        }
+        if (l0 == 0)
+            return 0;
+        /* if l0 < 0, fall through to manual parse without polluting r */
     }
     len = 0;
     tinybuf_error acc = tinybuf_result_ok(0);
     serialize_type type = serialize_null;
     {
-        tinybuf_error rt_main = try_read_type(buf, &type);
-        if (OK_AND_ADDTO(rt_main, &len))
+        int rt_main = try_read_type(buf, &type, r);
+        if (rt_main > 0)
         {
+            len += rt_main;
             switch (type)
             {
             case serialize_version:
@@ -765,8 +775,6 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                         int64_t body_rem = (int64_t)(body_end - buf->ptr);
                         if ((int64_t)blen > body_rem)
                         {
-                            buf_offset(buf, -(int64_t)blen_read);
-                            len -= blen_read;
                             blen = (QWORD)body_rem;
                             tinybuf_result_add_msg_const(r, "fixup: use body_rem as blen");
                         }

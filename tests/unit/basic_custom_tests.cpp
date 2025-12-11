@@ -34,6 +34,7 @@ TEST_CASE("custom string via type_idx", "[custom]")
 {
     tinybuf_set_use_strpool(1);
     tinybuf_init();
+    tinybuf_register_builtin_plugins();
 
     buffer *buf = buffer_alloc();
 

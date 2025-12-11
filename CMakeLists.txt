@@ -63,9 +63,10 @@ INCLUDE_DIRECTORIES(${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/klib)
 
 #收集源代码
 file(GLOB tinybuf_src_Root ${Source_Root}/source/*.c)
+file(GLOB system_plugins_src ${Source_Root}/system_plugins/*.c)
 file(GLOB json_src_Root ${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/jsoncpp/*.cpp)
 
-add_library(tinybuf STATIC ${tinybuf_src_Root})
+add_library(tinybuf STATIC ${tinybuf_src_Root} ${system_plugins_src})
 add_library(dyn_sys STATIC src/dyn_sys/dyn_sys.c)
 target_link_libraries(tinybuf PUBLIC dyn_sys)
 add_library(jsoncpp STATIC ${json_src_Root})

@@ -34,14 +34,14 @@ extern "C"
     } tinybuf_str;
     typedef struct
     {
-        tinybuf_str *items;
+        struct hole_string **items;
         int count;
         int capacity;
-    } tinybuf_strlist;
+    } holestrlist;
     typedef struct
     {
         int res;
-        tinybuf_strlist *msgs;
+        holestrlist *msgs;
         int *refcnt;
     } tinybuf_error;
     tinybuf_error tinybuf_result_ok(int res);
@@ -50,9 +50,10 @@ extern "C"
     tinybuf_error tinybuf_result_create_ok(int res);
     tinybuf_error tinybuf_result_create_err(int res, const char *msg, tinybuf_deleter_fn deleter);
     int tinybuf_result_add_msg(tinybuf_error *r, const char *msg, tinybuf_deleter_fn deleter);
+    int tinybuf_result_add_hole_msg(tinybuf_error *r, struct hole_string *msg);
     int tinybuf_result_add_msg_const(tinybuf_error *r, const char *msg);
     int tinybuf_result_msg_count(const tinybuf_error *r);
-    const char *tinybuf_result_msg_at(const tinybuf_error *r, int idx);
+    tinybuf_str tinybuf_result_msg_at(const tinybuf_error *r, int idx);
     int tinybuf_result_format_msgs(const tinybuf_error *r, char *dst, int dst_len);
     const char *tinybuf_last_error_message(void);
 

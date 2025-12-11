@@ -56,6 +56,7 @@ TEST_CASE("custom string", "[system]")
     LOGI("case begin: custom string");
     tinybuf_set_use_strpool(1);
     tinybuf_init();
+    tinybuf_register_builtin_plugins();
     buffer *buf = buffer_alloc();
     tinybuf_value *s = tinybuf_value_alloc();
     tinybuf_value_init_string(s, "hello", 5);

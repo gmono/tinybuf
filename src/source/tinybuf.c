@@ -70,9 +70,6 @@ static inline int kvpairs_boxkey_deserialize()
 /* strpool declarations are at the top of file */
 
 
-//---
-int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out);
-
 // 支持自定义描述序列支持的反序列化操作
 // 描述子是一串 serialize_type 类型的字节序列
 // 用于支持集中类型表示 集中类型表示可优化内存与寄存器

@@ -2,6 +2,11 @@
 #include "tinybuf_buffer.h"
 #include "tinybuf_plugin.h"
 #include <string.h>
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#endif
 
 const char *s_last_error_msg = NULL;
 const char *tinybuf_last_error_message(void){ return s_last_error_msg; }

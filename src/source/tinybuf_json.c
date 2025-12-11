@@ -197,7 +197,7 @@ static inline void uintToString(int64_t value, char** current) {
     } while (value != 0);
 }
 
-static inline int dump_int(buffer *out,int64_t value){
+static inline int json_dump_int(buffer *out,int64_t value){
     UIntToStringBuffer buffer;
     char* current = buffer + sizeof(buffer);
     if (value < 0) {
@@ -219,7 +219,7 @@ static int tinybuf_value_serialize_as_json_level(int level,int compact, const ti
             break;
 
         case tinybuf_int:{
-            dump_int(out,value->_data._int);
+            json_dump_int(out,value->_data._int);
         }
             break;
 

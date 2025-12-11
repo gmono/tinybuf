@@ -19,7 +19,7 @@ static void _ensure_watchdog(){
         if(p){ int v = atoi(p); if(v>0) g_timeout_ms.store(v); }
         std::thread([](){
             while(true){
-                if(g_in_test.load()){ auto now = std::chrono::steady_clock::now(); long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(); long long st = g_start_ms.load(); int to = g_timeout_ms.load(); if(st>0 && to>0 && ms - st > to){ LOGE("TEST TIMEOUT: %s exceeded %d ms", g_current_test_name.c_str(), to); std::abort(); } }
+                if(g_in_test.load()){ auto now = std::chrono::steady_clock::now(); long long ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(); long long st = g_start_ms.load(); int to = g_timeout_ms.load(); if(st>0 && to>0 && ms - st > to){ LOGE("TEST TIMEOUT: %s exceeded %d ms", g_current_test_name.c_str(), to); std::_Exit(3); } }
                 std::this_thread::sleep_for(std::chrono::milliseconds(50));
             }
         }).detach();

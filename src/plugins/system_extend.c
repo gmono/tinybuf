@@ -4,9 +4,6 @@
 #include "tinybuf_memory.h"
 #include <stdio.h>
 #include <string.h>
-#include "kvec.h"
-#include "klist.h"
-
 static tinybuf_value *clone_box(const tinybuf_value *in)
 {
     buffer *b = buffer_alloc();
@@ -318,7 +315,18 @@ static int dataframe_read(const char *name, const uint8_t *data, int len, tinybu
     }
     if (tinybuf_value_get_type(tmp) == tinybuf_indexed_tensor)
     {
-        *out = *tmp;
+        buffer *bb = buffer_alloc();
+        tinybuf_error rr_i = tinybuf_result_ok(0);
+        int ns = tinybuf_value_serialize(tmp, bb, &rr_i);
+        if (ns <= 0)
+        {
+            buffer_free(bb);
+            tinybuf_value_free(tmp);
+            return -1;
+        }
+        (void)tinybuf_value_deserialize(buffer_get_data(bb), (int)buffer_get_length(bb), out, &rr_i);
+        buffer_free(bb);
+        tinybuf_value_free(tmp);
         return n;
     }
     if (tinybuf_value_get_type(tmp) == tinybuf_tensor)

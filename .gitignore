@@ -12,13 +12,12 @@ build
 # Compiled Dynamic libraries
 #*.dylib
 #*.dll
-3rdpart/dyncall*
+# 3rdpart/dyncall*
 build*
 # Fortran module files
 *.mod
 *.smod
 .tools
-tinybuf_plugins
 
 # Compiled Static libraries
 *.lai

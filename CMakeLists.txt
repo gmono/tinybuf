@@ -3,6 +3,7 @@ project(tinybuf)
 
 option(TINYBUF_BUILD_TESTS "Build tests and benchmarks" ON)
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)

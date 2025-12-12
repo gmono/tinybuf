@@ -275,7 +275,7 @@ static int hlist_write(const char *name, const tinybuf_value *in, buffer *out, t
             tinybuf_result_append_merge(r, &er, tinybuf_merger_left);
             return -1;
         }
-        int wn = try_write_box(out, ch, r);
+        int wn = tinybuf_try_write_box(out, ch, r);
         if (wn <= 0)
         {
             tinybuf_result_add_msg_const(r, "hlist_write child failed");
@@ -345,7 +345,7 @@ static int dataframe_read(const char *name, const uint8_t *data, int len, tinybu
             tinybuf_value_free(tmp);
             return -1;
         }
-        tinybuf_value *ten = tinybuf_value_get_array_child(tmp, 0, &rr);
+        const tinybuf_value *ten = tinybuf_value_get_array_child(tmp, 0, &rr);
         if (!ten)
         {
             tinybuf_value_free(tmp);

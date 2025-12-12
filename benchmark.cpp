@@ -48,6 +48,28 @@ using namespace Json;
 #define JSON_COMPACT 0
 #define MAX_COUNT 1 * 10000
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "Psapi.lib")
+static inline unsigned long long tb_get_mem_usage()
+{
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&pmc, sizeof(pmc)))
+        return (unsigned long long)pmc.WorkingSetSize;
+    return 0ULL;
+}
+#else
+#include <sys/resource.h>
+static inline unsigned long long tb_get_mem_usage()
+{
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0)
+        return (unsigned long long)usage.ru_maxrss * 1024ULL;
+    return 0ULL;
+}
+#endif
+
 static inline uint64_t getCurrentMicrosecondOrigin()
 {
 #ifndef _WIN32
@@ -977,6 +999,7 @@ static int custstr_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_err
 static void custom_type_idx_string_tests()
 {
     tinybuf_set_use_strpool(1);
+    unsigned long long mem_before = tb_get_mem_usage();
     buffer *buf = buffer_alloc();
     tinybuf_value *s = tinybuf_value_alloc();
     tinybuf_value_init_string(s, "hello", 5);
@@ -985,6 +1008,7 @@ static void custom_type_idx_string_tests()
     int wn = tinybuf_try_write_custom_id_box(buf, "string", s, &w);
     assert(wn > 0);
     tinybuf_result_unref(&w);
+    unsigned long long mem_after_write = tb_get_mem_usage();
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_error r = tinybuf_result_ok(0);
@@ -994,6 +1018,11 @@ static void custom_type_idx_string_tests()
     tinybuf_error gr_s1 = tinybuf_result_ok(0);
     buffer *sv = tinybuf_value_get_string(out, &gr_s1);
     assert(sv && buffer_get_length(sv) == 5);
+    unsigned long long mem_after_read = tb_get_mem_usage();
+    LOGI("mem_usage bytes: before=%llu after_write=%llu after_read=%llu delta_write=%llu delta_read=%llu",
+         mem_before, mem_after_write, mem_after_read,
+         (mem_after_write >= mem_before ? mem_after_write - mem_before : 0ULL),
+         (mem_after_read >= mem_after_write ? mem_after_read - mem_after_write : 0ULL));
     tinybuf_value_free(out);
     tinybuf_value_free(s);
     buffer_free(buf);
@@ -1003,6 +1032,7 @@ static void custom_type_idx_string_tests()
 static void oop_serializable_fallback_tests()
 {
     tinybuf_set_use_strpool(1);
+    unsigned long long mem_before = tb_get_mem_usage();
     tinybuf_oop_attach_serializers("xjson", xjson_read, xjson_write, xjson_dump);
     tinybuf_oop_set_serializable("xjson", 1);
     tinybuf_register_builtin_plugins();
@@ -1015,12 +1045,18 @@ static void oop_serializable_fallback_tests()
     tinybuf_result_unref(&w);
     tinybuf_dump_buffer_as_text(buffer_get_data(buf), buffer_get_length(buf), text);
     LOGI("\r\n%s", buffer_get_data(text));
+    unsigned long long mem_after_write = tb_get_mem_usage();
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_error r = tinybuf_result_ok(0);
     int rn = tinybuf_try_read_box(&br, out, any_version, &r);
     assert(rn > 0);
     assert(tinybuf_value_get_type(out) == tinybuf_map);
+    unsigned long long mem_after_read = tb_get_mem_usage();
+    LOGI("mem_usage bytes: before=%llu after_write=%llu after_read=%llu delta_write=%llu delta_read=%llu",
+         mem_before, mem_after_write, mem_after_read,
+         (mem_after_write >= mem_before ? mem_after_write - mem_before : 0ULL),
+         (mem_after_read >= mem_after_write ? mem_after_read - mem_after_write : 0ULL));
     tinybuf_value_free(out);
     tinybuf_value_free(m);
     buffer_free(text);
@@ -1031,6 +1067,7 @@ static void oop_serializable_fallback_tests()
 static void custom_vs_oop_override_tests()
 {
     tinybuf_set_use_strpool(1);
+    unsigned long long mem_before = tb_get_mem_usage();
     tinybuf_oop_attach_serializers("mytype", xjson_read, xjson_write, xjson_dump);
     tinybuf_oop_set_serializable("mytype", 1);
     tinybuf_custom_register("mytype", custstr_read, custstr_write, custstr_dump);
@@ -1041,6 +1078,7 @@ static void custom_vs_oop_override_tests()
     int wn = tinybuf_try_write_custom_id_box(buf, "mytype", s, &w);
     assert(wn > 0);
     tinybuf_result_unref(&w);
+    unsigned long long mem_after_write = tb_get_mem_usage();
     tinybuf_value *out = tinybuf_value_alloc();
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_error r = tinybuf_result_ok(0);
@@ -1049,6 +1087,11 @@ static void custom_vs_oop_override_tests()
     tinybuf_error gr_s2 = tinybuf_result_ok(0);
     buffer *sv = tinybuf_value_get_string(out, &gr_s2);
     assert(sv && buffer_get_length(sv) == 8);
+    unsigned long long mem_after_read = tb_get_mem_usage();
+    LOGI("mem_usage bytes: before=%llu after_write=%llu after_read=%llu delta_write=%llu delta_read=%llu",
+         mem_before, mem_after_write, mem_after_read,
+         (mem_after_write >= mem_before ? mem_after_write - mem_before : 0ULL),
+         (mem_after_read >= mem_after_write ? mem_after_read - mem_after_write : 0ULL));
     tinybuf_value_free(out);
     tinybuf_value_free(s);
     buffer_free(buf);

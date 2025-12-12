@@ -4,6 +4,28 @@
 #include "dyn_sys.h"
 #include "tinybuf_buffer.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "Psapi.lib")
+static inline unsigned long long tb_get_mem_usage()
+{
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS *)&pmc, sizeof(pmc)))
+        return (unsigned long long)pmc.WorkingSetSize;
+    return 0ULL;
+}
+#else
+#include <sys/resource.h>
+static inline unsigned long long tb_get_mem_usage()
+{
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0)
+        return (unsigned long long)usage.ru_maxrss * 1024ULL;
+    return 0ULL;
+}
+#endif
+
 static int xjson_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
 {
     (void)name;
@@ -36,6 +58,7 @@ TEST_CASE("custom string via type_idx", "[custom]")
     tinybuf_init();
     tinybuf_register_builtin_plugins();
 
+    unsigned long long mem_before = tb_get_mem_usage();
     buffer *buf = buffer_alloc();
 
     tinybuf_value *s = tinybuf_value_alloc();
@@ -44,6 +67,7 @@ TEST_CASE("custom string via type_idx", "[custom]")
     tinybuf_error w = tinybuf_result_ok(0);
     int wl = tinybuf_try_write_custom_id_box(buf, "string", s, &w);
     REQUIRE(wl > 0);
+    unsigned long long mem_after_write = tb_get_mem_usage();
 
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_value *out = tinybuf_value_alloc();
@@ -59,6 +83,8 @@ TEST_CASE("custom string via type_idx", "[custom]")
     buffer *sv = tinybuf_value_get_string(out, &gr);
     REQUIRE(sv != NULL);
     REQUIRE(buffer_get_length(sv) == 5);
+    unsigned long long mem_after_read = tb_get_mem_usage();
+    INFO("mem_usage bytes: before=" << mem_before << " after_write=" << mem_after_write << " after_read=" << mem_after_read);
 
     tinybuf_result_unref(&rr);
     tinybuf_result_unref(&w);
@@ -79,6 +105,7 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
 #endif
     tinybuf_plugin_register_from_dll(plugin_path);
 
+    unsigned long long mem_before = tb_get_mem_usage();
     tinybuf_value *arr = tinybuf_value_alloc();
     for (int k = 0; k < 5; ++k)
     {
@@ -94,6 +121,7 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     tinybuf_error w = tinybuf_result_ok(0);
     int wl = tinybuf_try_write_custom_id_box(buf, "hetero_list", arr, &w);
     REQUIRE(wl > 0);
+    unsigned long long mem_after_write = tb_get_mem_usage();
 
     buf_ref br{buffer_get_data(buf), (int64_t)buffer_get_length(buf), buffer_get_data(buf), (int64_t)buffer_get_length(buf)};
     tinybuf_value *out = tinybuf_value_alloc();
@@ -110,6 +138,8 @@ TEST_CASE("hetero_list concatenated boxes", "[custom]")
     tinybuf_error ar0 = tinybuf_result_ok(0);
     const tinybuf_value *last = tinybuf_value_get_array_child(out, 5, &ar0);
     REQUIRE(tinybuf_value_get_type(last) == tinybuf_string);
+    unsigned long long mem_after_read = tb_get_mem_usage();
+    INFO("mem_usage bytes: before=" << mem_before << " after_write=" << mem_after_write << " after_read=" << mem_after_read);
 
     tinybuf_result_unref(&rr2);
     tinybuf_result_unref(&w);

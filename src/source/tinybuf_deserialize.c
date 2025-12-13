@@ -157,6 +157,7 @@ static int tinybuf_deserialize_vector_tensor(const char *ptr, int size, tinybuf_
 
 static int tinybuf_deserialize_dense_tensor(const char *ptr, int size, tinybuf_value *out)
 {
+    const char *p0 = ptr;
     uint64_t dims = 0;
     int a = int_deserialize((uint8_t *)ptr, size, &dims);
     if (a <= 0)
@@ -196,6 +197,8 @@ static int tinybuf_deserialize_dense_tensor(const char *ptr, int size, tinybuf_v
         for (int64_t i = 0; i < count; ++i)
             buf[i] = read_double((uint8_t *)ptr + i * 8);
         tensor->data = buf;
+        ptr += (int)(8 * count);
+        size -= (int)(8 * count);
     }
     else if ((int)dt == 10)
     {
@@ -208,6 +211,8 @@ static int tinybuf_deserialize_dense_tensor(const char *ptr, int size, tinybuf_v
             memcpy(&buf[i], &raw, 4);
         }
         tensor->data = buf;
+        ptr += (int)(4 * count);
+        size -= (int)(4 * count);
     }
     else if ((int)dt == 11)
     {
@@ -217,6 +222,8 @@ static int tinybuf_deserialize_dense_tensor(const char *ptr, int size, tinybuf_v
         uint8_t *buf = (uint8_t *)tinybuf_malloc((int)bytes);
         memcpy(buf, ptr, (size_t)bytes);
         tensor->data = buf;
+        ptr += (int)bytes;
+        size -= (int)bytes;
     }
     else
     {
@@ -244,7 +251,7 @@ static int tinybuf_deserialize_dense_tensor(const char *ptr, int size, tinybuf_v
     out->_type = tinybuf_tensor;
     out->_data._custom = tensor;
     out->_custom_free = NULL;
-    return 1;
+    return 1 + (int)(ptr - p0);
 }
 
 static int tinybuf_deserialize_sparse_tensor(const char *ptr, int size, tinybuf_value *out)
@@ -685,19 +692,14 @@ int tinybuf_value_deserialize(const char *ptr, int size, tinybuf_value *out, tin
     {
         const char *p0 = ptr;
         tinybuf_value *ten = tinybuf_value_alloc();
-        int r1 = tinybuf_value_deserialize(ptr, size, ten, r);
+        buf_ref br_ten = (buf_ref){(char *)ptr, (int64_t)size, (char *)ptr, (int64_t)size};
+        tinybuf_error rt = tinybuf_result_ok(0);
+        int r1 = tinybuf_try_read_box(&br_ten, ten, contain_any, &rt);
         if (r1 <= 0)
         {
-            buf_ref br_fallback = (buf_ref){(char *)ptr, (int64_t)size, (char *)ptr, (int64_t)size};
-            tinybuf_error r1b = tinybuf_result_ok(0);
-            int r1bl = tinybuf_try_read_box(&br_fallback, ten, contain_any, &r1b);
-            if (r1bl <= 0)
-            {
-                tinybuf_value_free(ten);
-                tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: indexed tensor tensor decode failed");
-                return r1bl;
-            }
-            r1 = r1bl;
+            tinybuf_value_free(ten);
+            tinybuf_result_add_msg_const(r, "tinybuf_value_deserialize: indexed tensor tensor decode failed");
+            return r1;
         }
         ptr += r1;
         size -= r1;

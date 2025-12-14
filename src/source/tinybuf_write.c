@@ -669,3 +669,78 @@ int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf
     r->res = total;
     return total;
 }
+
+int tinybuf_try_write_plugin_id_box(buffer *out, const char *name, const tinybuf_value *in, tinybuf_error *r)
+{
+    buffer *body = buffer_alloc();
+    buffer *pool = buffer_alloc();
+    strpool_reset_write(body);
+    int idx = strpool_add(name, (int)strlen(name));
+    uint8_t ty = serialize_name_idx;
+    buffer_append(body, (const char *)&ty, 1);
+    dump_int((uint64_t)idx, body);
+    buffer *payload = buffer_alloc();
+    tinybuf_error wr_local = tinybuf_result_ok(0);
+    int wlen = tinybuf_plugins_try_write_by_name(name, in, payload, &wr_local);
+    dump_int((uint64_t)(wlen > 0 ? wlen : 0), body);
+    if (wlen > 0)
+    {
+        buffer_append(body, buffer_get_data_inline(payload), buffer_get_length_inline(payload));
+    }
+    int rpool = strpool_write_tail(pool, r);
+    if (rpool < 0)
+    {
+        buffer_free(payload);
+        buffer_free(body);
+        buffer_free(pool);
+        return rpool;
+    }
+    uint64_t body_len = (uint64_t)buffer_get_length_inline(body);
+    uint64_t offset_guess_len = 1;
+    uint8_t tmpv[16];
+    while (1)
+    {
+        uint64_t off = 1 + offset_guess_len + body_len;
+        int l = int_serialize_local(off, tmpv);
+        if ((uint64_t)l == offset_guess_len)
+            break;
+        offset_guess_len = (uint64_t)l;
+    }
+    uint64_t final_off = 1 + offset_guess_len + body_len;
+    int rtype = try_write_type(out, serialize_str_pool_table, r);
+    if (rtype <= 0)
+    {
+        buffer_free(payload);
+        buffer_free(body);
+        buffer_free(pool);
+        return rtype;
+    }
+    int rlen = try_write_int_data(0, out, final_off, r);
+    if (rlen <= 0)
+    {
+        buffer_free(payload);
+        buffer_free(body);
+        buffer_free(pool);
+        return rlen;
+    }
+    buffer_append(out, buffer_get_data_inline(body), (int)body_len);
+    int pool_len = buffer_get_length_inline(pool);
+    if (pool_len)
+    {
+        buffer_append(out, buffer_get_data_inline(pool), pool_len);
+    }
+    buffer_free(payload);
+    buffer_free(body);
+    buffer_free(pool);
+    if (wlen < 0)
+    {
+        tinybuf_result_append_merge(r, &wr_local, tinybuf_merger_left);
+        char *m = (char *)tinybuf_malloc(64);
+        snprintf(m, 64, "name=%s", name ? name : "(null)");
+        tinybuf_result_add_msg(r, m, (tinybuf_deleter_fn)tinybuf_free);
+        return wlen;
+    }
+    int total = 1 + (int)offset_guess_len + (int)body_len + pool_len;
+    r->res = total;
+    return total;
+}

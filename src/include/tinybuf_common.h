@@ -90,6 +90,7 @@ extern "C"
     int tinybuf_try_write_pointer(buffer *out, int t, int64_t offset, tinybuf_error *r);
     int tinybuf_try_write_sub_ref(buffer *out, int t, int64_t offset, tinybuf_error *r);
     int tinybuf_try_write_custom_id_box(buffer *out, const char *name, const tinybuf_value *in, tinybuf_error *r);
+    int tinybuf_try_write_plugin_id_box(buffer *out, const char *name, const tinybuf_value *in, tinybuf_error *r);
 
     int tinybuf_init(void);
 
@@ -105,6 +106,7 @@ extern "C"
 #define tinybuf_try_write_partitions_r(out, mainbox, subs, count, res) tinybuf_try_write_partitions((out), (mainbox), (subs), (count), (res))
 #define tinybuf_try_write_pointer_r(out, t, off, res) tinybuf_try_write_pointer((out), (t), (off), (res))
 #define tinybuf_try_write_custom_id_box_r(out, name, in, res) tinybuf_try_write_custom_id_box((out), (name), (in), (res))
+#define tinybuf_try_write_plugin_id_box_r(out, name, in, res) tinybuf_try_write_plugin_id_box((out), (name), (in), (res))
 #define tinybuf_custom_try_read_r(name, data, len, out, contain, res) tinybuf_custom_try_read((name), (data), (len), (out), (contain), (res))
 #define tinybuf_custom_try_write_r(name, in, out, res) tinybuf_custom_try_write((name), (in), (out), (res))
 #define tinybuf_custom_try_dump_r(name, buf, out, res) tinybuf_custom_try_dump((name), (buf), (out), (res))

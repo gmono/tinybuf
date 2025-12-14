@@ -41,6 +41,10 @@ extern "C"
     int tinybuf_plugin_get_runtime_index_by_tag(uint8_t tag);
     int tinybuf_plugin_do_value_op(int plugin_runtime_index, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out);
     int tinybuf_plugin_do_value_op_by_tag(uint8_t tag, const char *name, tinybuf_value *value, const tinybuf_value *args, tinybuf_value *out);
+    int tinybuf_plugins_try_read_by_name(const char *name, buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r);
+    int tinybuf_plugins_try_write_by_name(const char *name, const tinybuf_value *in, buffer *out, tinybuf_error *r);
+    int tinybuf_plugins_try_dump_by_name(const char *name, buf_ref *buf, buffer *out, tinybuf_error *r);
+    const char *tinybuf_plugin_get_guid_by_tag(uint8_t tag);
 
     int tinybuf_plugin_register_descriptor(const tinybuf_plugin_descriptor *d);
 

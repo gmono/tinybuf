@@ -236,6 +236,17 @@ static int runtime_index_by_guid(const char *guid)
     }
     return -1;
 }
+static int plugin_list_index_by_guid(const char *guid)
+{
+    if (!guid)
+        return -1;
+    for (int i = 0; i < s_plugins_count; ++i)
+    {
+        if (s_plugins[i].guid && strcmp(s_plugins[i].guid, guid) == 0)
+            return i;
+    }
+    return -1;
+}
 int tinybuf_plugin_get_runtime_index_by_tag(uint8_t tag)
 {
     int li = plugin_list_index_by_tag(tag);
@@ -243,6 +254,13 @@ int tinybuf_plugin_get_runtime_index_by_tag(uint8_t tag)
         return -1;
     const char *g = s_plugins[li].guid;
     return runtime_index_by_guid(g);
+}
+const char *tinybuf_plugin_get_guid_by_tag(uint8_t tag)
+{
+    int li = plugin_list_index_by_tag(tag);
+    if (li < 0)
+        return NULL;
+    return s_plugins[li].guid;
 }
 
 static int plugin_list_index_by_runtime_index(int runtime_index)
@@ -294,6 +312,30 @@ int tinybuf_plugin_do_value_op_by_tag(uint8_t tag, const char *name, tinybuf_val
     return -1;
 }
 
+int tinybuf_plugins_try_read_by_name(const char *name, buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
+{
+    int li = plugin_list_index_by_guid(name);
+    if (li < 0)
+        return -1;
+    uint8_t tag = s_plugins[li].tags && s_plugins[li].tag_count > 0 ? s_plugins[li].tags[0] : 0;
+    return s_plugins[li].read(tag, buf, out, contain_handler, r);
+}
+int tinybuf_plugins_try_write_by_name(const char *name, const tinybuf_value *in, buffer *out, tinybuf_error *r)
+{
+    int li = plugin_list_index_by_guid(name);
+    if (li < 0)
+        return -1;
+    uint8_t tag = s_plugins[li].tags && s_plugins[li].tag_count > 0 ? s_plugins[li].tags[0] : 0;
+    return s_plugins[li].write(tag, in, out, r);
+}
+int tinybuf_plugins_try_dump_by_name(const char *name, buf_ref *buf, buffer *out, tinybuf_error *r)
+{
+    int li = plugin_list_index_by_guid(name);
+    if (li < 0)
+        return -1;
+    uint8_t tag = s_plugins[li].tags && s_plugins[li].tag_count > 0 ? s_plugins[li].tags[0] : 0;
+    return s_plugins[li].dump(tag, buf, out, r);
+}
 int tinybuf_try_read_box_with_plugins(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
 {
     if (buf->size <= 0)

@@ -832,12 +832,22 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                     {
                     }
                     tinybuf_error cr = tinybuf_result_ok(0);
-                    /* no special-case conversion for 'dataframe' here; rely on custom reader */
-                    int crlen = tinybuf_custom_try_read(name_out, (const uint8_t *)buf->ptr, (int)blen, out, contain_handler, &cr);
+                    buf_ref br_local = (buf_ref){(char *)buf->base, (int64_t)(buf->ptr - buf->base) + (int64_t)blen, (char *)buf->ptr, (int64_t)blen};
+                    int prlen = tinybuf_plugins_try_read_by_name(name_out, &br_local, out, contain_handler, &cr);
+                    int crlen = prlen > 0 ? prlen : tinybuf_custom_try_read(name_out, (const uint8_t *)buf->ptr, (int)blen, out, contain_handler, &cr);
                     if (crlen > 0)
                     {
-                        buf_offset(buf, (int)blen);
-                        len += (int)blen;
+                        if (prlen > 0)
+                        {
+                            int adv = prlen;
+                            buf_offset(buf, adv);
+                            len += adv;
+                        }
+                        else
+                        {
+                            buf_offset(buf, (int)blen);
+                            len += (int)blen;
+                        }
                         pool_mark_complete(box_offset);
                         SET_SUCCESS();
                     }

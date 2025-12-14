@@ -312,37 +312,6 @@ int tinybuf_value_serialize(const tinybuf_value *value, buffer *out, tinybuf_err
         }
     }
     break;
-    case tinybuf_indexed_tensor:
-    {
-        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t *)value->_data._custom;
-        if (!it || !it->tensor)
-        {
-            break;
-        }
-        char type = serialize_indexed_tensor;
-        buffer_append(out, &type, 1);
-        {
-            int nt = tinybuf_value_serialize(it->tensor, out, r);
-            if (nt <= 0) return nt;
-        }
-        dump_int((uint64_t)it->dims, out);
-        for (int i = 0; i < it->dims; ++i)
-        {
-            if (it->indices && it->indices[i])
-            {
-                dump_int(1, out);
-                {
-                    int ni = tinybuf_value_serialize(it->indices[i], out, r);
-                    if (ni <= 0) return ni;
-                }
-            }
-            else
-            {
-                dump_int(0, out);
-            }
-        }
-    }
-    break;
 
     default:
         assert(0);

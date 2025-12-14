@@ -2,6 +2,7 @@
 #define TINYBUF_COMMON_H
 #include <stdint.h>
 #include "tinybuf_buffer.h"
+
 /* forward declarations to avoid circular include with tinybuf.h */
 typedef struct T_tinybuf_value tinybuf_value;
 typedef enum

@@ -187,10 +187,15 @@ void tinybuf_register_builtin_customs(void)
     tinybuf_custom_register("string", custom_string_read, custom_string_write, custom_string_dump);
 }
 
+/* forward declaration from basic_customs to register 'dataframe' etc. */
+void tinybuf_register_basic_customs(void);
+
 int tinybuf_register_builtin_plugins(void)
 {
     int r = tinybuf_plugin_register_descriptor(tinybuf_get_upper_string_descriptor());
-    if (r == 0)
+    if (r == 0){
         tinybuf_register_builtin_customs();
+        tinybuf_register_basic_customs();
+    }
     return r;
 }

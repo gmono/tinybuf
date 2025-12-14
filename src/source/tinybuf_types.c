@@ -7,64 +7,36 @@
 int tinybuf_tensor_get_dtype(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
-    const tinybuf_value *v = value;
-    if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: null"); return -1; }
-    if(v->_type == tinybuf_indexed_tensor)
-    {
-        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)v->_data._custom;
-        v = it ? it->tensor : NULL;
-        if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: no inner tensor"); return -1; }
-    }
-    if(v->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: not tensor"); return -1; }
-    tinybuf_tensor_t *t = (tinybuf_tensor_t*)v->_data._custom;
+    if(!value){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: null"); return -1; }
+    if(value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_dtype: not tensor"); return -1; }
+    tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->dtype : -1;
 }
 
 int tinybuf_tensor_get_ndim(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
-    const tinybuf_value *v = value;
-    if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: null"); return -1; }
-    if(v->_type == tinybuf_indexed_tensor)
-    {
-        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)v->_data._custom;
-        v = it ? it->tensor : NULL;
-        if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: no inner tensor"); return -1; }
-    }
-    if(v->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: not tensor"); return -1; }
-    tinybuf_tensor_t *t = (tinybuf_tensor_t*)v->_data._custom;
+    if(!value){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: null"); return -1; }
+    if(value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_ndim: not tensor"); return -1; }
+    tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->dims : -1;
 }
 
 const int64_t* tinybuf_tensor_get_shape(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
-    const tinybuf_value *v = value;
-    if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: null"); return NULL; }
-    if(v->_type == tinybuf_indexed_tensor)
-    {
-        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)v->_data._custom;
-        v = it ? it->tensor : NULL;
-        if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: no inner tensor"); return NULL; }
-    }
-    if(v->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: not tensor"); return NULL; }
-    tinybuf_tensor_t *t = (tinybuf_tensor_t*)v->_data._custom;
+    if(!value){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: null"); return NULL; }
+    if(value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_shape: not tensor"); return NULL; }
+    tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->shape : NULL;
 }
 
 int64_t tinybuf_tensor_get_count(const tinybuf_value *value, tinybuf_error *r)
 {
     assert(r);
-    const tinybuf_value *v = value;
-    if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: null"); return -1; }
-    if(v->_type == tinybuf_indexed_tensor)
-    {
-        tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)v->_data._custom;
-        v = it ? it->tensor : NULL;
-        if(!v){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: no inner tensor"); return -1; }
-    }
-    if(v->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: not tensor"); return -1; }
-    tinybuf_tensor_t *t = (tinybuf_tensor_t*)v->_data._custom;
+    if(!value){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: null"); return -1; }
+    if(value->_type != tinybuf_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_tensor_get_count: not tensor"); return -1; }
+    tinybuf_tensor_t *t = (tinybuf_tensor_t*)value->_data._custom;
     return t ? t->count : -1;
 }
 
@@ -146,38 +118,4 @@ int tinybuf_value_init_bool_map(tinybuf_value *value, const uint8_t *bits, int64
     return 0;
 }
 
-// 索引张量释放
-static void tinybuf_indexed_tensor_free(void *p)
-{
-    if(!p) return;
-    tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t*)p;
-    if(it->tensor) tinybuf_value_free(it->tensor);
-    if(it->indices)
-    {
-        for(int i=0;i<it->dims;++i)
-        {
-            if(it->indices[i]) tinybuf_value_free(it->indices[i]);
-        }
-        tinybuf_free(it->indices);
-    }
-    tinybuf_free(it);
-}
-
-int tinybuf_value_init_indexed_tensor(tinybuf_value *value, const tinybuf_value *tensor, const tinybuf_value **indices, int dims)
-{
-    if(!value || !tensor || dims<0) return -1;
-    tinybuf_value_clear(value);
-    tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)tinybuf_malloc(sizeof(tinybuf_indexed_tensor_t));
-    it->dims=dims;
-    it->tensor=tinybuf_value_clone(tensor);
-    it->indices=NULL;
-    if(dims>0){
-        it->indices=(tinybuf_value**)tinybuf_malloc(sizeof(tinybuf_value*)*(size_t)dims);
-        for(int i=0;i<dims;++i)
-        {
-            it->indices[i] = indices ? (indices[i] ? tinybuf_value_clone(indices[i]) : NULL) : NULL;
-        }
-    }
-    value->_type=tinybuf_indexed_tensor; value->_data._custom=it; value->_custom_free=tinybuf_indexed_tensor_free;
-    return 0;
-}
+/* indexed_tensor moved to system.data plugin; no core initializer */

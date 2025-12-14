@@ -75,7 +75,7 @@ static inline bool maybe_free_sub_ref(tinybuf_value *value)
 
 static inline bool need_custom_free(const tinybuf_value *value)
 {
-    return value->_data._custom != NULL && (value->_type == tinybuf_custom || value->_type == tinybuf_tensor || value->_type == tinybuf_bool_map || value->_type == tinybuf_indexed_tensor);
+    return value->_data._custom != NULL && (value->_type == tinybuf_custom || value->_type == tinybuf_tensor || value->_type == tinybuf_bool_map);
 }
 static inline bool maybe_free_custom(tinybuf_value *value)
 {
@@ -330,22 +330,6 @@ void tinybuf_version_set(tinybuf_value *target, int64_t version, tinybuf_value *
     target->_data._ref = value;
 }
 
-const tinybuf_value* tinybuf_indexed_tensor_get_tensor_const(const tinybuf_value *value, tinybuf_error *r)
-{
-    assert(r);
-    if(!value || value->_type!=tinybuf_indexed_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_indexed_tensor_get_tensor_const: not indexed_tensor"); return NULL; }
-    tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)value->_data._custom;
-    return it ? it->tensor : NULL;
-}
-
-const tinybuf_value* tinybuf_indexed_tensor_get_index_const(const tinybuf_value *value, int dim, tinybuf_error *r)
-{
-    assert(r);
-    if(!value || value->_type!=tinybuf_indexed_tensor){ tinybuf_result_add_msg_const(r, "tinybuf_indexed_tensor_get_index_const: not indexed_tensor"); return NULL; }
-    tinybuf_indexed_tensor_t *it=(tinybuf_indexed_tensor_t*)value->_data._custom;
-    if(!it || dim<0 || dim>=it->dims){ tinybuf_result_add_msg_const(r, "tinybuf_indexed_tensor_get_index_const: dim out of range"); return NULL; }
-    return it->indices ? it->indices[dim] : NULL;
-}
 tinybuf_type tinybuf_value_get_type(const tinybuf_value *value)
 {
     if (!value) return tinybuf_null;

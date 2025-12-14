@@ -37,10 +37,10 @@ TB_TRAIT(Addable);
 #include <sys/time.h>
 #else
 #include <chrono>
-#endif
 #include <assert.h>
 #include <thread>
 #include <mutex>
+#endif
 
 using namespace std;
 using namespace Json;
@@ -68,6 +68,7 @@ static inline unsigned long long tb_get_mem_usage()
         return (unsigned long long)usage.ru_maxrss * 1024ULL;
     return 0ULL;
 }
+
 #endif
 
 static inline uint64_t getCurrentMicrosecondOrigin()
@@ -1968,6 +1969,7 @@ static void hetero_list_tests()
     tinybuf_set_use_strpool(0);
 }
 
+#ifndef DISABLE_DATAFRAME_TESTS
 static void dataframe_extend_tests()
 {
     tinybuf_set_use_strpool(1);
@@ -2015,6 +2017,7 @@ static void dataframe_extend_tests()
     tinybuf_value_free(ten);
     tinybuf_set_use_strpool(0);
 }
+#endif
 
 static void oop_infra_tests()
 {
@@ -2033,6 +2036,7 @@ static void oop_infra_tests()
     LOGI("oop_infra_tests done");
 }
 
+#ifndef DISABLE_INDEXED_TENSOR_TEST
 static void indexed_tensor_tests()
 {
     // base dense<double> 2x2 with row/col string indices
@@ -2083,6 +2087,7 @@ static void indexed_tensor_tests()
     tinybuf_value_free(ten);
     LOGI("indexed_tensor_tests done");
 }
+#endif
 
 static void partition_concurrent_write_tests()
 {
@@ -2204,9 +2209,13 @@ TEST_CASE("tensor_storage", "[benchmark]") { tensor_storage_tests(); }
 TEST_CASE("bool_map", "[benchmark]") { bool_map_tests(); }
 TEST_CASE("hetero_tuple", "[benchmark]") { hetero_tuple_tests(); }
 TEST_CASE("hetero_list", "[benchmark]") { hetero_list_tests(); }
+#ifndef DISABLE_DATAFRAME_TESTS
 TEST_CASE("dataframe_extend", "[benchmark]") { dataframe_extend_tests(); }
+#endif
 TEST_CASE("oop_infra", "[benchmark]") { oop_infra_tests(); }
+#ifndef DISABLE_INDEXED_TENSOR_TEST
 TEST_CASE("indexed_tensor", "[benchmark]") { indexed_tensor_tests(); }
+#endif
 TEST_CASE("pointer_readable_dump", "[benchmark]") {
     buffer *buf = buffer_alloc();
     tinybuf_value *base = tinybuf_value_alloc();

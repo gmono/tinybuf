@@ -109,6 +109,8 @@
         "common.h": "c",
         "*.inc": "c",
         "dyncall.h": "c",
-        "*.txt": "cpp"
+        "*.txt": "cpp",
+        "stdint.h": "c",
+        "type_core.h": "c"
     }
 }

@@ -81,31 +81,8 @@ static int hlist_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error
     return rlen > 0 ? rlen : rlen;
 }
 
-static int dataframe_read(const char *name, const uint8_t *data, int len, tinybuf_value *out, CONTAIN_HANDLER contain_handler, tinybuf_error *r)
-{
-    (void)name;
-    buf_ref br = (buf_ref){(const char *)data, (int64_t)len, (const char *)data, (int64_t)len};
-    int n = tinybuf_try_read_box(&br, out, contain_handler, r);
-    return n;
-}
-static int dataframe_write(const char *name, const tinybuf_value *in, buffer *out, tinybuf_error *r)
-{
-    (void)name;
-    if (tinybuf_value_get_type(in) != tinybuf_indexed_tensor)
-        return -1;
-    int n = tinybuf_try_write_box(out, in, r);
-    return n;
-}
-static int dataframe_dump(const char *name, buf_ref *buf, buffer *out, tinybuf_error *r)
-{
-    (void)name;
-    int rlen = tinybuf_dump_buffer_as_text(buf->ptr, (int)buf->size, out);
-    return rlen > 0 ? rlen : rlen;
-}
-
 void tinybuf_register_basic_customs(void)
 {
     tinybuf_custom_register("tuple", tuple_read, tuple_write, tuple_dump);
     tinybuf_custom_register("hlist", hlist_read, hlist_write, hlist_dump);
-    tinybuf_custom_register("dataframe", dataframe_read, dataframe_write, dataframe_dump);
 }

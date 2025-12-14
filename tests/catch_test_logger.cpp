@@ -7,6 +7,24 @@
 #include <thread>
 #include <chrono>
 #include <cstdlib>
+#ifdef _WIN32
+#include <windows.h>
+#include <crtdbg.h>
+#include <stdlib.h>
+static struct TbNoDialogInit {
+    TbNoDialogInit() {
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+        _seterrormode(_OUT_TO_STDERR);
+        _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+        _CrtSetReportMode(_CRT_ERROR, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(_CRT_ERROR, _CRTDBG_FILE_STDERR);
+        _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
+        _CrtSetReportFile(_CRT_WARN, _CRTDBG_FILE_STDERR);
+        _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+    }
+} s_tb_no_dialog_init;
+#endif
 
 static std::string g_current_test_name;
 static std::atomic<int> g_timeout_ms{5000};

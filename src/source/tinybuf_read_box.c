@@ -629,87 +629,6 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                 SET_FAILED("read part table header failed");
                 break;
             }
-            case serialize_indexed_tensor:
-            {
-                tinybuf_value *ten = tinybuf_value_alloc();
-                {
-                    tinybuf_error rt = tinybuf_result_ok(0);
-                    int r1 = try_read_box(buf, ten, contain_any, &rt);
-                    if (!(r1 > 0))
-                    {
-                        tinybuf_value_free(ten);
-                        SET_FAILED("read indexed_tensor tensor failed");
-                        break;
-                    }
-                    len += r1;
-                }
-                QWORD dims1 = 0;
-                {
-                    int a1 = try_read_int_data(FALSE, buf, &dims1, r);
-                    if (!(a1 > 0))
-                    {
-                        tinybuf_value_free(ten);
-                        SET_FAILED("read indexed_tensor dims failed");
-                        break;
-                    }
-                    len += a1;
-                }
-                tinybuf_indexed_tensor_t *it = (tinybuf_indexed_tensor_t *)tinybuf_malloc(sizeof(tinybuf_indexed_tensor_t));
-                it->tensor = ten;
-                it->dims = (int)dims1;
-                it->indices = NULL;
-                if (it->dims > 0)
-                {
-                    it->indices = (tinybuf_value **)tinybuf_malloc(sizeof(tinybuf_value *) * (size_t)it->dims);
-                    for (int i = 0; i < it->dims; ++i) it->indices[i] = NULL;
-                }
-                for (int i = 0; i < it->dims; ++i)
-                {
-                    QWORD has = 0;
-                    int ai = try_read_int_data(FALSE, buf, &has, r);
-                    if (!(ai > 0))
-                    {
-                        if (it->indices)
-                        {
-                            for (int k = 0; k < i; ++k) if (it->indices[k]) tinybuf_value_free(it->indices[k]);
-                            tinybuf_free(it->indices);
-                        }
-                        tinybuf_value_free(ten);
-                        tinybuf_free(it);
-                        SET_FAILED("read indexed_tensor index flag failed");
-                        break;
-                    }
-                    len += ai;
-                    if (has)
-                    {
-                        tinybuf_value *idx = tinybuf_value_alloc();
-                        tinybuf_error rr3 = tinybuf_result_ok(0);
-                        int rl3 = try_read_box(buf, idx, contain_any, &rr3);
-                        if (!(rl3 > 0))
-                        {
-                            if (it->indices)
-                            {
-                                for (int k = 0; k < i; ++k) if (it->indices[k]) tinybuf_value_free(it->indices[k]);
-                                tinybuf_free(it->indices);
-                            }
-                            tinybuf_value_free(ten);
-                            tinybuf_free(it);
-                            tinybuf_value_free(idx);
-                            SET_FAILED("read indexed_tensor index failed");
-                            break;
-                        }
-                        len += rl3;
-                        it->indices[i] = idx;
-                    }
-                }
-                if (failed) break;
-                out->_type = tinybuf_indexed_tensor;
-                out->_data._custom = it;
-                out->_custom_free = NULL;
-                pool_mark_complete(box_offset);
-                SET_SUCCESS();
-                break;
-            }
             case serialize_name_idx:
             {
                 QWORD idx = 0;
@@ -913,87 +832,10 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                     {
                     }
                     tinybuf_error cr = tinybuf_result_ok(0);
-                    if (name_len == 9 && memcmp(name_out, "dataframe", 9) == 0)
-                    {
-                        tinybuf_value *tmp = tinybuf_value_alloc();
-                        int dlen = tinybuf_value_deserialize(buf->ptr, (int)blen, tmp, &cr);
-                        if (dlen > 0)
-                        {
-                            if (tinybuf_value_get_type(tmp) == tinybuf_indexed_tensor)
-                            {
-                                *out = *tmp;
-                            }
-                            else if (tinybuf_value_get_type(tmp) == tinybuf_tensor)
-                            {
-                                tinybuf_value_init_indexed_tensor(out, tmp, NULL, 0);
-                                tinybuf_value_free(tmp);
-                            }
-                            else if (tinybuf_value_get_type(tmp) == tinybuf_array)
-                            {
-                                tinybuf_error rrn = tinybuf_result_ok(0);
-                                int nchild = tinybuf_value_get_child_size(tmp, &rrn);
-                                if (nchild > 0)
-                                {
-                                    const tinybuf_value *ten = tinybuf_value_get_array_child(tmp, 0, &rrn);
-                                    int dims = nchild - 1;
-                                    const tinybuf_value **indices = NULL;
-                                    if (dims > 0)
-                                    {
-                                        indices = (const tinybuf_value **)tinybuf_malloc(sizeof(const tinybuf_value *) * (size_t)dims);
-                                        for (int i = 0; i < dims; ++i)
-                                            indices[i] = tinybuf_value_get_array_child(tmp, i + 1, &rrn);
-                                    }
-                                    tinybuf_value_init_indexed_tensor(out, ten, indices, dims);
-                                    if (indices) tinybuf_free((void *)indices);
-                                }
-                            }
-                            else
-                            {
-                                tinybuf_value_free(tmp);
-                                dlen = -1;
-                            }
-                            if (dlen > 0)
-                            {
-                                buf_offset(buf, (int)blen);
-                                len += (int)blen;
-                                pool_mark_complete(box_offset);
-                                SET_SUCCESS();
-                                tinybuf_free(name_out);
-                                return len;
-                            }
-                        }
-                        tinybuf_value_free(tmp);
-                    }
+                    /* no special-case conversion for 'dataframe' here; rely on custom reader */
                     int crlen = tinybuf_custom_try_read(name_out, (const uint8_t *)buf->ptr, (int)blen, out, contain_handler, &cr);
                     if (crlen > 0)
                     {
-                        if (name_len == 9 && memcmp(name_out, "dataframe", 9) == 0)
-                        {
-                            if (tinybuf_value_get_type(out) == tinybuf_array)
-                            {
-                                tinybuf_error rrn = tinybuf_result_ok(0);
-                                int nchild = tinybuf_value_get_child_size(out, &rrn);
-                                if (nchild > 0)
-                                {
-                                    const tinybuf_value *ten = tinybuf_value_get_array_child(out, 0, &rrn);
-                                    int dims = nchild - 1;
-                                    const tinybuf_value **indices = NULL;
-                                    if (dims > 0)
-                                    {
-                                        indices = (const tinybuf_value **)tinybuf_malloc(sizeof(const tinybuf_value *) * (size_t)dims);
-                                        for (int i = 0; i < dims; ++i)
-                                            indices[i] = tinybuf_value_get_array_child(out, i + 1, &rrn);
-                                    }
-                                    tinybuf_value_init_indexed_tensor(out, ten, indices, dims);
-                                    if (indices) tinybuf_free((void *)indices);
-                                }
-                            }
-                            else if (tinybuf_value_get_type(out) == tinybuf_tensor)
-                            {
-                                tinybuf_value *ten_clone = tinybuf_value_clone(out);
-                                tinybuf_value_init_indexed_tensor(out, ten_clone, NULL, 0);
-                            }
-                        }
                         buf_offset(buf, (int)blen);
                         len += (int)blen;
                         pool_mark_complete(box_offset);
@@ -1006,33 +848,6 @@ int try_read_box(buf_ref *buf, tinybuf_value *out, CONTAIN_HANDLER contain_handl
                         int rl2 = tinybuf_try_read_box(&br3, out, contain_handler, r);
                         if (rl2 > 0)
                         {
-                            if (name_len == 9 && memcmp(name_out, "dataframe", 9) == 0)
-                            {
-                                if (tinybuf_value_get_type(out) == tinybuf_array)
-                                {
-                                    tinybuf_error rrn = tinybuf_result_ok(0);
-                                    int nchild = tinybuf_value_get_child_size(out, &rrn);
-                                    if (nchild > 0)
-                                    {
-                                        const tinybuf_value *ten = tinybuf_value_get_array_child(out, 0, &rrn);
-                                        int dims = nchild - 1;
-                                        const tinybuf_value **indices = NULL;
-                                        if (dims > 0)
-                                        {
-                                            indices = (const tinybuf_value **)tinybuf_malloc(sizeof(const tinybuf_value *) * (size_t)dims);
-                                            for (int i = 0; i < dims; ++i)
-                                                indices[i] = tinybuf_value_get_array_child(out, i + 1, &rrn);
-                                        }
-                                        tinybuf_value_init_indexed_tensor(out, ten, indices, dims);
-                                        if (indices) tinybuf_free((void *)indices);
-                                    }
-                                }
-                                else if (tinybuf_value_get_type(out) == tinybuf_tensor)
-                                {
-                                    tinybuf_value *ten_clone = tinybuf_value_clone(out);
-                                    tinybuf_value_init_indexed_tensor(out, ten_clone, NULL, 0);
-                                }
-                            }
                             buf_offset(buf, rl2);
                             len += rl2;
                             pool_mark_complete(box_offset);

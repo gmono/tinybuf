@@ -36,3 +36,9 @@
          3. 此处有一个叫dynamic_call(void*,list of bin_value)的函数
          4. 核心在于实现这个叫dynamic_call的函数 这里假设调用协议只关心二进制数据参数的大小而不关心其实际类型例如一个i32和一个f32的传参方式完全一样 如果不一样 必须做相应处理
          5. 使用dyncall封装实现 通过代理tinybuf_value 为bin_value可实现动态类型与序列化系统兼容
+
+
+## 语言支持
+
+1. 优先支持Rust 对接纯C接口
+2. 支持C++ 支持把C++对象树自动转换为tinybuf_value树 通过subref连接 C++类需要提供静态函数 get_sub_refs()用于返回子引用表

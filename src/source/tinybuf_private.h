@@ -47,12 +47,6 @@ typedef struct
     int64_t count;
     uint8_t *bits;
 } tinybuf_bool_map_t;
-typedef struct
-{
-    tinybuf_value *tensor;
-    tinybuf_value **indices;
-    int dims;
-} tinybuf_indexed_tensor_t;
 
 // serialize type markers
 typedef enum
@@ -104,7 +98,6 @@ typedef enum
     serialize_dense_tensor = 44,
     serialize_sparse_tensor = 45,
     serialize_bool_map = 46,
-    serialize_indexed_tensor = 47,
     serialize_name_idx = 48,
     serialize_uri = 52,
     serialize_router_link = 53,

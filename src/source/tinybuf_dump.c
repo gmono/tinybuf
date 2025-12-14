@@ -345,46 +345,6 @@ static int dump_box_text(buf_ref *buf, buffer *dst)
             }
             return consumed;
         }
-        case serialize_indexed_tensor:
-        {
-            tinybuf_value tmp;
-            memset(&tmp, 0, sizeof(tmp));
-            buf_ref hb = *buf;
-            tinybuf_error r1 = tinybuf_result_ok(0);
-            int n1 = tinybuf_try_read_box(&hb, &tmp, contain_any, &r1);
-            if (n1 <= 0) return n1;
-            buf_offset(buf, n1);
-            consumed += n1;
-            tinybuf_value_free(&tmp);
-
-            QWORD dims = 0;
-            int a = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &dims);
-            if (a <= 0) return a;
-            buf_offset(buf, a);
-            consumed += a;
-            append_cstr(dst, "indexed_tensor(dims=");
-            append_int_dec(dst, (int64_t)dims);
-            append_cstr(dst, ")");
-            for (QWORD i = 0; i < dims; ++i) {
-                QWORD has = 0;
-                int c = try_read_int_tovar(FALSE, buf->ptr, (int)buf->size, &has);
-                if (c <= 0) return c;
-                buf_offset(buf, c);
-                consumed += c;
-                if (has) {
-                    tinybuf_value tmp2;
-                    memset(&tmp2, 0, sizeof(tmp2));
-                    buf_ref hb2 = *buf;
-                    tinybuf_error r2 = tinybuf_result_ok(0);
-                    int n2 = tinybuf_try_read_box(&hb2, &tmp2, contain_any, &r2);
-                    if (n2 <= 0) return n2;
-                    buf_offset(buf, n2);
-                    consumed += n2;
-                    tinybuf_value_free(&tmp2);
-                }
-            }
-            return consumed;
-        }
         case serialize_name_idx:
         {
             QWORD idx = 0;

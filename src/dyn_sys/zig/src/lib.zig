@@ -2,7 +2,54 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
 
-pub const type_def_obj = extern struct {};
+pub const init_fn = *const fn (self: ?*anyopaque) callconv(.C) void;
+pub const deleter_fn = *const fn (self: ?*anyopaque) callconv(.C) void;
+pub const copy_fn = *const fn (from: ?*const anyopaque, to: ?*anyopaque) callconv(.C) void;
+pub const move_fn = *const fn (from: ?*anyopaque, to: ?*anyopaque) callconv(.C) void;
+pub const alloc_fn = *const fn () callconv(.C) ?*anyopaque;
+pub const get_total_size_fn = *const fn (self: ?*const anyopaque) callconv(.C) usize;
+
+pub const type_def_kind = enum(c_int) {
+    type_simple = 0,
+    type_complex = 1,
+};
+
+pub const field_def = extern struct {
+    name: ?[*:0]const u8,
+    type: ?*const type_def_obj,
+    meta: ?*const anyopaque,
+};
+
+pub const param_def = extern struct {
+    name: ?[*:0]const u8,
+    type: ?*const type_def_obj,
+    meta: ?*const anyopaque,
+};
+
+pub const method_def = extern struct {
+    name: ?[*:0]const u8,
+    ret: ?*const type_def_obj,
+    params: ?*const param_def,
+    param_count: c_int,
+    meta: ?*const anyopaque,
+    impl: ?*anyopaque,
+};
+
+pub const type_def_obj = extern struct {
+    name: ?[*:0]const u8,
+    kind: type_def_kind,
+    size: usize,
+    init: init_fn,
+    deleter: deleter_fn,
+    copy: copy_fn,
+    move: move_fn,
+    alloc: alloc_fn,
+    get_total_size: get_total_size_fn,
+    fields: ?*const field_def,
+    field_count: c_int,
+    methods: ?*const method_def,
+    method_count: c_int,
+};
 pub const typed_obj = extern struct {
     ptr: ?*anyopaque,
     type: ?*const type_def_obj,
@@ -232,11 +279,37 @@ pub export fn dyn_oop_do_op(
     const oi = findOpIndex(idx, op_name) orelse return -1;
     const op = g_types.items[idx].ops.items[oi];
     if (op.impl_fn == null) return -1;
-    // 简单校验：参数个数匹配
     if (op.typed_sig) |ts| {
-        if (argc != ts.param_count) {
-            // 允许不严格校验：只在>0时校验
-            if (ts.param_count > 0) return -1;
+        const pc: usize = @intCast(ts.param_count);
+        if (pc > 0) {
+            const a_count: usize = @intCast(argc);
+            if (a_count < pc) return -1;
+            if (args != null) {
+                const a_ptr = args.?;
+                const params = ts.params orelse null;
+                if (params != null) {
+                    const ps = params.?;
+                    var i: usize = 0;
+                    while (i < pc) : (i += 1) {
+                        const need_tn = if (ps[i].type_name) |tn| cspan(tn) else "value";
+                        const a_many: [*]const typed_obj = @ptrCast(a_ptr);
+                        const arg_ty = a_many[i].type;
+                        if (arg_ty == null) {
+                            if (!mem.eql(u8, need_tn, "value") and !mem.eql(u8, need_tn, "any")) return -1;
+                        } else {
+                            const name_ptr = arg_ty.?.name orelse null;
+                            if (name_ptr != null) {
+                                const got = cspan(name_ptr.?);
+                                if (!mem.eql(u8, need_tn, "any") and !mem.eql(u8, need_tn, "value")) {
+                                    if (!mem.eql(u8, got, need_tn)) return -1;
+                                }
+                            } else {
+                                if (!mem.eql(u8, need_tn, "any") and !mem.eql(u8, need_tn, "value")) return -1;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
     return op.impl_fn.?(self, args, argc, out);

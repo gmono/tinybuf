@@ -35,6 +35,22 @@ jobs:
       - name: Run Aggregated Tests
         run: test -x build/bin/all_test && build/bin/all_test "~[benchmark]" || true
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Rust tests (tinybuf_script)
+        working-directory: src/interpret/tinybuf_script
+        run: cargo test --all --quiet
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          zig-version: 0.14.0
+
+      - name: Run Zig tests (dyn_sys)
+        working-directory: src/dyn_sys/zig
+        run: zig build test
+
   windows:
     runs-on: windows-latest
     steps:
@@ -62,3 +78,21 @@ jobs:
         shell: powershell
         run: |
           if (Test-Path build\bin\Release\all_test.exe) { & build\bin\Release\all_test.exe "~[benchmark]" }
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run Rust tests (tinybuf_script)
+        shell: powershell
+        working-directory: src\interpret\tinybuf_script
+        run: cargo test --all --quiet
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          zig-version: 0.14.0
+
+      - name: Run Zig tests (dyn_sys)
+        shell: powershell
+        working-directory: src\dyn_sys\zig
+        run: zig build test

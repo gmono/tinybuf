@@ -79,8 +79,10 @@ target_include_directories(tinybuf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/kl
 add_library(dyn_integration STATIC src/dyn_sys/dyn_integration.c)
 
 # Use Zig-implemented dyn_sys as replacement
+set(ZIG_GLOBAL_CACHE_DIR "${CMAKE_BINARY_DIR}/.zig-cache")
 add_custom_target(build_zig_dyn_sys
-    COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig" ${CMAKE_COMMAND} -E env ZIG_GLOBAL_CACHE_DIR=$ENV{USERPROFILE}/.zig zig build
+    COMMAND ${CMAKE_COMMAND} -E make_directory "${ZIG_GLOBAL_CACHE_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig" ${CMAKE_COMMAND} -E env ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR}" zig build
     BYPRODUCTS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig/zig-out/lib/dyn_sys_zig.lib"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig/zig-out/lib/libdyn_sys_zig.a"

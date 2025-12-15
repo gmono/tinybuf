@@ -27,6 +27,7 @@ Stmt: Stmt = {
     Sep* "print" <s:StringLit> <o:OptExpr> Sep => Stmt::PrintTemplate(s, o),
     Sep* "list" "types" Sep => Stmt::ListTypes,
     Sep* "list" "type" <name:Ident> Sep => Stmt::ListType(name),
+    Sep* <e:Expr> Sep => Stmt::ExprStmt(e),
 };
 
 Sep: () = { ";" => (), "\n" => () };

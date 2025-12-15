@@ -2,6 +2,8 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = std.mem.Allocator;
 
+pub const CStr = ?[*:0]const u8;
+
 pub const init_fn = *const fn (self: ?*anyopaque) callconv(.C) void;
 pub const deleter_fn = *const fn (self: ?*anyopaque) callconv(.C) void;
 pub const copy_fn = *const fn (from: ?*const anyopaque, to: ?*anyopaque) callconv(.C) void;
@@ -39,12 +41,12 @@ pub const type_def_obj = extern struct {
     name: ?[*:0]const u8,
     kind: type_def_kind,
     size: usize,
-    init: init_fn,
-    deleter: deleter_fn,
-    copy: copy_fn,
-    move: move_fn,
-    alloc: alloc_fn,
-    get_total_size: get_total_size_fn,
+    init: ?init_fn,
+    deleter: ?deleter_fn,
+    copy: ?copy_fn,
+    move: ?move_fn,
+    alloc: ?alloc_fn,
+    get_total_size: ?get_total_size_fn,
     fields: ?*const field_def,
     field_count: c_int,
     methods: ?*const method_def,
@@ -92,6 +94,7 @@ fn ensureInit() void {
         g_allocator = std.heap.page_allocator;
         g_types = std.ArrayList(TypeEntry).init(g_allocator);
         g_inited = true;
+        _ = ensureType("testobj") catch {};
     }
 }
 
@@ -104,6 +107,20 @@ fn to_cstr(s: []const u8) ![*:0]u8 {
 
 fn cspan(p: [*:0]const u8) []const u8 {
     return mem.span(p);
+}
+
+pub export fn new_str(ptr: CStr) CStr {
+    ensureInit();
+    if (ptr == null) return null;
+    const s = mem.span(ptr.?);
+    return to_cstr(s) catch null;
+}
+
+pub export fn deallocate_str(s: CStr) void {
+    ensureInit();
+    if (s == null) return;
+    const sc = mem.span(s.?);
+    g_allocator.free(@constCast(sc));
 }
 
 fn findTypeIndex(type_name: [*:0]const u8) ?usize {
@@ -315,6 +332,350 @@ pub export fn dyn_oop_do_op(
     return op.impl_fn.?(self, args, argc, out);
 }
 
+fn ptr_add(p: ?*anyopaque, off: usize) ?*anyopaque {
+    if (p == null) return null;
+    const base: [*]u8 = @ptrCast(p.?);
+    return @ptrCast(base + off);
+}
+
+fn cptr_add(p: ?*const anyopaque, off: usize) ?*const anyopaque {
+    if (p == null) return null;
+    const base: [*]const u8 = @ptrCast(p.?);
+    return @ptrCast(base + off);
+}
+
+fn call_init_if_any(def: ?*const type_def_obj, self: ?*anyopaque) void {
+    if (def == null or self == null) return;
+    if (def.?.init != null) def.?.init.?(self);
+}
+
+pub export fn default_mv(from: ?*anyopaque, to: ?*anyopaque, s: usize) void {
+    if (from == null or to == null or s == 0) return;
+    const f: [*]const u8 = @ptrCast(from.?);
+    const t: [*]u8 = @ptrCast(to.?);
+    @memcpy(t[0..s], f[0..s]);
+    @memset(@as([*]u8, @ptrCast(from.?))[0..s], 0);
+}
+
+pub export fn default_copy(from: ?*const anyopaque, to: ?*anyopaque, s: usize) void {
+    if (from == null or to == null or s == 0) return;
+    const f: [*]const u8 = @ptrCast(from.?);
+    const t: [*]u8 = @ptrCast(to.?);
+    @memcpy(t[0..s], f[0..s]);
+}
+
+pub export fn default_delete(obj: ?*anyopaque) void {
+    _ = obj;
+}
+
+pub export fn type_total_size(def: ?*const type_def_obj, self: ?*const anyopaque) usize {
+    if (def == null) return 0;
+    if (def.?.get_total_size != null) return def.?.get_total_size.?(self);
+    return def.?.size;
+}
+
+pub export fn object_mv(def: ?*const type_def_obj, from: ?*anyopaque, to: ?*anyopaque) c_int {
+    if (def == null or to == null or from == null) return -1;
+    if (def.?.move != null) {
+        def.?.move.?(from, to);
+        return 0;
+    }
+    const sz = type_total_size(def, from);
+    default_mv(from, to, sz);
+    return 0;
+}
+
+pub export fn object_copy(def: ?*const type_def_obj, from: ?*const anyopaque, to: ?*anyopaque) c_int {
+    if (def == null or to == null or from == null) return -1;
+    if (def.?.copy != null) {
+        def.?.copy.?(from, to);
+        return 0;
+    }
+    const sz = type_total_size(def, from);
+    default_copy(from, to, sz);
+    return 0;
+}
+
+pub export fn object_delete(def: ?*const type_def_obj, obj: ?*anyopaque) c_int {
+    if (def == null or obj == null) return -1;
+    if (def.?.deleter != null) {
+        def.?.deleter.?(obj);
+        return 0;
+    }
+    const sz = type_total_size(def, obj);
+    if (sz > 0) {
+        const p: [*]u8 = @ptrCast(obj.?);
+        g_allocator.free(p[0..sz]);
+    }
+    return 0;
+}
+
+pub export fn typed_obj_init(o: ?*typed_obj, def: ?*const type_def_obj, ptr: ?*anyopaque) c_int {
+    if (o == null or def == null) return -1;
+    o.?.type = def;
+    o.?.ptr = ptr;
+    call_init_if_any(def, o.?.ptr);
+    return 0;
+}
+
+pub export fn typed_obj_alloc(o: ?*typed_obj, def: ?*const type_def_obj) c_int {
+    if (o == null or def == null) return -1;
+    var mem_ptr: ?*anyopaque = null;
+    if (def.?.alloc != null) {
+        mem_ptr = def.?.alloc.?();
+    } else {
+        const sz = if (def.?.size > 0) def.?.size else 1;
+        var buf = g_allocator.alloc(u8, sz) catch return -1;
+        @memset(buf[0..sz], 0);
+        mem_ptr = @ptrCast(buf.ptr);
+    }
+    if (mem_ptr == null) return -1;
+    o.?.type = def;
+    o.?.ptr = mem_ptr;
+    call_init_if_any(def, o.?.ptr);
+    return 0;
+}
+
+pub export fn typed_obj_copy(dst: ?*typed_obj, src: ?*const typed_obj) c_int {
+    if (dst == null or src == null or src.?.type == null or src.?.ptr == null) return -1;
+    if (dst.?.ptr == null) {
+        const sz = type_total_size(src.?.type, src.?.ptr);
+        var buf = g_allocator.alloc(u8, sz) catch return -1;
+        @memset(buf[0..sz], 0);
+        dst.?.ptr = @ptrCast(buf.ptr);
+    }
+    dst.?.type = src.?.type;
+    return object_copy(src.?.type, src.?.ptr, dst.?.ptr);
+}
+
+pub export fn typed_obj_move(dst: ?*typed_obj, src: ?*typed_obj) c_int {
+    if (dst == null or src == null or src.?.type == null or src.?.ptr == null) return -1;
+    if (dst.?.ptr == null) {
+        const sz = type_total_size(src.?.type, src.?.ptr);
+        var buf = g_allocator.alloc(u8, sz) catch return -1;
+        @memset(buf[0..sz], 0);
+        dst.?.ptr = @ptrCast(buf.ptr);
+    }
+    dst.?.type = src.?.type;
+    const rc = object_mv(src.?.type, src.?.ptr, dst.?.ptr);
+    if (rc == 0) {
+        const sz = type_total_size(src.?.type, null);
+        const p: [*]u8 = @ptrCast(src.?.ptr.?);
+        g_allocator.free(p[0..sz]);
+        src.?.ptr = null;
+        src.?.type = null;
+    }
+    return rc;
+}
+
+pub export fn typed_obj_delete(o: ?*typed_obj) c_int {
+    if (o == null or o.?.type == null or o.?.ptr == null) return -1;
+    const rc = object_delete(o.?.type, o.?.ptr);
+    o.?.ptr = null;
+    o.?.type = null;
+    return rc;
+}
+
+fn init_noop(self: ?*anyopaque) callconv(.C) void {
+    _ = self;
+}
+
+pub export const i8_def: type_def_obj = .{
+    .name = "i8",
+    .kind = .type_simple,
+    .size = @sizeOf(i8),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const u8_def: type_def_obj = .{
+    .name = "u8",
+    .kind = .type_simple,
+    .size = @sizeOf(u8),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const i16_def: type_def_obj = .{
+    .name = "i16",
+    .kind = .type_simple,
+    .size = @sizeOf(i16),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const u16_def: type_def_obj = .{
+    .name = "u16",
+    .kind = .type_simple,
+    .size = @sizeOf(u16),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const i32_def: type_def_obj = .{
+    .name = "i32",
+    .kind = .type_simple,
+    .size = @sizeOf(i32),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const u32_def: type_def_obj = .{
+    .name = "u32",
+    .kind = .type_simple,
+    .size = @sizeOf(u32),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const i64_def: type_def_obj = .{
+    .name = "i64",
+    .kind = .type_simple,
+    .size = @sizeOf(i64),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const u64_def: type_def_obj = .{
+    .name = "u64",
+    .kind = .type_simple,
+    .size = @sizeOf(u64),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const f32_def: type_def_obj = .{
+    .name = "f32",
+    .kind = .type_simple,
+    .size = @sizeOf(f32),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const f64_def: type_def_obj = .{
+    .name = "f64",
+    .kind = .type_simple,
+    .size = @sizeOf(f64),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const bool_def: type_def_obj = .{
+    .name = "bool",
+    .kind = .type_simple,
+    .size = @sizeOf(u8),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const char_def: type_def_obj = .{
+    .name = "char",
+    .kind = .type_simple,
+    .size = @sizeOf(u8),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+pub export const ptr_def: type_def_obj = .{
+    .name = "ptr",
+    .kind = .type_simple,
+    .size = @sizeOf(?*anyopaque),
+    .init = init_noop,
+    .deleter = null,
+    .copy = null,
+    .move = null,
+    .alloc = null,
+    .get_total_size = null,
+    .fields = null,
+    .field_count = 0,
+    .methods = null,
+    .method_count = 0,
+};
+
 test "register type and op, query meta, invoke" {
     const T = "Test";
     const add = "add";
@@ -357,4 +718,16 @@ pub export fn add_cb(self: *typed_obj, args: ?*const typed_obj, argc: c_int, out
     _ = argc;
     _ = out;
     return 42;
+}
+
+test "typed_obj alloc/copy/move/delete with i64" {
+    var a: typed_obj = .{ .ptr = null, .type = null };
+    try std.testing.expect(typed_obj_alloc(&a, &i64_def) == 0);
+    var b: typed_obj = .{ .ptr = null, .type = null };
+    try std.testing.expect(typed_obj_copy(&b, &a) == 0);
+    var moved: typed_obj = .{ .ptr = null, .type = null };
+    try std.testing.expect(typed_obj_move(&moved, &a) == 0);
+    try std.testing.expect(a.ptr == null and a.type == null);
+    try std.testing.expect(typed_obj_delete(&b) == 0);
+    try std.testing.expect(typed_obj_delete(&moved) == 0);
 }

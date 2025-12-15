@@ -13,3 +13,6 @@ thiserror = "1.0"
 
 [build-dependencies]
 lalrpop = "0.22"
+
+[features]
+zig_oop = []

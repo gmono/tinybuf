@@ -14,6 +14,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          zig-version: 0.14.0
+
       - name: Install Ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
@@ -42,20 +47,24 @@ jobs:
         working-directory: src/interpret/tinybuf_script
         run: cargo test --all --quiet
 
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          zig-version: 0.14.0
-
       - name: Run Zig tests (dyn_sys)
         working-directory: src/dyn_sys/zig
         run: zig build test
+
+      - name: Run Rust tests with Zig OOP feature
+        working-directory: src/interpret/tinybuf_script
+        run: cargo test --all --features zig_oop --quiet
 
   windows:
     runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          zig-version: 0.14.0
 
       - name: Configure
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -86,11 +95,6 @@ jobs:
         shell: powershell
         working-directory: src\interpret\tinybuf_script
         run: cargo test --all --quiet
-
-      - name: Setup Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          zig-version: 0.14.0
 
       - name: Run Zig tests (dyn_sys)
         shell: powershell

@@ -76,8 +76,26 @@ file(GLOB json_src_Root ${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/jsoncpp/*.cpp)
 
 add_library(tinybuf STATIC ${tinybuf_src_Root} ${system_plugins_src} ${core_src})
 target_include_directories(tinybuf PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/klib)
-add_library(dyn_sys STATIC src/dyn_sys/dyn_sys.c src/dyn_sys/type_core.c)
 add_library(dyn_integration STATIC src/dyn_sys/dyn_integration.c)
+
+# Use Zig-implemented dyn_sys as replacement
+add_custom_target(build_zig_dyn_sys
+    COMMAND ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig" ${CMAKE_COMMAND} -E env ZIG_GLOBAL_CACHE_DIR=$ENV{USERPROFILE}/.zig zig build
+    BYPRODUCTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig/zig-out/lib/dyn_sys_zig.lib"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig/zig-out/lib/libdyn_sys_zig.a"
+    COMMENT "Building Zig dyn_sys static library"
+)
+add_library(dyn_sys STATIC IMPORTED)
+add_dependencies(dyn_sys build_zig_dyn_sys)
+if(WIN32)
+    set_target_properties(dyn_sys PROPERTIES
+        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig/zig-out/lib/dyn_sys_zig.lib")
+else()
+    set_target_properties(dyn_sys PROPERTIES
+        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/src/dyn_sys/zig/zig-out/lib/libdyn_sys_zig.a")
+endif()
+
 target_link_libraries(tinybuf PUBLIC dyn_sys dyn_integration)
 add_library(jsoncpp STATIC ${json_src_Root})
 set(DYNCALL_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/3rdpart/dyncall-1.4)

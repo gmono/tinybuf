@@ -123,7 +123,7 @@ mod tests {
             let dd(x,y)=x+y
             let a=3
             let b=4
-            run (dd a b)
+            run (dd,a,b)
         "#;
         let out = interpret_script(src).unwrap();
         assert_eq!(out, vec!["7"]);
@@ -198,6 +198,26 @@ mod tests {
         assert_eq!(shell_transform_line("a+b"), "print a+b\n");
         assert_eq!(shell_transform_line("2**3"), "print 2**3\n");
         assert_eq!(shell_transform_line("(1 + 2) * 3"), "print (1 + 2) * 3\n");
+    }
+
+    #[test]
+    fn sym_and_str_conversions() {
+        let src = r#"
+            print #"hello"
+            print 'dd
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["hello", "dd"]);
+    }
+
+    #[test]
+    fn list_map_pipeline() {
+        let src = r#"
+            let id(x)=x
+            print ((#"aa",#"bb",#"cc") |id)
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["(aa bb cc)"]);
     }
 
     #[test]

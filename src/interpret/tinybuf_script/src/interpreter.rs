@@ -9,6 +9,7 @@ enum Value {
     Str(String),
     List(Vec<Value>),
     Func(Vec<String>, Expr, HashMap<String, Value>),
+    FuncBlock(Vec<String>, Vec<Stmt>, Expr, HashMap<String, Value>),
 }
 
 pub struct Interpreter {
@@ -33,6 +34,11 @@ impl Interpreter {
                 Stmt::LetFunc(name, params, body) => {
                     let func_env = self.env.clone();
                     let v = Value::Func(params.clone(), (*body).clone(), func_env);
+                    self.env.insert(name.clone(), v);
+                }
+                Stmt::LetFuncBlock(name, params, body, ret) => {
+                    let func_env = self.env.clone();
+                    let v = Value::FuncBlock(params.clone(), body.clone(), (*ret).clone(), func_env);
                     self.env.insert(name.clone(), v);
                 }
                 Stmt::PrintTemplate(tpl, arg) => {
@@ -216,6 +222,9 @@ impl Interpreter {
                     }
                 }
             }
+            Stmt::Return(_) => {
+                return Err("return outside function".to_string());
+            }
             Stmt::ExprStmt(expr) => {
                 let _ = eval(expr, &self.env, &self.ops)?;
             }
@@ -224,17 +233,28 @@ impl Interpreter {
         Ok(outputs)
     }
     fn call_func(&self, name: &str, args: &[Value]) -> Result<Value, String> {
-        if let Some(Value::Func(params, body, fenv)) = self.env.get(name) {
-            let mut call_env = fenv.clone();
-            if args.len() != params.len() {
-                return Err(format!("arity mismatch: expected {}, got {}", params.len(), args.len()));
+        match self.env.get(name) {
+            Some(Value::Func(params, body, fenv)) => {
+                let mut call_env = fenv.clone();
+                if args.len() != params.len() {
+                    return Err(format!("arity mismatch: expected {}, got {}", params.len(), args.len()));
+                }
+                for (p, v) in params.iter().zip(args.iter()) {
+                    call_env.insert(p.clone(), v.clone());
+                }
+                eval(body, &call_env, &self.ops)
             }
-            for (p, v) in params.iter().zip(args.iter()) {
-                call_env.insert(p.clone(), v.clone());
+            Some(Value::FuncBlock(params, body_stmts, ret_expr, fenv)) => {
+                let mut call_env = fenv.clone();
+                if args.len() != params.len() {
+                    return Err(format!("arity mismatch: expected {}, got {}", params.len(), args.len()));
+                }
+                for (p, v) in params.iter().zip(args.iter()) {
+                    call_env.insert(p.clone(), v.clone());
+                }
+                eval_block(&body_stmts, ret_expr, &mut call_env, &self.ops)
             }
-            eval(body, &call_env, &self.ops)
-        } else {
-            Err(format!("undefined function: {}", name))
+            _ => Err(format!("undefined function: {}", name)),
         }
     }
 }
@@ -509,6 +529,7 @@ fn to_string(v: &Value) -> String {
             out
         }
         Value::Func(_, _, _) => "<func>".to_string(),
+        Value::FuncBlock(_, _, _, _) => "<func>".to_string(),
     }
 }
 
@@ -579,9 +600,59 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             }
         }
         Expr::Group(e) => eval(e, env, ops),
+        Expr::Map(list_expr, func_name) => {
+            let lv = eval(list_expr, env, ops)?;
+            match lv {
+                Value::List(xs) => {
+                    if let Some(Value::Func(params, body, fenv)) = env.get(func_name) {
+                        if params.len() != 1 {
+                            return Err("map function must be unary".to_string());
+                        }
+                        let mut out = Vec::new();
+                        for x in xs {
+                            let mut call_env = fenv.clone();
+                            call_env.insert(params[0].clone(), x);
+                            let r = eval(body, &call_env, ops)?;
+                            out.push(r);
+                        }
+                        Ok(Value::List(out))
+                    } else {
+                        Err(format!("undefined function: {}", func_name))
+                    }
+                }
+                _ => Err("map left operand must be a list".to_string()),
+            }
+        }
     }
 }
 
+fn eval_block(stmts: &[Stmt], ret: &Expr, env: &mut HashMap<String, Value>, ops: &HashMap<String, String>) -> Result<Value, String> {
+    for stmt in stmts {
+        match stmt {
+            Stmt::Let(name, expr) => {
+                let v = eval(expr, env, ops)?;
+                env.insert(name.clone(), v);
+            }
+            Stmt::LetFunc(name, params, body) => {
+                let func_env = env.clone();
+                env.insert(name.clone(), Value::Func(params.clone(), (*body).clone(), func_env));
+            }
+            Stmt::LetFuncBlock(name, params, body, ret2) => {
+                let func_env = env.clone();
+                env.insert(name.clone(), Value::FuncBlock(params.clone(), body.clone(), (*ret2).clone(), func_env));
+            }
+            Stmt::ExprStmt(e) => {
+                let _ = eval(e, env, ops)?;
+            }
+            Stmt::PrintExpr(_) | Stmt::PrintTemplate(_, _) => {}
+            Stmt::Return(_) => {}
+            Stmt::ListTypes | Stmt::ListType(_) | Stmt::RegOp(_, _) | Stmt::Call(_, _, _) | Stmt::RunList(_) => {
+                return Err("invalid statement in function block".to_string());
+            }
+        }
+    }
+    eval(ret, env, ops)
+}
 fn bin_int(
     a: &Expr,
     b: &Expr,

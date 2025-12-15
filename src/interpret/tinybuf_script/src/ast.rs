@@ -7,6 +7,8 @@ pub enum Stmt {
     ListType(String),
     RegOp(String, String),
     LetFunc(String, Vec<String>, Expr),
+    LetFuncBlock(String, Vec<String>, Vec<Stmt>, Expr),
+    Return(Expr),
     Call(String, String, Vec<Expr>),
     RunList(Vec<Expr>),
     ExprStmt(Expr),
@@ -27,5 +29,6 @@ pub enum Expr {
     Mod(Box<Expr>, Box<Expr>),
     Pow(Box<Expr>, Box<Expr>),
     Custom(Box<Expr>, String, Box<Expr>),
+    Map(Box<Expr>, String),
     Group(Box<Expr>),
 }

@@ -1,0 +1,3 @@
+[workspace]
+members = ["tinybuf_plugin_rs", "demo", "upper_plugin_rs"]
+resolver = "2"

@@ -1,0 +1,8 @@
+[package]
+name = "plugin_demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tinybuf_plugin_rs = { path = "../tinybuf_plugin_rs" }
+upper_plugin_rs = { path = "../upper_plugin_rs" }

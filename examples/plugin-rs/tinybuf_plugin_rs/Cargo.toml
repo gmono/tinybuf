@@ -1,0 +1,13 @@
+[package]
+name = "tinybuf_plugin_rs"
+version = "0.1.0"
+edition = "2021"
+links = "tinybuf"
+
+[lib]
+name = "tinybuf_plugin_rs"
+path = "src/lib.rs"
+
+[build-dependencies]
+cmake = "0.1"
+

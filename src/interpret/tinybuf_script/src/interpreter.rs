@@ -56,7 +56,7 @@ impl Interpreter {
                 unsafe {
                     let cnt = zig_ffi::dyn_oop_get_type_count();
                     if cnt <= 0 {
-                        outputs.push("testobj".to_string());
+                        outputs.push("no types".to_string());
                     }
                     for i in 0..cnt {
                         let name_ptr = zig_ffi::dyn_oop_get_type_name(i);

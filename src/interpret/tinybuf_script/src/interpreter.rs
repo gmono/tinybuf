@@ -8,15 +8,18 @@ use crate::ast::{Expr, Stmt};
 enum Value {
     Int(i64),
     Str(String),
+    List(Vec<Value>),
+    Func(Vec<String>, Expr, HashMap<String, Value>),
 }
 
 pub struct Interpreter {
     env: HashMap<String, Value>,
+    ops: HashMap<String, String>,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
-        Self { env: HashMap::new() }
+        Self { env: HashMap::new(), ops: HashMap::new() }
     }
 
     pub fn run(&mut self, program: &[Stmt]) -> Result<Vec<String>, String> {
@@ -24,12 +27,17 @@ impl Interpreter {
         for stmt in program {
             match stmt {
                 Stmt::Let(name, expr) => {
-                    let v = eval(expr, &self.env)?;
+                    let v = eval(expr, &self.env, &self.ops)?;
+                    self.env.insert(name.clone(), v);
+                }
+                Stmt::LetFunc(name, params, body) => {
+                    let func_env = self.env.clone();
+                    let v = Value::Func(params.clone(), (*body).clone(), func_env);
                     self.env.insert(name.clone(), v);
                 }
                 Stmt::PrintTemplate(tpl, arg) => {
                     if let Some(arg) = arg {
-                        let v = eval(arg, &self.env)?;
+                        let v = eval(arg, &self.env, &self.ops)?;
                         let vstr = to_string(&v);
                         let rendered = tpl.replace("{}", &vstr);
                         outputs.push(rendered);
@@ -38,8 +46,11 @@ impl Interpreter {
                     }
                 }
                 Stmt::PrintExpr(expr) => {
-                    let v = eval(expr, &self.env)?;
+                    let v = eval(expr, &self.env, &self.ops)?;
                     outputs.push(to_string(&v));
+                }
+                Stmt::RegOp(op, fname) => {
+                    self.ops.insert(op.clone(), fname.clone());
                 }
                 Stmt::ListTypes => {
                     #[cfg(feature = "zig_oop")]
@@ -149,7 +160,7 @@ impl Interpreter {
                     let mut out_obj = zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() };
                     let mut arg_objs: Vec<zig_ffi::typed_obj> = Vec::new();
                     for a in args {
-                        let v = eval(a, &self.env)?;
+                        let v = eval(a, &self.env, &self.ops)?;
                         match v {
                             Value::Int(i) => {
                                 let td = zig_ffi::dyn_oop_get_type_def(std::ffi::CString::new("i64").unwrap().as_ptr());
@@ -163,6 +174,9 @@ impl Interpreter {
                             }
                             Value::Str(_) => {
                                 return Err("string args not supported".to_string());
+                            }
+                            _ => {
+                                return Err("unsupported arg type".to_string());
                             }
                         }
                     }
@@ -193,12 +207,43 @@ impl Interpreter {
                     return Err("zig_oop required".to_string());
                 }
             }
+            Stmt::RunList(items) => {
+                if items.is_empty() {
+                    outputs.push("empty list".to_string());
+                } else {
+                    match &items[0] {
+                        Expr::Var(fname) => {
+                            let mut argsv = Vec::new();
+                            for e in items.iter().skip(1) {
+                                argsv.push(eval(e, &self.env, &self.ops)?);
+                            }
+                            let out = self.call_func(fname, &argsv)?;
+                            outputs.push(to_string(&out));
+                        }
+                        _ => return Err("run expects list with function name first".to_string()),
+                    }
+                }
+            }
             Stmt::ExprStmt(expr) => {
-                let _ = eval(expr, &self.env)?;
+                let _ = eval(expr, &self.env, &self.ops)?;
             }
         }
     }
         Ok(outputs)
+    }
+    fn call_func(&self, name: &str, args: &[Value]) -> Result<Value, String> {
+        if let Some(Value::Func(params, body, fenv)) = self.env.get(name) {
+            let mut call_env = fenv.clone();
+            if args.len() != params.len() {
+                return Err(format!("arity mismatch: expected {}, got {}", params.len(), args.len()));
+            }
+            for (p, v) in params.iter().zip(args.iter()) {
+                call_env.insert(p.clone(), v.clone());
+            }
+            eval(body, &call_env, &self.ops)
+        } else {
+            Err(format!("undefined function: {}", name))
+        }
     }
 }
 
@@ -271,22 +316,87 @@ fn to_string(v: &Value) -> String {
     match v {
         Value::Int(i) => i.to_string(),
         Value::Str(s) => s.clone(),
+        Value::List(xs) => {
+            let mut out = String::new();
+            out.push('(');
+            for (i, v) in xs.iter().enumerate() {
+                if i > 0 { out.push(' '); }
+                out.push_str(&to_string(v));
+            }
+            out.push(')');
+            out
+        }
+        Value::Func(_, _, _) => "<func>".to_string(),
     }
 }
 
-fn eval(expr: &Expr, env: &HashMap<String, Value>) -> Result<Value, String> {
+fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>) -> Result<Value, String> {
     match expr {
         Expr::Int(i) => Ok(Value::Int(*i)),
         Expr::Str(s) => Ok(Value::Str(s.clone())),
+        Expr::Sym(s) => Ok(Value::Str(s.clone())),
         Expr::Var(name) => env
             .get(name)
             .cloned()
             .ok_or_else(|| format!("undefined variable: {}", name)),
-        Expr::Add(a, b) => bin_int(a, b, env, |x, y| x + y),
-        Expr::Sub(a, b) => bin_int(a, b, env, |x, y| x - y),
-        Expr::Mul(a, b) => bin_int(a, b, env, |x, y| x * y),
-        Expr::Div(a, b) => bin_int(a, b, env, |x, y| x / y),
-        Expr::Group(e) => eval(e, env),
+        Expr::List(items) => {
+            let mut vals = Vec::new();
+            for e in items {
+                vals.push(eval(e, env, ops)?);
+            }
+            Ok(Value::List(vals))
+        }
+        Expr::Call(name, args) => {
+            let mut argv = Vec::new();
+            for a in args {
+                argv.push(eval(a, env, ops)?);
+            }
+            if let Some(Value::Func(params, body, fenv)) = env.get(name) {
+                let mut call_env = fenv.clone();
+                if argv.len() != params.len() {
+                    return Err(format!("arity mismatch: expected {}, got {}", params.len(), argv.len()));
+                }
+                for (p, v) in params.iter().zip(argv.iter()) {
+                    call_env.insert(p.clone(), v.clone());
+                }
+                eval(body, &call_env, ops)
+            } else {
+                Err(format!("undefined function: {}", name))
+            }
+        }
+        Expr::Add(a, b) => bin_int(a, b, env, ops, |x, y| x + y),
+        Expr::Sub(a, b) => bin_int(a, b, env, ops, |x, y| x - y),
+        Expr::Mul(a, b) => bin_int(a, b, env, ops, |x, y| x * y),
+        Expr::Div(a, b) => bin_int(a, b, env, ops, |x, y| x / y),
+        Expr::Mod(a, b) => bin_int(a, b, env, ops, |x, y| x % y),
+        Expr::Pow(a, b) => {
+            let va = eval(a, env, ops)?;
+            let vb = eval(b, env, ops)?;
+            match (va, vb) {
+                (Value::Int(x), Value::Int(y)) => {
+                    if y < 0 { Err("negative exponent not supported".to_string()) }
+                    else { Ok(Value::Int(x.pow(y as u32))) }
+                }
+                _ => Err("type error: expected integers".to_string()),
+            }
+        }
+        Expr::Custom(a, op, b) => {
+            let va = eval(a, env, ops)?;
+            let vb = eval(b, env, ops)?;
+            let fname = ops.get(op).ok_or_else(|| format!("undefined custom operator: {}", op))?;
+            if let Some(Value::Func(params, body, fenv)) = env.get(fname) {
+                let mut call_env = fenv.clone();
+                if params.len() != 2 {
+                    return Err("custom operator must bind to binary function".to_string());
+                }
+                call_env.insert(params[0].clone(), va);
+                call_env.insert(params[1].clone(), vb);
+                eval(body, &call_env, ops)
+            } else {
+                Err(format!("undefined operator function: {}", fname))
+            }
+        }
+        Expr::Group(e) => eval(e, env, ops),
     }
 }
 
@@ -294,10 +404,11 @@ fn bin_int(
     a: &Expr,
     b: &Expr,
     env: &HashMap<String, Value>,
+    ops: &HashMap<String, String>,
     f: impl Fn(i64, i64) -> i64,
 ) -> Result<Value, String> {
-    let va = eval(a, env)?;
-    let vb = eval(b, env)?;
+    let va = eval(a, env, ops)?;
+    let vb = eval(b, env, ops)?;
     match (va, vb) {
         (Value::Int(x), Value::Int(y)) => Ok(Value::Int(f(x, y))),
         _ => Err("type error: expected integers".to_string()),

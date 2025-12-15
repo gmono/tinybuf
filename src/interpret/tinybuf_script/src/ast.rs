@@ -5,7 +5,10 @@ pub enum Stmt {
     PrintExpr(Expr),
     ListTypes,
     ListType(String),
+    RegOp(String, String),
+    LetFunc(String, Vec<String>, Expr),
     Call(String, String, Vec<Expr>),
+    RunList(Vec<Expr>),
     ExprStmt(Expr),
 }
 
@@ -14,9 +17,15 @@ pub enum Expr {
     Int(i64),
     Str(String),
     Var(String),
+    Sym(String),
+    List(Vec<Expr>),
+    Call(String, Vec<Expr>),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
     Mul(Box<Expr>, Box<Expr>),
     Div(Box<Expr>, Box<Expr>),
+    Mod(Box<Expr>, Box<Expr>),
+    Pow(Box<Expr>, Box<Expr>),
+    Custom(Box<Expr>, String, Box<Expr>),
     Group(Box<Expr>),
 }

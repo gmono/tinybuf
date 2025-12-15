@@ -7,9 +7,12 @@ match {
     "list",
     "types",
     "type",
-    "call",
+    "reg",
+    "operator",
+    "run",
     "=",
     "+", "-", "*", "/",
+    "%", r"\*\*",
     "(", ")",
     ";",
     r#""([^"\\]|\\.)*""#,
@@ -18,17 +21,21 @@ match {
     r"[ \t\r\f]+" => { },
     r"//[^\n]*" => { },
     "\n",
+    r"<[a-zA-Z0-9_]+>",
 }
 
 pub Program: Vec<Stmt> = Stmt*;
 
 Stmt: Stmt = {
     Sep* "let" <name:Ident> "=" <e:Expr> Sep => Stmt::Let(name, e),
+    Sep* "let" <name:Ident> "(" <ps:ParamList> ")" "=" <body:Expr> Sep => Stmt::LetFunc(name, ps, body),
     Sep* "print" <e:Expr> Sep => Stmt::PrintExpr(e),
     Sep* "print" <s:StringLit> <o:OptExpr> Sep => Stmt::PrintTemplate(s, o),
     Sep* "list" "types" Sep => Stmt::ListTypes,
     Sep* "list" "type" <name:Ident> Sep => Stmt::ListType(name),
     Sep* "call" <t:Ident> "." <op:Ident> "(" <args:ArgList> ")" Sep => Stmt::Call(t, op, args),
+    Sep* "reg" "operator" <op:CustomOp> <fname:Ident> Sep => Stmt::RegOp(op, fname),
+    Sep* "run" "(" <items:ArgList> ")" Sep => Stmt::RunList(items),
     Sep* <e:Expr> Sep => Stmt::ExprStmt(e),
 };
 
@@ -38,23 +45,45 @@ ArgList: Vec<Expr> = {
     <l:ArgList> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
 };
 
+ParamList: Vec<String> = {
+    => vec![],
+    <p:Ident> => vec![p],
+    <l:ParamList> "," <p:Ident> => { l.into_iter().chain(std::iter::once(p)).collect() },
+};
+
+CustomOp: String = r"<[a-zA-Z0-9_]+>" => {
+    let s = <>;
+    s[1..s.len()-1].to_string()
+};
+
 Sep: () = { ";" => (), "\n" => () };
 
-Expr: Expr = {
-    <l:Expr> "+" <r:Term> => Expr::Add(Box::new(l), Box::new(r)),
-    <l:Expr> "-" <r:Term> => Expr::Sub(Box::new(l), Box::new(r)),
+Expr: Expr = AddSub;
+
+AddSub: Expr = {
+    <l:AddSub> "+" <r:Term> => Expr::Add(Box::new(l), Box::new(r)),
+    <l:AddSub> "-" <r:Term> => Expr::Sub(Box::new(l), Box::new(r)),
+    <l:AddSub> <op:CustomOp> <r:Term> => Expr::Custom(Box::new(l), op, Box::new(r)),
     Term,
 };
 
 Term: Expr = {
-    <l:Term> "*" <r:Factor> => Expr::Mul(Box::new(l), Box::new(r)),
-    <l:Term> "/" <r:Factor> => Expr::Div(Box::new(l), Box::new(r)),
+    <l:Term> "*" <r:Power> => Expr::Mul(Box::new(l), Box::new(r)),
+    <l:Term> "/" <r:Power> => Expr::Div(Box::new(l), Box::new(r)),
+    <l:Term> "%" <r:Power> => Expr::Mod(Box::new(l), Box::new(r)),
+    Power,
+};
+
+Power: Expr = {
+    <l:Factor> r"\*\*" <r:Power> => Expr::Pow(Box::new(l), Box::new(r)),
     Factor,
 };
 
 Factor: Expr = {
     <n:Number> => Expr::Int(n),
     <v:Ident> => Expr::Var(v),
+    <v:Ident> "(" <args:ArgList> ")" => Expr::Call(v, args),
+    "(" <items:ArgList> ")" => Expr::List(items),
     "(" <e:Expr> ")" => Expr::Group(Box::new(e)),
 };
 

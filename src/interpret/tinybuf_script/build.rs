@@ -2,6 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    lalrpop::process_root().expect("lalrpop generate failed");
     if env::var("CARGO_FEATURE_ZIG_OOP").is_err() {
         return;
     }

@@ -13,12 +13,12 @@ build
 #*.dylib
 #*.dll
 # 3rdpart/dyncall*
-build*
+build-*
 # Fortran module files
 *.mod
 *.smod
 .tools
-
+.zig-cache
 # Compiled Static libraries
 *.lai
 *.la
@@ -28,7 +28,7 @@ target
 #*.exe
 *.out
 *.app
-
+buildsys
 *.DS_Store
 
 /.idea/

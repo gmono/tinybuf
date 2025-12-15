@@ -7,6 +7,7 @@ pub enum Token {
     List,
     Types,
     Type,
+    Call,
     Ident(String),
     Number(i64),
     StringLit(String),
@@ -40,6 +41,8 @@ enum LexToken {
     Types,
     #[token("type")]
     Type,
+    #[token("call")]
+    Call,
 
     #[regex(r#""([^"\\]|\\.)*""#)]
     String,
@@ -86,6 +89,7 @@ pub fn lex(input: &str) -> Result<Vec<Spanned>, usize> {
             List => Token::List,
             Types => Token::Types,
             Type => Token::Type,
+            Call => Token::Call,
             String => {
                 let s = &input[start..end];
                 let unquoted = &s[1..s.len() - 1];
@@ -137,4 +141,3 @@ fn unescape(s: &str) -> String {
     }
     out
 }
-

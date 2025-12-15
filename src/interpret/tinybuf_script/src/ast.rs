@@ -5,6 +5,7 @@ pub enum Stmt {
     PrintExpr(Expr),
     ListTypes,
     ListType(String),
+    Call(String, String, Vec<Expr>),
     ExprStmt(Expr),
 }
 
@@ -19,4 +20,3 @@ pub enum Expr {
     Div(Box<Expr>, Box<Expr>),
     Group(Box<Expr>),
 }
-

@@ -7,6 +7,7 @@ match {
     "list",
     "types",
     "type",
+    "call",
     "=",
     "+", "-", "*", "/",
     "(", ")",
@@ -27,7 +28,14 @@ Stmt: Stmt = {
     Sep* "print" <s:StringLit> <o:OptExpr> Sep => Stmt::PrintTemplate(s, o),
     Sep* "list" "types" Sep => Stmt::ListTypes,
     Sep* "list" "type" <name:Ident> Sep => Stmt::ListType(name),
+    Sep* "call" <t:Ident> "." <op:Ident> "(" <args:ArgList> ")" Sep => Stmt::Call(t, op, args),
     Sep* <e:Expr> Sep => Stmt::ExprStmt(e),
+};
+
+ArgList: Vec<Expr> = {
+    => vec![],
+    <e:Expr> => vec![e],
+    <l:ArgList> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
 };
 
 Sep: () = { ";" => (), "\n" => () };

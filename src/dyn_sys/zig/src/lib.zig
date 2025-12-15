@@ -82,6 +82,8 @@ const OpEntry = struct {
 
 const TypeEntry = struct {
     name: [*:0]const u8,
+    desc: ?[*:0]const u8,
+    def: ?*const type_def_obj,
     ops: std.ArrayList(OpEntry),
 };
 
@@ -155,7 +157,7 @@ fn ensureType(type_name: [*:0]const u8) !usize {
     if (findTypeIndex(type_name)) |idx| return idx;
     const name_dup = try to_cstr(cspan(type_name));
     const ops = std.ArrayList(OpEntry).init(g_allocator);
-    try g_types.append(.{ .name = name_dup, .ops = ops });
+    try g_types.append(.{ .name = name_dup, .desc = null, .def = null, .ops = ops });
     return g_types.items.len - 1;
 }
 
@@ -177,6 +179,16 @@ pub export fn dyn_oop_register_type(type_name: ?[*:0]const u8) c_int {
     return 0;
 }
 
+pub export fn dyn_oop_set_type_meta(type_name: ?[*:0]const u8, desc: ?[*:0]const u8, def: ?*const type_def_obj) c_int {
+    if (type_name == null) return -1;
+    ensureInit();
+    const tn = type_name.?;
+    const idx = ensureType(tn) catch return -1;
+    g_types.items[idx].desc = if (desc) |d| to_cstr(cspan(d)) catch null else null;
+    g_types.items[idx].def = def;
+    return 0;
+}
+
 pub export fn dyn_oop_get_type_count() c_int {
     ensureInit();
     return @as(c_int, @intCast(g_types.items.len));
@@ -189,6 +201,102 @@ pub export fn dyn_oop_get_type_name(index: c_int) ?[*:0]const u8 {
     return g_types.items[i].name;
 }
 
+pub export fn dyn_oop_get_type_desc(type_name: [*:0]const u8) ?[*:0]const u8 {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return null;
+    return g_types.items[idx].desc;
+}
+
+pub export fn dyn_oop_get_type_kind(type_name: [*:0]const u8) c_int {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return -1;
+    const def = g_types.items[idx].def orelse return -1;
+    return @intFromEnum(def.kind);
+}
+
+pub export fn dyn_oop_get_type_size(type_name: [*:0]const u8) usize {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return 0;
+    const def = g_types.items[idx].def orelse return 0;
+    return def.size;
+}
+
+pub export fn dyn_oop_get_field_count(type_name: [*:0]const u8) c_int {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return -1;
+    const def = g_types.items[idx].def orelse return -1;
+    return def.field_count;
+}
+
+pub export fn dyn_oop_get_field_name(type_name: [*:0]const u8, index: c_int) ?[*:0]const u8 {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return null;
+    const def = g_types.items[idx].def orelse return null;
+    if (def.fields == null) return null;
+    const i: usize = @intCast(index);
+    const fc: usize = @intCast(def.field_count);
+    if (i >= fc) return null;
+    const fields: [*]const field_def = @ptrCast(def.fields.?);
+    return fields[i].name;
+}
+
+pub export fn dyn_oop_get_method_count(type_name: [*:0]const u8) c_int {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return -1;
+    const def = g_types.items[idx].def orelse return -1;
+    return def.method_count;
+}
+
+pub export fn dyn_oop_get_method_name(type_name: [*:0]const u8, index: c_int) ?[*:0]const u8 {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return null;
+    const def = g_types.items[idx].def orelse return null;
+    if (def.methods == null) return null;
+    const i: usize = @intCast(index);
+    const mc: usize = @intCast(def.method_count);
+    if (i >= mc) return null;
+    const methods: [*]const method_def = @ptrCast(def.methods.?);
+    return methods[i].name;
+}
+
+fn build_m_sig_string(md: *const method_def) ![*:0]u8 {
+    var buf = std.ArrayList(u8).init(g_allocator);
+    defer buf.deinit();
+    const ret = if (md.ret) |r| cspan(r.name orelse "void") else "void";
+    try buf.appendSlice(ret);
+    try buf.append('(');
+    const pc = @as(usize, @intCast(md.param_count));
+    if (pc > 0 and md.params != null) {
+        const params = md.params.?;
+        const p_many: [*]const param_def = @ptrCast(params);
+        var i: usize = 0;
+        while (i < pc) : (i += 1) {
+            const tn = if (p_many[i].type) |t| cspan(t.name orelse "void") else "void";
+            try buf.appendSlice(tn);
+            if (i + 1 < pc) try buf.appendSlice(", ");
+        }
+    }
+    try buf.append(')');
+    return try to_cstr(buf.items);
+}
+
+pub export fn dyn_oop_get_method_sig_str(type_name: [*:0]const u8, index: c_int) ?[*:0]const u8 {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return null;
+    const def = g_types.items[idx].def orelse return null;
+    if (def.methods == null) return null;
+    const i: usize = @intCast(index);
+    const mc: usize = @intCast(def.method_count);
+    if (i >= mc) return null;
+    const methods: [*]const method_def = @ptrCast(def.methods.?);
+    return build_m_sig_string(&methods[i]) catch null;
+}
+
+pub export fn dyn_oop_get_type_def(type_name: [*:0]const u8) ?*const type_def_obj {
+    ensureInit();
+    const idx = findTypeIndex(type_name) orelse return null;
+    return g_types.items[idx].def;
+}
 pub export fn dyn_oop_get_op_count(type_name: [*:0]const u8) c_int {
     ensureInit();
     const idx = findTypeIndex(type_name) orelse return -1;

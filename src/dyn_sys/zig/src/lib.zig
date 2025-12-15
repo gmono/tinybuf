@@ -94,7 +94,6 @@ fn ensureInit() void {
         g_allocator = std.heap.page_allocator;
         g_types = std.ArrayList(TypeEntry).init(g_allocator);
         g_inited = true;
-        _ = ensureType("testobj") catch {};
     }
 }
 
@@ -480,201 +479,37 @@ fn init_noop(self: ?*anyopaque) callconv(.C) void {
     _ = self;
 }
 
-pub export const i8_def: type_def_obj = .{
-    .name = "i8",
-    .kind = .type_simple,
-    .size = @sizeOf(i8),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const u8_def: type_def_obj = .{
-    .name = "u8",
-    .kind = .type_simple,
-    .size = @sizeOf(u8),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const i16_def: type_def_obj = .{
-    .name = "i16",
-    .kind = .type_simple,
-    .size = @sizeOf(i16),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const u16_def: type_def_obj = .{
-    .name = "u16",
-    .kind = .type_simple,
-    .size = @sizeOf(u16),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const i32_def: type_def_obj = .{
-    .name = "i32",
-    .kind = .type_simple,
-    .size = @sizeOf(i32),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const u32_def: type_def_obj = .{
-    .name = "u32",
-    .kind = .type_simple,
-    .size = @sizeOf(u32),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const i64_def: type_def_obj = .{
-    .name = "i64",
-    .kind = .type_simple,
-    .size = @sizeOf(i64),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const u64_def: type_def_obj = .{
-    .name = "u64",
-    .kind = .type_simple,
-    .size = @sizeOf(u64),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const f32_def: type_def_obj = .{
-    .name = "f32",
-    .kind = .type_simple,
-    .size = @sizeOf(f32),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const f64_def: type_def_obj = .{
-    .name = "f64",
-    .kind = .type_simple,
-    .size = @sizeOf(f64),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const bool_def: type_def_obj = .{
-    .name = "bool",
-    .kind = .type_simple,
-    .size = @sizeOf(u8),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const char_def: type_def_obj = .{
-    .name = "char",
-    .kind = .type_simple,
-    .size = @sizeOf(u8),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
-pub export const ptr_def: type_def_obj = .{
-    .name = "ptr",
-    .kind = .type_simple,
-    .size = @sizeOf(?*anyopaque),
-    .init = init_noop,
-    .deleter = null,
-    .copy = null,
-    .move = null,
-    .alloc = null,
-    .get_total_size = null,
-    .fields = null,
-    .field_count = 0,
-    .methods = null,
-    .method_count = 0,
-};
+fn SimpleDef(comptime name: [:0]const u8, comptime T: type) type_def_obj {
+    return .{
+        .name = name,
+        .kind = .type_simple,
+        .size = @sizeOf(T),
+        .init = init_noop,
+        .deleter = null,
+        .copy = null,
+        .move = null,
+        .alloc = null,
+        .get_total_size = null,
+        .fields = null,
+        .field_count = 0,
+        .methods = null,
+        .method_count = 0,
+    };
+}
+
+pub export const i8_def: type_def_obj = SimpleDef("i8", i8);
+pub export const u8_def: type_def_obj = SimpleDef("u8", u8);
+pub export const i16_def: type_def_obj = SimpleDef("i16", i16);
+pub export const u16_def: type_def_obj = SimpleDef("u16", u16);
+pub export const i32_def: type_def_obj = SimpleDef("i32", i32);
+pub export const u32_def: type_def_obj = SimpleDef("u32", u32);
+pub export const i64_def: type_def_obj = SimpleDef("i64", i64);
+pub export const u64_def: type_def_obj = SimpleDef("u64", u64);
+pub export const f32_def: type_def_obj = SimpleDef("f32", f32);
+pub export const f64_def: type_def_obj = SimpleDef("f64", f64);
+pub export const bool_def: type_def_obj = SimpleDef("bool", u8);
+pub export const char_def: type_def_obj = SimpleDef("char", u8);
+pub export const ptr_def: type_def_obj = SimpleDef("ptr", ?*anyopaque);
 
 test "register type and op, query meta, invoke" {
     const T = "Test";

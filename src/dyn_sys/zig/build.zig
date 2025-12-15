@@ -49,9 +49,11 @@ pub fn build(b: *std.Build) void {
     }
 
     const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/lib.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/lib.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
         .link_libc = false,
     });
     const run_unit_tests = b.addRunArtifact(unit_tests);

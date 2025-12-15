@@ -111,6 +111,12 @@
         "dyncall.h": "c",
         "*.txt": "cpp",
         "stdint.h": "c",
-        "type_core.h": "c"
+        "type_core.h": "c",
+        "cassert": "cpp",
+        "cerrno": "cpp",
+        "cfloat": "cpp",
+        "ciso646": "cpp",
+        "climits": "cpp",
+        "string_view": "cpp"
     }
 }

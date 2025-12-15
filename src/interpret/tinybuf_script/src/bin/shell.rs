@@ -1,7 +1,9 @@
 use std::io::{self, Write};
-use tinybuf_script::{parse_program, Interpreter};
+use tinybuf_script::{parse_program, Interpreter, ensure_oop_demo_registered};
+use tinybuf_script::shell_transform_line;
 
 fn main() {
+    ensure_oop_demo_registered();
     let mut interp = Interpreter::new();
     println!("tinybuf_script shell");
     loop {
@@ -22,16 +24,7 @@ fn main() {
             println!("commands: :help, :quit, :types, :type NAME");
             continue;
         }
-        let src = if line == ":types" {
-            "list types".to_string()
-        } else if let Some(rest) = line.strip_prefix(":type ") {
-            let mut s = String::from("list type ");
-            s.push_str(rest.trim());
-            s
-        } else {
-            line.to_string()
-        };
-        let src = if src.ends_with(';') || src.ends_with('\n') { src } else { format!("{src}\n") };
+        let src = shell_transform_line(line);
         match parse_program(&src) {
             Ok(ast) => match interp.run(&ast) {
                 Ok(outputs) => {

@@ -10,9 +10,9 @@ path = "src/lib.rs"
 [dependencies]
 lalrpop-util = { version = "0.22", features = ["lexer"] }
 thiserror = "1.0"
+regex = "1.11"
+libloading = "0.8"
 
 [build-dependencies]
 lalrpop = "0.22"
 
-[features]
-zig_oop = []

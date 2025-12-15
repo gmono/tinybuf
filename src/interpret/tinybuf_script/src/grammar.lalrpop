@@ -1,0 +1,62 @@
+use crate::ast::*;
+grammar;
+
+match {
+    "let",
+    "print",
+    "list",
+    "types",
+    "type",
+    "=",
+    "+", "-", "*", "/",
+    "(", ")",
+    ";",
+    r#""([^"\\]|\\.)*""#,
+    r"[a-zA-Z_][a-zA-Z0-9_]*",
+    r"-?[0-9]+",
+    r"[ \t\r\f]+" => { },
+    r"//[^\n]*" => { },
+    "\n",
+}
+
+pub Program: Vec<Stmt> = Stmt*;
+
+Stmt: Stmt = {
+    Sep* "let" <name:Ident> "=" <e:Expr> Sep => Stmt::Let(name, e),
+    Sep* "print" <e:Expr> Sep => Stmt::PrintExpr(e),
+    Sep* "print" <s:StringLit> <o:OptExpr> Sep => Stmt::PrintTemplate(s, o),
+    Sep* "list" "types" Sep => Stmt::ListTypes,
+    Sep* "list" "type" <name:Ident> Sep => Stmt::ListType(name),
+};
+
+Sep: () = { ";" => (), "\n" => () };
+
+Expr: Expr = {
+    <l:Expr> "+" <r:Term> => Expr::Add(Box::new(l), Box::new(r)),
+    <l:Expr> "-" <r:Term> => Expr::Sub(Box::new(l), Box::new(r)),
+    Term,
+};
+
+Term: Expr = {
+    <l:Term> "*" <r:Factor> => Expr::Mul(Box::new(l), Box::new(r)),
+    <l:Term> "/" <r:Factor> => Expr::Div(Box::new(l), Box::new(r)),
+    Factor,
+};
+
+Factor: Expr = {
+    <n:Number> => Expr::Int(n),
+    <v:Ident> => Expr::Var(v),
+    "(" <e:Expr> ")" => Expr::Group(Box::new(e)),
+};
+
+OptExpr: Option<Expr> = {
+    => None,
+    <e:Expr> => Some(e),
+};
+
+Ident: String = r"[a-zA-Z_][a-zA-Z0-9_]*" => <>.to_string();
+Number: i64 = r"-?[0-9]+" => <>.parse().unwrap();
+StringLit: String = r#""([^"\\]|\\.)*""# => {
+    let s = <>;
+    s[1..s.len()-1].to_string()
+};

@@ -23,7 +23,7 @@ build*
 *.lai
 *.la
 *.lib
-
+target
 # Executables
 #*.exe
 *.out

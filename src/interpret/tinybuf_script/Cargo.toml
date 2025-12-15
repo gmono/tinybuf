@@ -1,0 +1,15 @@
+[package]
+name = "tinybuf_script"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "tinybuf_script"
+path = "src/lib.rs"
+
+[dependencies]
+lalrpop-util = { version = "0.22", features = ["lexer"] }
+thiserror = "1.0"
+
+[build-dependencies]
+lalrpop = "0.22"

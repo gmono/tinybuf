@@ -35,6 +35,8 @@ TB_TRAIT(Addable);
 #include <sstream>
 #ifndef _WIN32
 #include <sys/time.h>
+#include <thread>
+#include <cassert>
 #else
 #include <chrono>
 #include <assert.h>

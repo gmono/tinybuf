@@ -15,12 +15,18 @@ pub enum Stmt {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ListItem {
+    pub key: Option<String>,
+    pub value: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Int(i64),
     Str(String),
     Var(String),
     Sym(String),
-    List(Vec<Expr>),
+    List(Vec<ListItem>),
     Call(String, Vec<Expr>),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),
@@ -31,4 +37,5 @@ pub enum Expr {
     Custom(Box<Expr>, String, Box<Expr>),
     Map(Box<Expr>, String),
     Group(Box<Expr>),
+    Index(Box<Expr>, Box<Expr>),
 }

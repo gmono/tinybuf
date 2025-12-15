@@ -221,6 +221,29 @@ mod tests {
     }
 
     #[test]
+    fn keyed_list_indexing_and_get() {
+        let src = r#"
+            let lst=(a=1,2,4)
+            print lst["a"]
+            print lst[0]
+            print lst[1]
+            get lst a
+            get lst 'a
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["1", "1", "2", "1", "1"]);
+    }
+    #[test]
+    fn func_call_syntax_equivalent_to_run() {
+        let src = r#"
+            let add(x,y)=x+y
+            print add(1,2)
+            run (add,1,2)
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["3", "3"]);
+    }
+    #[test]
     fn shell_auto_print_executes_expression() {
         let src = {
             let mut s = String::new();

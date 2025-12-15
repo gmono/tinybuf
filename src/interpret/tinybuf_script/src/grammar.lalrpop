@@ -5,6 +5,7 @@ match {
     "let",
     "print",
     "return",
+    "get",
     "list",
     "types",
     "type",
@@ -15,7 +16,7 @@ match {
     "=",
     "+", "-", "**", "*", "/",
     "%",
-    "(", ")", "{", "}", ".", ",", "#", "'", "|",
+    "(", ")", "{", "}", ".", ",", "#", "'", "|", "[", "]",
     ";",
     r#""([^"\\]|\\.)*""#,
     r"[a-zA-Z_][a-zA-Z0-9_]*",
@@ -35,30 +36,36 @@ Stmt: Stmt = {
     Sep* "return" <e:Expr> Sep => Stmt::Return(e),
     Sep* "list" "types" Sep => Stmt::ListTypes,
     Sep* "list" "type" <name:Ident> Sep => Stmt::ListType(name),
-    Sep* "call" <t:Ident> "." <op:Ident> "(" <args:ArgList> ")" Sep => Stmt::Call(t, op, args),
+    Sep* "call" <t:Ident> "." <op:Ident> "(" ")" Sep => Stmt::Call(t, op, vec![]),
+    Sep* "call" <t:Ident> "." <op:Ident> "(" <args:ArgNonEmpty> ")" Sep => Stmt::Call(t, op, args),
     Sep* "reg" "operator" <op:CustomOp> <fname:Ident> Sep => Stmt::RegOp(op, fname),
-    Sep* "run" "(" <items:ArgList> ")" Sep => Stmt::RunList(items),
+    Sep* "run" "(" ")" Sep => Stmt::RunList(vec![]),
+    Sep* "run" "(" <items:ArgNonEmpty> ")" Sep => Stmt::RunList(items),
+    Sep* "get" <lst:Expr> <k:Ident> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
+    Sep* "get" <lst:Expr> <k:StringLit> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
+    Sep* "get" <lst:Expr> "'" <k:Ident> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
+    Sep* "get" <lst:Expr> <i:Number> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Int(i)))),
     Sep* <e:Expr> Sep => Stmt::ExprStmt(e),
 };
 
 LetStmt: Stmt = {
-    <name:Ident> "(" <ps:ParamList> ")" "=" <body:Expr> => Stmt::LetFunc(name, ps, body),
-    <name:Ident> "(" <ps:ParamList> ")" "=" "{" <b:Stmt*> "return" <ret:Expr> "}" => Stmt::LetFuncBlock(name, ps, b, ret),
+    <name:Ident> "(" ")" "=" <body:Expr> => Stmt::LetFunc(name, vec![], body),
+    <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" <body:Expr> => Stmt::LetFunc(name, ps, body),
+    <name:Ident> "(" ")" "=" "{" <b:Stmt*> "return" <ret:Expr> "}" => Stmt::LetFuncBlock(name, vec![], b, ret),
+    <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" "{" <b:Stmt*> "return" <ret:Expr> "}" => Stmt::LetFuncBlock(name, ps, b, ret),
     <name:Ident> "=" <e:Expr> => Stmt::Let(name, e),
 };
 
 /* removed Block to avoid LR(1) ambiguity */
 
-ArgList: Vec<Expr> = {
-    => vec![],
+ArgNonEmpty: Vec<Expr> = {
     <e:Expr> => vec![e],
-    <l:ArgList> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
+    <l:ArgNonEmpty> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
 };
 
-ParamList: Vec<String> = {
-    => vec![],
+ParamNonEmpty: Vec<String> = {
     <p:Ident> => vec![p],
-    <l:ParamList> "," <p:Ident> => { l.into_iter().chain(std::iter::once(p)).collect() },
+    <l:ParamNonEmpty> "," <p:Ident> => { l.into_iter().chain(std::iter::once(p)).collect() },
 };
 
 CustomOp: String = r"<[a-zA-Z0-9_]+>" => {
@@ -86,17 +93,31 @@ Term: Expr = {
 };
 
 Power: Expr = {
-    <l:Factor> "**" <r:Power> => Expr::Pow(Box::new(l), Box::new(r)),
+    <l:Postfix> "**" <r:Power> => Expr::Pow(Box::new(l), Box::new(r)),
+    Postfix,
+};
+
+CommaTail: Vec<ListItem> = {
+    <e:ListItem> => vec![e],
+    <l:CommaTail> "," <e:ListItem> => { l.into_iter().chain(std::iter::once(e)).collect() },
+};
+
+CommaList: Vec<ListItem> = {
+    <e:ListItem> "," <t:CommaTail> => { std::iter::once(e).chain(t.into_iter()).collect() },
+};
+
+ListItem: ListItem = {
+    <k:Ident> "=" <v:Expr> => ListItem{ key: Some(k), value: v },
+    <k:StringLit> "=" <v:Expr> => ListItem{ key: Some(k), value: v },
+    <v:Expr> => ListItem{ key: None, value: v },
+};
+
+Postfix: Expr = {
+    <p:Postfix> "[" <i:Expr> "]" => Expr::Index(Box::new(p), Box::new(i)),
+    <p:Postfix> "[" <s:StringLit> "]" => Expr::Index(Box::new(p), Box::new(Expr::Str(s))),
+    <f:Ident> "(" ")" => Expr::Call(f, vec![]),
+    <f:Ident> "(" <args:ArgNonEmpty> ")" => Expr::Call(f, args),
     Factor,
-};
-
-CommaTail: Vec<Expr> = {
-    <e:Expr> => vec![e],
-    <l:CommaTail> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
-};
-
-CommaList: Vec<Expr> = {
-    <e:Expr> "," <t:CommaTail> => { std::iter::once(e).chain(t.into_iter()).collect() },
 };
 
 Factor: Expr = {

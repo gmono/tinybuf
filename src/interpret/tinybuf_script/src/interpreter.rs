@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::ffi::CStr;
 
 use crate::ast::{Expr, Stmt};
+use crate::ast::ListItem;
 
 #[derive(Debug, Clone)]
 enum Value {
     Int(i64),
     Str(String),
-    List(Vec<Value>),
+    List(Vec<Value>, std::collections::HashMap<String, usize>),
     Func(Vec<String>, Expr, HashMap<String, Value>),
     FuncBlock(Vec<String>, Vec<Stmt>, Expr, HashMap<String, Value>),
 }
@@ -518,7 +519,7 @@ fn to_string(v: &Value) -> String {
     match v {
         Value::Int(i) => i.to_string(),
         Value::Str(s) => s.clone(),
-        Value::List(xs) => {
+        Value::List(xs, _) => {
             let mut out = String::new();
             out.push('(');
             for (i, v) in xs.iter().enumerate() {
@@ -544,10 +545,14 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             .ok_or_else(|| format!("undefined variable: {}", name)),
         Expr::List(items) => {
             let mut vals = Vec::new();
-            for e in items {
-                vals.push(eval(e, env, ops)?);
+            let mut keys = HashMap::new();
+            for (idx, it) in items.iter().enumerate() {
+                vals.push(eval(&it.value, env, ops)?);
+                if let Some(k) = &it.key {
+                    keys.insert(k.clone(), idx);
+                }
             }
-            Ok(Value::List(vals))
+            Ok(Value::List(vals, keys))
         }
         Expr::Call(name, args) => {
             let mut argv = Vec::new();
@@ -603,7 +608,7 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
         Expr::Map(list_expr, func_name) => {
             let lv = eval(list_expr, env, ops)?;
             match lv {
-                Value::List(xs) => {
+                Value::List(xs, _) => {
                     if let Some(Value::Func(params, body, fenv)) = env.get(func_name) {
                         if params.len() != 1 {
                             return Err("map function must be unary".to_string());
@@ -615,12 +620,35 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
                             let r = eval(body, &call_env, ops)?;
                             out.push(r);
                         }
-                        Ok(Value::List(out))
+                        Ok(Value::List(out, HashMap::new()))
                     } else {
                         Err(format!("undefined function: {}", func_name))
                     }
                 }
                 _ => Err("map left operand must be a list".to_string()),
+            }
+        }
+        Expr::Index(list_expr, idx_expr) => {
+            let lv = eval(list_expr, env, ops)?;
+            match lv {
+                Value::List(xs, keys) => {
+                    let iv = eval(idx_expr, env, ops)?;
+                    match iv {
+                        Value::Int(i) => {
+                            let idx = i as usize;
+                            xs.get(idx).cloned().ok_or_else(|| "index out of range".to_string())
+                        }
+                        Value::Str(s) => {
+                            if let Some(&idx) = keys.get(&s) {
+                                xs.get(idx).cloned().ok_or_else(|| "index out of range".to_string())
+                            } else {
+                                Err("key not found".to_string())
+                            }
+                        }
+                        _ => Err("index must be int or string".to_string()),
+                    }
+                }
+                _ => Err("indexing requires a list".to_string()),
             }
         }
     }

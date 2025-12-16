@@ -3,8 +3,7 @@ use std::ffi::CStr;
 use std::rc::Rc;
 use std::fmt;
 
-use crate::ast::{Expr, Stmt};
-// use crate::ast::ListItem;
+use crate::ast::{Expr, Stmt, ListItem};
 
 pub struct OopObject {
     pub obj: zig_ffi::typed_obj,
@@ -186,6 +185,7 @@ impl Interpreter {
         env.insert("sys_types".to_string(), Value::NativeFunc(NativeFunc {
             params: vec![],
             body: sys_types_body,
+            variadic: false,
         }));
 
         // Reflection: sys_methods(sym) -> list<str>
@@ -223,6 +223,7 @@ impl Interpreter {
         env.insert("sys_methods".to_string(), Value::NativeFunc(NativeFunc {
             params: vec![(Some("sym".to_string()), "type_name".to_string())],
             body: sys_methods_body,
+            variadic: false,
         }));
 
         // sym(str) -> sym

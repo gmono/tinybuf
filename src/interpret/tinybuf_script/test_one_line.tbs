@@ -1,0 +1,14 @@
+let make_obj(sym t) = { print "creating"; return init(t); }
+let obj = make_obj('testobj)
+print obj
+let res = obj.add(10, 20)
+print res
+let outer() = { let inner(x) = { return x; }; return inner(100); }
+print outer()
+let s = 'test_sym
+print typeof(s)
+print #s
+let v = 123
+let sym_v = 'v
+print val(sym_v)
+print typeof(val(sym_v))

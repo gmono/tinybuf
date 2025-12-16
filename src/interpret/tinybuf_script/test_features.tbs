@@ -1,0 +1,26 @@
+let make_obj(sym t) = {
+    print "creating object type: " 
+    print #t
+    return init(t)
+}
+
+let obj = make_obj('testobj)
+print "Object created: " 
+print obj
+
+let res = call obj.add(10, 20)
+print "Add result: " 
+print res
+
+let outer() = {
+    print "Outer running"
+    let inner(x) = {
+        print "Inner x: " 
+        print x
+        return x * 2
+    }
+    return inner(21)
+}
+
+print "Nested result: " 
+print outer()

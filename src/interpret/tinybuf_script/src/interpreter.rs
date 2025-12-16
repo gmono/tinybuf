@@ -1,16 +1,100 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
+use std::rc::Rc;
+use std::fmt;
 
 use crate::ast::{Expr, Stmt};
 use crate::ast::ListItem;
 
+pub struct OopObject {
+    pub obj: zig_ffi::typed_obj,
+    pub type_name: String,
+}
+
+impl Drop for OopObject {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.obj.ptr.is_null() {
+                zig_ffi::typed_obj_delete(&mut self.obj);
+            }
+        }
+    }
+}
+
+impl fmt::Debug for OopObject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<OopObject {:?}>", self.obj.ptr)
+    }
+}
+
+#[derive(Clone)]
+pub struct NativeFunc {
+    pub params: Vec<(Option<String>, String)>,
+    pub body: Rc<dyn Fn(&[Value], &HashMap<String, Value>) -> Result<Value, String>>,
+}
+
+impl fmt::Debug for NativeFunc {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<NativeFunc>")
+    }
+}
+
 #[derive(Debug, Clone)]
-enum Value {
+pub enum Value {
     Int(i64),
     Str(String),
+    Sym(String),
     List(Vec<Value>, std::collections::HashMap<String, usize>),
-    Func(Vec<String>, Expr, HashMap<String, Value>),
-    FuncBlock(Vec<String>, Vec<Stmt>, Expr, HashMap<String, Value>),
+    Func(Vec<(Option<String>, String)>, Expr, HashMap<String, Value>),
+    FuncBlock(Vec<(Option<String>, String)>, Vec<Stmt>, HashMap<String, Value>),
+    NativeFunc(NativeFunc),
+    Object(Rc<OopObject>),
+}
+
+fn check_args(params: &[(Option<String>, String)], args: &[Value]) -> Result<(), String> {
+    if args.len() != params.len() {
+        return Err(format!("arity mismatch: expected {}, got {}", params.len(), args.len()));
+    }
+    for (i, (param_type, _)) in params.iter().enumerate() {
+        if let Some(pt) = param_type {
+            match (pt.as_str(), &args[i]) {
+                ("int", Value::Int(_)) => {},
+                ("str", Value::Str(_)) => {},
+                ("sym", Value::Sym(_)) => {},
+                ("list", Value::List(_, _)) => {},
+                ("obj", Value::Object(_)) => {},
+                ("any", _) => {},
+                (t, v) => return Err(format!("type mismatch for arg {}: expected {}, got {}", i, t, to_string(v))),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_func(func: &Value, args: &[Value], ops: &HashMap<String, String>, env: &HashMap<String, Value>) -> Result<Value, String> {
+    match func {
+        Value::Func(params, body, fenv) => {
+            check_args(params, args)?;
+            let mut call_env = fenv.clone();
+            for (p, v) in params.iter().zip(args.iter()) {
+                call_env.insert(p.1.clone(), v.clone());
+            }
+            eval(body, &call_env, ops)
+        }
+        Value::FuncBlock(params, body_stmts, fenv) => {
+            check_args(params, args)?;
+            let mut call_env = fenv.clone();
+            for (p, v) in params.iter().zip(args.iter()) {
+                call_env.insert(p.1.clone(), v.clone());
+            }
+            eval_block(body_stmts, &mut call_env, ops)
+        }
+        Value::NativeFunc(nf) => {
+            check_args(&nf.params, args)?;
+            (nf.body)(args, env)
+        }
+        _ => Err("not a function".to_string()),
+    }
 }
 
 pub struct Interpreter {
@@ -21,7 +105,63 @@ pub struct Interpreter {
 impl Interpreter {
     pub fn new() -> Self {
         init_oop_demo_once();
-        Self { env: HashMap::new(), ops: HashMap::new() }
+        let mut env = HashMap::new();
+        
+        let init_body = Rc::new(|args: &[Value], _env: &HashMap<String, Value>| -> Result<Value, String> {
+             let type_name = match &args[0] {
+                 Value::Sym(s) => s,
+                 _ => return Err("init expects a symbol".to_string()),
+             };
+             unsafe {
+                 let cname = std::ffi::CString::new(type_name.as_str()).map_err(|_| "invalid type name")?;
+                 let def = zig_ffi::dyn_oop_get_type_def(cname.as_ptr());
+                 if def.is_null() {
+                     return Err(format!("type not found: {}", type_name));
+                 }
+                 let mut obj = zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() };
+                 if zig_ffi::typed_obj_alloc(&mut obj, def) != 0 {
+                     return Err("alloc failed".to_string());
+                 }
+                 Ok(Value::Object(Rc::new(OopObject { obj, type_name: type_name.clone() })))
+             }
+        });
+
+        env.insert("init".to_string(), Value::NativeFunc(NativeFunc {
+            params: vec![(Some("sym".to_string()), "type_name".to_string())],
+            body: init_body,
+        }));
+        
+        // Reflection: typeof(val) -> str
+        let type_body = Rc::new(|args: &[Value], _env: &HashMap<String, Value>| -> Result<Value, String> {
+            let v = &args[0];
+            match v {
+                Value::Int(_) => Ok(Value::Str("int".to_string())),
+                Value::Str(_) => Ok(Value::Str("str".to_string())),
+                Value::Sym(_) => Ok(Value::Str("sym".to_string())),
+                Value::List(_, _) => Ok(Value::Str("list".to_string())),
+                Value::Func(_, _, _) | Value::FuncBlock(_, _, _) | Value::NativeFunc(_) => Ok(Value::Str("func".to_string())),
+                Value::Object(o) => Ok(Value::Str(o.type_name.clone())),
+            }
+        });
+        env.insert("typeof".to_string(), Value::NativeFunc(NativeFunc {
+            params: vec![(Some("any".to_string()), "val".to_string())],
+            body: type_body,
+        }));
+
+        // Reflection: val(sym) -> value
+        let val_body = Rc::new(|args: &[Value], env: &HashMap<String, Value>| -> Result<Value, String> {
+             let var_name = match &args[0] {
+                 Value::Sym(s) => s,
+                 _ => return Err("val expects a symbol".to_string()),
+             };
+             env.get(var_name).cloned().ok_or_else(|| format!("undefined variable: {}", var_name))
+        });
+        env.insert("val".to_string(), Value::NativeFunc(NativeFunc {
+            params: vec![(Some("sym".to_string()), "var".to_string())],
+            body: val_body,
+        }));
+
+        Self { env, ops: HashMap::new() }
     }
 
     pub fn run(&mut self, program: &[Stmt]) -> Result<Vec<String>, String> {
@@ -37,9 +177,9 @@ impl Interpreter {
                     let v = Value::Func(params.clone(), (*body).clone(), func_env);
                     self.env.insert(name.clone(), v);
                 }
-                Stmt::LetFuncBlock(name, params, body, ret) => {
+                Stmt::LetFuncBlock(name, params, body) => {
                     let func_env = self.env.clone();
-                    let v = Value::FuncBlock(params.clone(), body.clone(), (*ret).clone(), func_env);
+                    let v = Value::FuncBlock(params.clone(), body.clone(), func_env);
                     self.env.insert(name.clone(), v);
                 }
                 Stmt::PrintTemplate(tpl, arg) => {
@@ -155,11 +295,17 @@ impl Interpreter {
             }
             Stmt::Call(tname, opname, args) => {
                 unsafe {
-                    let tn = std::ffi::CString::new(tname.as_str()).unwrap();
+                    let (tn_str, mut self_obj, should_delete_self) = if let Some(Value::Object(obj)) = self.env.get(tname) {
+                        (obj.type_name.clone(), zig_ffi::typed_obj { ptr: obj.obj.ptr, r#type: obj.obj.r#type }, false)
+                    } else {
+                        (tname.clone(), zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() }, true)
+                    };
+
+                    let tn = std::ffi::CString::new(tn_str.as_str()).unwrap();
                     let on = std::ffi::CString::new(opname.as_str()).unwrap();
                     let mut sig_ptr: *const zig_ffi::dyn_method_sig = std::ptr::null();
                     let _ = zig_ffi::dyn_oop_get_op_typed(tn.as_ptr(), on.as_ptr(), &mut sig_ptr);
-                    let mut self_obj = zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() };
+                    
                     let mut out_obj = zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() };
                     let mut arg_objs: Vec<zig_ffi::typed_obj> = Vec::new();
                     for a in args {
@@ -203,7 +349,9 @@ impl Interpreter {
                         let _ = zig_ffi::typed_obj_delete(&mut o);
                     }
                     let _ = zig_ffi::typed_obj_delete(&mut out_obj);
-                    let _ = zig_ffi::typed_obj_delete(&mut self_obj);
+                    if should_delete_self {
+                        let _ = zig_ffi::typed_obj_delete(&mut self_obj);
+                    }
                 }
             }
             Stmt::RunList(items) => {
@@ -235,27 +383,8 @@ impl Interpreter {
     }
     fn call_func(&self, name: &str, args: &[Value]) -> Result<Value, String> {
         match self.env.get(name) {
-            Some(Value::Func(params, body, fenv)) => {
-                let mut call_env = fenv.clone();
-                if args.len() != params.len() {
-                    return Err(format!("arity mismatch: expected {}, got {}", params.len(), args.len()));
-                }
-                for (p, v) in params.iter().zip(args.iter()) {
-                    call_env.insert(p.clone(), v.clone());
-                }
-                eval(body, &call_env, &self.ops)
-            }
-            Some(Value::FuncBlock(params, body_stmts, ret_expr, fenv)) => {
-                let mut call_env = fenv.clone();
-                if args.len() != params.len() {
-                    return Err(format!("arity mismatch: expected {}, got {}", params.len(), args.len()));
-                }
-                for (p, v) in params.iter().zip(args.iter()) {
-                    call_env.insert(p.clone(), v.clone());
-                }
-                eval_block(&body_stmts, ret_expr, &mut call_env, &self.ops)
-            }
-            _ => Err(format!("undefined function: {}", name)),
+            Some(func_val) => apply_func(func_val, args, &self.ops, &self.env),
+            None => Err(format!("undefined function: {}", name)),
         }
     }
 }
@@ -446,10 +575,14 @@ fn init_oop_demo_once() {
     use std::sync::Once;
     static INIT: Once = Once::new();
     INIT.call_once(|| unsafe {
+        let i64_name = std::ffi::CString::new("i64").unwrap();
+        let _ = zig_ffi::dyn_oop_register_type(i64_name.as_ptr());
+        let i64_def = zig_ffi::get_i64_def();
+        let _ = zig_ffi::dyn_oop_set_type_meta(i64_name.as_ptr(), std::ptr::null(), i64_def);
+
         let tname = std::ffi::CString::new("testobj").unwrap();
         let desc = std::ffi::CString::new("demo type").unwrap();
         let _ = zig_ffi::dyn_oop_register_type(tname.as_ptr());
-        let i64_def = zig_ffi::get_i64_def();
         let _ = zig_ffi::dyn_oop_set_type_meta(tname.as_ptr(), desc.as_ptr(), i64_def);
         let tname2 = std::ffi::CString::new("test_struct").unwrap();
         let desc2 = std::ffi::CString::new("demo struct").unwrap();
@@ -519,6 +652,7 @@ fn to_string(v: &Value) -> String {
     match v {
         Value::Int(i) => i.to_string(),
         Value::Str(s) => s.clone(),
+        Value::Sym(s) => format!("@{}", s), // Representation of symbol
         Value::List(xs, _) => {
             let mut out = String::new();
             out.push('(');
@@ -530,7 +664,76 @@ fn to_string(v: &Value) -> String {
             out
         }
         Value::Func(_, _, _) => "<func>".to_string(),
-        Value::FuncBlock(_, _, _, _) => "<func>".to_string(),
+        Value::FuncBlock(_, _, _) => "<func>".to_string(),
+        Value::NativeFunc(_) => "<native func>".to_string(),
+        Value::Object(_) => "<object>".to_string(),
+    }
+}
+
+fn call_oop_method(obj_val: &Value, op_name: &str, args: &[Value]) -> Result<Value, String> {
+    unsafe {
+        let (tn_str, mut self_obj, should_delete_self) = match obj_val {
+            Value::Object(obj) => (obj.type_name.clone(), zig_ffi::typed_obj { ptr: obj.obj.ptr, r#type: obj.obj.r#type }, false),
+            Value::Sym(s) => (s.clone(), zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() }, true),
+            _ => return Err("method call requires object or type symbol".to_string()),
+        };
+
+        let tn = std::ffi::CString::new(tn_str.as_str()).unwrap();
+        let on = std::ffi::CString::new(op_name).unwrap();
+        let mut sig_ptr: *const zig_ffi::dyn_method_sig = std::ptr::null();
+        let _ = zig_ffi::dyn_oop_get_op_typed(tn.as_ptr(), on.as_ptr(), &mut sig_ptr);
+        
+        let mut out_obj = zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() };
+        let mut arg_objs: Vec<zig_ffi::typed_obj> = Vec::new();
+        for a in args {
+            match a {
+                Value::Int(i) => {
+                    let td = zig_ffi::dyn_oop_get_type_def(std::ffi::CString::new("i64").unwrap().as_ptr());
+                    let mut to = zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() };
+                    if zig_ffi::typed_obj_alloc(&mut to, td) == 0 && !to.ptr.is_null() {
+                        *(to.ptr as *mut i64) = *i;
+                        arg_objs.push(to);
+                    } else {
+                        return Err("alloc arg failed".to_string());
+                    }
+                }
+                Value::Str(_) => return Err("string args not supported".to_string()),
+                _ => return Err("unsupported arg type".to_string()),
+            }
+        }
+        let rc = zig_ffi::dyn_oop_do_op(tn.as_ptr(), on.as_ptr(), &mut self_obj, if arg_objs.is_empty() { std::ptr::null() } else { arg_objs.as_ptr() }, arg_objs.len() as zig_ffi::c_int, &mut out_obj);
+        
+        let res = if rc < 0 {
+            Err("op call failed".to_string())
+        } else {
+            if !out_obj.ptr.is_null() && !out_obj.r#type.is_null() && !sig_ptr.is_null() {
+                let retn = (*sig_ptr).ret_type_name;
+                if !retn.is_null() {
+                    let ret_type_str = std::ffi::CStr::from_ptr(retn).to_string_lossy().into_owned();
+                    if ret_type_str == "i64" {
+                        let val = *(out_obj.ptr as *const i64);
+                        let _ = zig_ffi::typed_obj_delete(&mut out_obj);
+                        Ok(Value::Int(val))
+                    } else {
+                        Ok(Value::Object(Rc::new(OopObject { obj: out_obj, type_name: ret_type_str })))
+                    }
+                } else {
+                    let _ = zig_ffi::typed_obj_delete(&mut out_obj);
+                    Ok(Value::Int(rc as i64))
+                }
+            } else {
+                let _ = zig_ffi::typed_obj_delete(&mut out_obj);
+                Ok(Value::Int(rc as i64))
+            }
+        };
+
+        for mut o in arg_objs {
+            let _ = zig_ffi::typed_obj_delete(&mut o);
+        }
+        if should_delete_self {
+            let _ = zig_ffi::typed_obj_delete(&mut self_obj);
+        }
+        res
     }
 }
 
@@ -538,7 +741,14 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
     match expr {
         Expr::Int(i) => Ok(Value::Int(*i)),
         Expr::Str(s) => Ok(Value::Str(s.clone())),
-        Expr::Sym(s) => Ok(Value::Str(s.clone())),
+        Expr::Sym(s) => Ok(Value::Sym(s.clone())),
+        Expr::SymToStr(e) => {
+            let v = eval(e, env, ops)?;
+            match v {
+                Value::Sym(s) => Ok(Value::Str(s)),
+                _ => Err("expected symbol".to_string()),
+            }
+        }
         Expr::Var(name) => env
             .get(name)
             .cloned()
@@ -559,18 +769,19 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             for a in args {
                 argv.push(eval(a, env, ops)?);
             }
-            if let Some(Value::Func(params, body, fenv)) = env.get(name) {
-                let mut call_env = fenv.clone();
-                if argv.len() != params.len() {
-                    return Err(format!("arity mismatch: expected {}, got {}", params.len(), argv.len()));
-                }
-                for (p, v) in params.iter().zip(argv.iter()) {
-                    call_env.insert(p.clone(), v.clone());
-                }
-                eval(body, &call_env, ops)
+            if let Some(func_val) = env.get(name) {
+                apply_func(func_val, &argv, ops, env)
             } else {
                 Err(format!("undefined function: {}", name))
             }
+        }
+        Expr::MethodCall(obj_expr, op_name, args) => {
+            let obj_val = eval(obj_expr, env, ops)?;
+            let mut argv = Vec::new();
+            for a in args {
+                argv.push(eval(a, env, ops)?);
+            }
+            call_oop_method(&obj_val, op_name, &argv)
         }
         Expr::Add(a, b) => bin_int(a, b, env, ops, |x, y| x + y),
         Expr::Sub(a, b) => bin_int(a, b, env, ops, |x, y| x - y),
@@ -592,14 +803,8 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             let va = eval(a, env, ops)?;
             let vb = eval(b, env, ops)?;
             let fname = ops.get(op).ok_or_else(|| format!("undefined custom operator: {}", op))?;
-            if let Some(Value::Func(params, body, fenv)) = env.get(fname) {
-                let mut call_env = fenv.clone();
-                if params.len() != 2 {
-                    return Err("custom operator must bind to binary function".to_string());
-                }
-                call_env.insert(params[0].clone(), va);
-                call_env.insert(params[1].clone(), vb);
-                eval(body, &call_env, ops)
+            if let Some(func_val) = env.get(fname) {
+                apply_func(func_val, &[va, vb], ops, env)
             } else {
                 Err(format!("undefined operator function: {}", fname))
             }
@@ -609,16 +814,10 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             let lv = eval(list_expr, env, ops)?;
             match lv {
                 Value::List(xs, _) => {
-                    if let Some(Value::Func(params, body, fenv)) = env.get(func_name) {
-                        if params.len() != 1 {
-                            return Err("map function must be unary".to_string());
-                        }
+                    if let Some(func_val) = env.get(func_name) {
                         let mut out = Vec::new();
                         for x in xs {
-                            let mut call_env = fenv.clone();
-                            call_env.insert(params[0].clone(), x);
-                            let r = eval(body, &call_env, ops)?;
-                            out.push(r);
+                            out.push(apply_func(func_val, &[x], ops, env)?);
                         }
                         Ok(Value::List(out, HashMap::new()))
                     } else {
@@ -654,7 +853,7 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
     }
 }
 
-fn eval_block(stmts: &[Stmt], ret: &Expr, env: &mut HashMap<String, Value>, ops: &HashMap<String, String>) -> Result<Value, String> {
+fn eval_block(stmts: &[Stmt], env: &mut HashMap<String, Value>, ops: &HashMap<String, String>) -> Result<Value, String> {
     for stmt in stmts {
         match stmt {
             Stmt::Let(name, expr) => {
@@ -665,21 +864,55 @@ fn eval_block(stmts: &[Stmt], ret: &Expr, env: &mut HashMap<String, Value>, ops:
                 let func_env = env.clone();
                 env.insert(name.clone(), Value::Func(params.clone(), (*body).clone(), func_env));
             }
-            Stmt::LetFuncBlock(name, params, body, ret2) => {
+            Stmt::LetFuncBlock(name, params, body) => {
                 let func_env = env.clone();
-                env.insert(name.clone(), Value::FuncBlock(params.clone(), body.clone(), (*ret2).clone(), func_env));
+                env.insert(name.clone(), Value::FuncBlock(params.clone(), body.clone(), func_env));
             }
             Stmt::ExprStmt(e) => {
                 let _ = eval(e, env, ops)?;
             }
-            Stmt::PrintExpr(_) | Stmt::PrintTemplate(_, _) => {}
-            Stmt::Return(_) => {}
+            Stmt::PrintExpr(e) => {
+                 let v = eval(e, env, ops)?;
+                 println!("{}", to_string(&v));
+            }
+            Stmt::PrintTemplate(tpl, arg) => {
+                if let Some(arg) = arg {
+                    let v = eval(arg, env, ops)?;
+                    let vstr = to_string(&v);
+                    println!("{}", tpl.replace("{}", &vstr));
+                } else {
+                    println!("{}", tpl);
+                }
+            }
+            Stmt::Return(e) => {
+                return eval(e, env, ops);
+            }
             Stmt::ListTypes | Stmt::ListType(_) | Stmt::RegOp(_, _) | Stmt::Call(_, _, _) | Stmt::RunList(_) => {
-                return Err("invalid statement in function block".to_string());
+                // For now, these might not be fully supported inside blocks if they rely on Interpreter state (outputs)
+                // But we can support basic ones.
+                // Wait, Stmt::Call etc are handled in Interpreter::run which returns outputs.
+                // eval_block is "silent" unless it prints?
+                // The Interpreter::run accumulates outputs.
+                // eval_block currently doesn't have access to "outputs" vec.
+                // So Print statements inside function block will print to stdout directly?
+                // The previous implementation ignored Print statements (empty block).
+                // I will make them print to stdout for now, or just ignore them if that's the desired behavior.
+                // But generally functions should be able to print.
+                // However, the signature of eval_block doesn't allow returning output strings.
+                // I'll stick to println! for now for debugging, or maybe I should change signature to return outputs too?
+                // No, simpler is better.
+                // But Stmt::Call relies on Interpreter::run logic?
+                // Stmt::Call in Interpreter::run executes FFI calls.
+                // I should probably move the logic of Stmt execution to a common place if I want full support.
+                // For now, I'll just ignore unsupported statements or return error.
+                // Stmt::Call is actually not an Expr, it's a Stmt.
+                // If it's Expr::Call, it's handled in eval.
+                // Stmt::Call is `call t.op(args)`.
+                return Err("unsupported statement in function block".to_string());
             }
         }
     }
-    eval(ret, env, ops)
+    Ok(Value::Int(0))
 }
 fn bin_int(
     a: &Expr,

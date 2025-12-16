@@ -51,8 +51,8 @@ Stmt: Stmt = {
 LetStmt: Stmt = {
     <name:Ident> "(" ")" "=" <body:Expr> => Stmt::LetFunc(name, vec![], body),
     <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" <body:Expr> => Stmt::LetFunc(name, ps, body),
-    <name:Ident> "(" ")" "=" "{" <b:Stmt*> "return" <ret:Expr> "}" => Stmt::LetFuncBlock(name, vec![], b, ret),
-    <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" "{" <b:Stmt*> "return" <ret:Expr> "}" => Stmt::LetFuncBlock(name, ps, b, ret),
+    <name:Ident> "(" ")" "=" "{" <b:Stmt*> "}" => Stmt::LetFuncBlock(name, vec![], b),
+    <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" "{" <b:Stmt*> "}" => Stmt::LetFuncBlock(name, ps, b),
     <name:Ident> "=" <e:Expr> => Stmt::Let(name, e),
 };
 
@@ -63,9 +63,14 @@ ArgNonEmpty: Vec<Expr> = {
     <l:ArgNonEmpty> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
 };
 
-ParamNonEmpty: Vec<String> = {
-    <p:Ident> => vec![p],
-    <l:ParamNonEmpty> "," <p:Ident> => { l.into_iter().chain(std::iter::once(p)).collect() },
+Param: (Option<String>, String) = {
+    <n:Ident> => (None, n),
+    <t:Ident> <n:Ident> => (Some(t), n),
+};
+
+ParamNonEmpty: Vec<(Option<String>, String)> = {
+    <p:Param> => vec![p],
+    <l:ParamNonEmpty> "," <p:Param> => l.into_iter().chain(std::iter::once(p)).collect(),
 };
 
 CustomOp: String = r"<[a-zA-Z0-9_]+>" => {
@@ -93,7 +98,12 @@ Term: Expr = {
 };
 
 Power: Expr = {
-    <l:Postfix> "**" <r:Power> => Expr::Pow(Box::new(l), Box::new(r)),
+    <l:Unary> "**" <r:Power> => Expr::Pow(Box::new(l), Box::new(r)),
+    Unary,
+};
+
+Unary: Expr = {
+    "#" <u:Unary> => Expr::SymToStr(Box::new(u)),
     Postfix,
 };
 
@@ -115,6 +125,8 @@ ListItem: ListItem = {
 Postfix: Expr = {
     <p:Postfix> "[" <i:Expr> "]" => Expr::Index(Box::new(p), Box::new(i)),
     <p:Postfix> "[" <s:StringLit> "]" => Expr::Index(Box::new(p), Box::new(Expr::Str(s))),
+    <p:Postfix> "." <m:Ident> "(" ")" => Expr::MethodCall(Box::new(p), m, vec![]),
+    <p:Postfix> "." <m:Ident> "(" <args:ArgNonEmpty> ")" => Expr::MethodCall(Box::new(p), m, args),
     <f:Ident> "(" ")" => Expr::Call(f, vec![]),
     <f:Ident> "(" <args:ArgNonEmpty> ")" => Expr::Call(f, args),
     Factor,
@@ -124,7 +136,7 @@ Factor: Expr = {
     <n:Number> => Expr::Int(n),
     <v:Ident> => Expr::Var(v),
     "#" <s:StringLit> => Expr::Sym(s),
-    "'" <v:Ident> => Expr::Str(v),
+    "'" <v:Ident> => Expr::Sym(v),
     "(" ")" => Expr::List(vec![]),
     "(" <items:CommaList> ")" => Expr::List(items),
     "(" <first:Expr> ")" => Expr::Group(Box::new(first)),

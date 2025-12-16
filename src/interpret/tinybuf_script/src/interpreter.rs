@@ -161,6 +161,63 @@ impl Interpreter {
             body: val_body,
         }));
 
+        // Reflection: sys_types() -> list<str>
+        let sys_types_body = Rc::new(|_args: &[Value], _env: &HashMap<String, Value>| -> Result<Value, String> {
+            let mut types = Vec::new();
+            unsafe {
+                let cnt = zig_ffi::dyn_oop_get_type_count();
+                for i in 0..cnt {
+                    let name_ptr = zig_ffi::dyn_oop_get_type_name(i);
+                    if !name_ptr.is_null() {
+                        let name = CStr::from_ptr(name_ptr).to_string_lossy().into_owned();
+                        types.push(Value::Str(name));
+                    }
+                }
+            }
+            Ok(Value::List(types, HashMap::new()))
+        });
+        env.insert("sys_types".to_string(), Value::NativeFunc(NativeFunc {
+            params: vec![],
+            body: sys_types_body,
+        }));
+
+        // Reflection: sys_methods(sym) -> list<str>
+        let sys_methods_body = Rc::new(|args: &[Value], _env: &HashMap<String, Value>| -> Result<Value, String> {
+            let type_name = match &args[0] {
+                Value::Sym(s) => s,
+                _ => return Err("sys_methods expects a symbol type name".to_string()),
+            };
+            let mut methods = Vec::new();
+            unsafe {
+                let cname = std::ffi::CString::new(type_name.as_str()).map_err(|_| "invalid type name")?;
+                let mc = zig_ffi::dyn_oop_get_method_count(cname.as_ptr());
+                for i in 0..mc {
+                    let mname_ptr = zig_ffi::dyn_oop_get_method_name(cname.as_ptr(), i);
+                    if !mname_ptr.is_null() {
+                        let mname = CStr::from_ptr(mname_ptr).to_string_lossy().into_owned();
+                        methods.push(Value::Str(mname));
+                    }
+                }
+                // Also get operators as they are methods
+                let oc = zig_ffi::dyn_oop_get_op_count(cname.as_ptr());
+                for i in 0..oc {
+                     let mut oname: *const std::os::raw::c_char = std::ptr::null();
+                     let mut osig: *const std::os::raw::c_char = std::ptr::null();
+                     let mut odesc: *const std::os::raw::c_char = std::ptr::null();
+                     let mrc = zig_ffi::dyn_oop_get_op_meta(cname.as_ptr(), i, &mut oname, &mut osig, &mut odesc);
+                     if mrc == 0 && !oname.is_null() {
+                         let on = CStr::from_ptr(oname).to_string_lossy().into_owned();
+                         methods.push(Value::Str(on));
+                     }
+                }
+            }
+            Ok(Value::List(methods, HashMap::new()))
+        });
+        env.insert("sys_methods".to_string(), Value::NativeFunc(NativeFunc {
+            params: vec![(Some("sym".to_string()), "type_name".to_string())],
+            body: sys_methods_body,
+        }));
+
         Self { env, ops: HashMap::new() }
     }
 

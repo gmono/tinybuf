@@ -12,3 +12,5 @@ let v = 123
 let sym_v = 'v
 print val(sym_v)
 print typeof(val(sym_v))
+print sys_types()
+print sys_methods('testobj)

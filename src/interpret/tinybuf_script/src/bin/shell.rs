@@ -7,7 +7,12 @@ fn main() {
     
     let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 {
-        let filename = &args[1];
+        let (filename, test_mode) = if args[1] == "test" && args.len() > 2 {
+            (&args[2], true)
+        } else {
+            (&args[1], false)
+        };
+
         let src = match std::fs::read_to_string(filename) {
             Ok(s) => s,
             Err(e) => {
@@ -17,6 +22,7 @@ fn main() {
         };
         
         let mut interp = Interpreter::new();
+        interp.test_mode = test_mode;
         match parse_program(&src) {
             Ok(ast) => match interp.run(&ast) {
                 Ok(outputs) => {

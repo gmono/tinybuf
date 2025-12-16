@@ -1,0 +1,7 @@
+print "normal start"
+let a = 10
+test {
+    let b = 20
+    print "in test: a+b={}" a+b
+}
+print "normal end"

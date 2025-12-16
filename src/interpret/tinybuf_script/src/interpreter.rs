@@ -16,12 +16,13 @@ enum Value {
 pub struct Interpreter {
     env: HashMap<String, Value>,
     ops: HashMap<String, String>,
+    pub test_mode: bool,
 }
 
 impl Interpreter {
     pub fn new() -> Self {
         init_oop_demo_once();
-        Self { env: HashMap::new(), ops: HashMap::new() }
+        Self { env: HashMap::new(), ops: HashMap::new(), test_mode: false }
     }
 
     pub fn run(&mut self, program: &[Stmt]) -> Result<Vec<String>, String> {
@@ -43,6 +44,7 @@ impl Interpreter {
                     self.env.insert(name.clone(), v);
                 }
                 Stmt::PrintTemplate(tpl, arg) => {
+                    if self.test_mode { continue; }
                     if let Some(arg) = arg {
                         let v = eval(arg, &self.env, &self.ops)?;
                         let vstr = to_string(&v);
@@ -53,6 +55,7 @@ impl Interpreter {
                     }
                 }
                 Stmt::PrintExpr(expr) => {
+                    if self.test_mode { continue; }
                     let v = eval(expr, &self.env, &self.ops)?;
                     outputs.push(to_string(&v));
                 }
@@ -60,6 +63,7 @@ impl Interpreter {
                     self.ops.insert(op.clone(), fname.clone());
                 }
             Stmt::ListTypes => {
+                if self.test_mode { continue; }
                 unsafe {
                     let cnt = zig_ffi::dyn_oop_get_type_count();
                     if cnt <= 0 {
@@ -75,6 +79,7 @@ impl Interpreter {
                 }
             }
             Stmt::ListType(name) => {
+                if self.test_mode { continue; }
                 unsafe {
                     let cname = std::ffi::CString::new(name.as_str()).unwrap();
                     outputs.push(format!("type {}", name));
@@ -154,6 +159,7 @@ impl Interpreter {
                 }
             }
             Stmt::Call(tname, opname, args) => {
+                if self.test_mode { continue; }
                 unsafe {
                     let tn = std::ffi::CString::new(tname.as_str()).unwrap();
                     let on = std::ffi::CString::new(opname.as_str()).unwrap();
@@ -207,6 +213,7 @@ impl Interpreter {
                 }
             }
             Stmt::RunList(items) => {
+                if self.test_mode { continue; }
                 if items.is_empty() {
                     outputs.push("empty list".to_string());
                 } else {
@@ -227,9 +234,11 @@ impl Interpreter {
                 return Err("return outside function".to_string());
             }
             Stmt::ExprStmt(expr) => {
+                if self.test_mode { continue; }
                 let _ = eval(expr, &self.env, &self.ops)?;
             }
             Stmt::Test(stmts) => {
+                if !self.test_mode { continue; }
                 let saved_env = self.env.clone();
                 let saved_ops = self.ops.clone();
                 let block_outputs = self.run(stmts)?;
@@ -520,6 +529,12 @@ unsafe extern "C" fn demo_add_cb(
 
 pub fn run(program: &[Stmt]) -> Result<Vec<String>, String> {
     let mut it = Interpreter::new();
+    it.run(program)
+}
+
+pub fn run_tests(program: &[Stmt]) -> Result<Vec<String>, String> {
+    let mut it = Interpreter::new();
+    it.test_mode = true;
     it.run(program)
 }
 

@@ -90,6 +90,31 @@ AddSub: Expr = {
     Term,
 };
 
+LispKeyword: Expr = {
+    "let" => Expr::Sym("let".to_string()),
+    "print" => Expr::Sym("print".to_string()),
+    "run" => Expr::Sym("run".to_string()),
+    "return" => Expr::Sym("return".to_string()),
+    "list" => Expr::Sym("list".to_string()),
+    "call" => Expr::Sym("call".to_string()),
+    "get" => Expr::Sym("get".to_string()),
+    "types" => Expr::Sym("types".to_string()),
+    "type" => Expr::Sym("type".to_string()),
+    "reg" => Expr::Sym("reg".to_string()),
+    "operator" => Expr::Sym("operator".to_string()),
+};
+
+LispAtom: Expr = {
+    Expr,
+    LispKeyword,
+};
+
+LispArgs: Vec<Expr> = {
+    <e:LispAtom> => vec![e],
+    <l:LispArgs> "," <e:LispAtom> => l.into_iter().chain(std::iter::once(e)).collect(),
+    <l:LispArgs> <e:LispAtom> => l.into_iter().chain(std::iter::once(e)).collect(),
+};
+
 Term: Expr = {
     <l:Term> "*" <r:Power> => Expr::Mul(Box::new(l), Box::new(r)),
     <l:Term> "/" <r:Power> => Expr::Div(Box::new(l), Box::new(r)),

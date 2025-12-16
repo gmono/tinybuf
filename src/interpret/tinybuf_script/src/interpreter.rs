@@ -82,7 +82,7 @@ fn apply_func(func: &Value, args: &[Value], ops: &HashMap<String, String>, env: 
             for (p, v) in params.iter().zip(args.iter()) {
                 call_env.insert(p.1.clone(), v.clone());
             }
-            eval(body, &call_env, ops)
+            eval(body, &mut call_env, ops)
         }
         Value::FuncBlock(params, body_stmts, fenv) => {
             check_args(params, args, false)?;
@@ -242,131 +242,20 @@ impl Interpreter {
         Self { env, ops: HashMap::new() }
     }
 
-    fn run_list_stmt(&mut self, items: &[ListItem], outputs: &mut Vec<String>) -> Result<(), String> {
-        if items.is_empty() { return Ok(()); }
-        
-        let head = &items[0].value;
-        let head_sym = match head {
-            Expr::Sym(s) | Expr::Var(s) => Some(s.as_str()),
-            _ => None,
-        };
-        
-        if let Some(s) = head_sym {
-            match s {
-                "let" => {
-                     // Case 1: (let a 1) -> 3 items: let, a, 1
-                     if items.len() == 3 {
-                         let name = match &items[1].value {
-                             Expr::Sym(n) | Expr::Var(n) => n.clone(),
-                             _ => return Err("let expects symbol/var name".to_string()),
-                         };
-                         let val = eval(&items[2].value, &self.env, &self.ops)?;
-                         self.env.insert(name, val);
-                         return Ok(());
-                     }
-                     // Case 2: (let a=1) -> 2 items: let, ListItem{key="a", value=1}
-                     if items.len() == 2 {
-                         if let Some(key) = &items[1].key {
-                             let val = eval(&items[1].value, &self.env, &self.ops)?;
-                             self.env.insert(key.clone(), val);
-                             return Ok(());
-                         }
-                     }
-                     return Err("let syntax error: expected (let a 1) or (let a=1)".to_string());
-                }
-                "print" => {
-                    for arg in items.iter().skip(1) {
-                        let v = eval(&arg.value, &self.env, &self.ops)?;
-                        outputs.push(to_string(&v));
-                    }
-                    return Ok(());
-                }
-                "run" => {
-                     if items.len() < 2 { return Err("run requires list".to_string()); }
-                     let v = eval(&items[1].value, &self.env, &self.ops)?;
-                     if let Value::List(sub_items, _) = v {
-                          return self.run_list_values(&sub_items, outputs);
-                     }
-                     return Err("run expects a list value".to_string());
-                }
-                _ => {}
-            }
-        }
-        
-        // Convert ListItem to Expr::List to eval as a normal function call
-        // But Expr::List expects Vec<ListItem>. We have &[ListItem].
-        // We can clone.
-        let list_expr = Expr::List(items.to_vec());
-        let res = eval(&list_expr, &self.env, &self.ops)?;
-        outputs.push(to_string(&res));
-        Ok(())
-    }
-
-    fn run_list_values(&mut self, items: &[Value], outputs: &mut Vec<String>) -> Result<(), String> {
-        if items.is_empty() { return Ok(()); }
-        
-        let head = &items[0];
-        let is_special = match head {
-            Value::Sym(s) => matches!(s.as_str(), "let" | "print" | "run"),
-            _ => false
-        };
-        
-        if is_special {
-             if let Value::Sym(s) = head {
-                 match s.as_str() {
-                     "let" => {
-                          if items.len() < 3 { return Err("let requires name and value".to_string()); }
-                          let name = match &items[1] {
-                              Value::Sym(n) | Value::Str(n) => n.clone(),
-                              _ => return Err("let expects symbol name".to_string()),
-                          };
-                          let val = items[2].clone();
-                          self.env.insert(name, val);
-                          return Ok(());
-                     }
-                     "print" => {
-                         for arg in items.iter().skip(1) {
-                             outputs.push(to_string(arg));
-                         }
-                         return Ok(());
-                     }
-                     "run" => {
-                          if items.len() < 2 { return Err("run requires list".to_string()); }
-                          if let Value::List(sub, _) = &items[1] {
-                              return self.run_list_values(sub, outputs);
-                          }
-                          return Err("run expects list".to_string());
-                     }
-                     _ => {}
-                 }
-             }
-        }
-        
-        let func = match &items[0] {
-            Value::Sym(s) => self.env.get(s).cloned().ok_or_else(|| format!("undefined function: {}", s))?,
-            v => v.clone(),
-        };
-        
-        let args = items[1..].to_vec();
-        let res = apply_func(&func, &args, &self.ops, &self.env)?;
-        outputs.push(to_string(&res));
-        Ok(())
-    }
-
-    pub fn run(&mut self, program: &[Stmt]) -> Result<Vec<String>, String> {
+    pub fn run(&mut self, program: Vec<Stmt>) -> Result<Vec<String>, String> {
         let mut outputs = Vec::new();
         for stmt in program {
             match stmt {
-                Stmt::RunList(items) => {
-                    self.run_list_stmt(items, &mut outputs)?;
+                Stmt::Run(e) => {
+                    let _ = eval(&e, &mut self.env, &self.ops)?;
                 }
                 Stmt::Let(name, expr) => {
-                    let v = eval(expr, &self.env, &self.ops)?;
+                    let v = eval(&expr, &mut self.env, &self.ops)?;
                     self.env.insert(name.clone(), v);
                 }
                 Stmt::LetFunc(name, params, body) => {
                     let func_env = self.env.clone();
-                    let v = Value::Func(params.clone(), (*body).clone(), func_env);
+                    let v = Value::Func(params.clone(), body.clone(), func_env);
                     self.env.insert(name.clone(), v);
                 }
                 Stmt::LetFuncBlock(name, params, body) => {
@@ -376,7 +265,7 @@ impl Interpreter {
                 }
                 Stmt::PrintTemplate(tpl, arg) => {
                     if let Some(arg) = arg {
-                        let v = eval(arg, &self.env, &self.ops)?;
+                        let v = eval(&arg, &mut self.env, &self.ops)?;
                         let vstr = to_string(&v);
                         let rendered = tpl.replace("{}", &vstr);
                         outputs.push(rendered);
@@ -385,7 +274,7 @@ impl Interpreter {
                     }
                 }
                 Stmt::PrintExpr(expr) => {
-                    let v = eval(expr, &self.env, &self.ops)?;
+                    let v = eval(&expr, &mut self.env, &self.ops)?;
                     outputs.push(to_string(&v));
                 }
                 Stmt::RegOp(op, fname) => {
@@ -487,7 +376,7 @@ impl Interpreter {
             }
             Stmt::Call(tname, opname, args) => {
                 unsafe {
-                    let (tn_str, mut self_obj, should_delete_self) = if let Some(Value::Object(obj)) = self.env.get(tname) {
+                    let (tn_str, mut self_obj, should_delete_self) = if let Some(Value::Object(obj)) = self.env.get(&tname) {
                         (obj.type_name.clone(), zig_ffi::typed_obj { ptr: obj.obj.ptr, r#type: obj.obj.r#type }, false)
                     } else {
                         (tname.clone(), zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() }, true)
@@ -501,7 +390,7 @@ impl Interpreter {
                     let mut out_obj = zig_ffi::typed_obj { ptr: std::ptr::null_mut(), r#type: std::ptr::null() };
                     let mut arg_objs: Vec<zig_ffi::typed_obj> = Vec::new();
                     for a in args {
-                        let v = eval(a, &self.env, &self.ops)?;
+                        let v = eval(&a, &mut self.env, &self.ops)?;
                         match v {
                             Value::Int(i) => {
                                 let td = zig_ffi::dyn_oop_get_type_def(std::ffi::CString::new("i64").unwrap().as_ptr());
@@ -551,7 +440,7 @@ impl Interpreter {
                 return Err("return outside function".to_string());
             }
             Stmt::ExprStmt(expr) => {
-                let _ = eval(expr, &self.env, &self.ops)?;
+                let _ = eval(&expr, &mut self.env, &self.ops)?;
             }
         }
     }
@@ -821,7 +710,7 @@ unsafe extern "C" fn demo_add_cb(
 
 pub fn run(program: &[Stmt]) -> Result<Vec<String>, String> {
     let mut it = Interpreter::new();
-    it.run(program)
+    it.run(program.to_vec())
 }
 
 fn to_string(v: &Value) -> String {
@@ -1107,7 +996,10 @@ fn eval_block(stmts: &[Stmt], env: &mut HashMap<String, Value>, ops: &HashMap<St
             Stmt::Return(e) => {
                 return eval(e, env, ops);
             }
-            Stmt::ListTypes | Stmt::ListType(_) | Stmt::RegOp(_, _) | Stmt::Call(_, _, _) | Stmt::RunList(_) => {
+            Stmt::Run(e) => {
+                eval(e, env, ops)?;
+            }
+            Stmt::ListTypes | Stmt::ListType(_) | Stmt::RegOp(_, _) | Stmt::Call(_, _, _) => {
                 // For now, these might not be fully supported inside blocks if they rely on Interpreter state (outputs)
                 // But we can support basic ones.
                 // Wait, Stmt::Call etc are handled in Interpreter::run which returns outputs.

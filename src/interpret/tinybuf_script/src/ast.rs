@@ -8,9 +8,9 @@ pub enum Stmt {
     RegOp(String, String),
     LetFunc(String, Vec<(Option<String>, String)>, Expr),
     LetFuncBlock(String, Vec<(Option<String>, String)>, Vec<Stmt>),
-    Return(Expr),
+  Return(Expr),
     Call(String, String, Vec<Expr>),
-    RunList(Vec<ListItem>),
+    Run(Expr),
     ExprStmt(Expr),
 }
 

@@ -1,5 +1,5 @@
 use std::env;
-use std::path::PathBuf;
+// use std::path::PathBuf;
 
 fn main() {
     lalrpop::process_root().expect("lalrpop generate failed");
@@ -9,6 +9,7 @@ fn main() {
         .parent().unwrap() // src
         .join("dyn_sys").join("zig").join("zig-out");
     let zig_lib_dir = zig_out_dir.join("lib");
+    let _zig_lib_dir = zig_lib_dir;
     let zig_bin_dir = zig_out_dir.join("bin");
     let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
 

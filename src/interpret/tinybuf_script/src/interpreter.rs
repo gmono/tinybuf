@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::fmt;
 
 use crate::ast::{Expr, Stmt};
-use crate::ast::ListItem;
+// use crate::ast::ListItem;
 
 pub struct OopObject {
     pub obj: zig_ffi::typed_obj,
@@ -386,7 +386,7 @@ impl Interpreter {
                             }
                         }
                     }
-                    let rc = zig_ffi::dyn_oop_do_op(tn.as_ptr(), on.as_ptr(), &mut self_obj, if arg_objs.is_empty() { std::ptr::null() } else { arg_objs.as_ptr() }, arg_objs.len() as zig_ffi::c_int, &mut out_obj);
+                    let rc = zig_ffi::dyn_oop_do_op(tn.as_ptr(), on.as_ptr(), &mut self_obj, if arg_objs.is_empty() { std::ptr::null() } else { arg_objs.as_ptr() }, arg_objs.len() as zig_ffi::CInt, &mut out_obj);
                     if rc < 0 {
                         outputs.push("op call failed".to_string());
                     } else {
@@ -449,7 +449,7 @@ impl Interpreter {
         mod zig_ffi {
             use libloading::{Library, Symbol};
             use std::sync::OnceLock;
-            pub type c_int = i32;
+            pub type CInt = i32;
             static LIB: OnceLock<Library> = OnceLock::new();
             fn lib() -> &'static Library {
                 LIB.get_or_init(|| unsafe { Library::new("dyn_sys_zig_dll.dll") }.expect("load dyn_sys_zig_dll.dll"))
@@ -457,9 +457,9 @@ impl Interpreter {
             pub type DynCallFn = unsafe extern "C" fn(
                 self_obj: *mut typed_obj,
                 args: *const typed_obj,
-                argc: c_int,
+                argc: CInt,
                 ret_out: *mut typed_obj,
-            ) -> c_int;
+            ) -> CInt;
             #[repr(C)]
             pub struct typed_obj {
                 pub ptr: *mut std::ffi::c_void,
@@ -475,68 +475,68 @@ impl Interpreter {
             pub struct dyn_method_sig {
                 pub ret_type_name: *const std::os::raw::c_char,
                 pub params: *const dyn_param_desc,
-                pub param_count: c_int,
+                pub param_count: CInt,
                 pub desc: *const std::os::raw::c_char,
             }
-            pub unsafe fn dyn_oop_get_type_count() -> c_int {
-                let f: Symbol<unsafe extern "C" fn() -> c_int> = lib().get(b"dyn_oop_get_type_count\0").unwrap();
+            pub unsafe fn dyn_oop_get_type_count() -> CInt {
+                let f: Symbol<unsafe extern "C" fn() -> CInt> = lib().get(b"dyn_oop_get_type_count\0").unwrap();
                 f()
             }
-            pub unsafe fn dyn_oop_get_type_name(index: c_int) -> *const std::os::raw::c_char {
-                let f: Symbol<unsafe extern "C" fn(c_int) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_type_name\0").unwrap();
+            pub unsafe fn dyn_oop_get_type_name(index: CInt) -> *const std::os::raw::c_char {
+                let f: Symbol<unsafe extern "C" fn(CInt) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_type_name\0").unwrap();
                 f(index)
             }
             pub unsafe fn dyn_oop_get_type_desc(type_name: *const std::os::raw::c_char) -> *const std::os::raw::c_char {
                 let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_type_desc\0").unwrap();
                 f(type_name)
             }
-            pub unsafe fn dyn_oop_get_type_kind(type_name: *const std::os::raw::c_char) -> c_int {
-                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> c_int> = lib().get(b"dyn_oop_get_type_kind\0").unwrap();
+            pub unsafe fn dyn_oop_get_type_kind(type_name: *const std::os::raw::c_char) -> CInt {
+                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> CInt> = lib().get(b"dyn_oop_get_type_kind\0").unwrap();
                 f(type_name)
             }
             pub unsafe fn dyn_oop_get_type_size(type_name: *const std::os::raw::c_char) -> usize {
                 let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> usize> = lib().get(b"dyn_oop_get_type_size\0").unwrap();
                 f(type_name)
             }
-            pub unsafe fn dyn_oop_get_field_count(type_name: *const std::os::raw::c_char) -> c_int {
-                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> c_int> = lib().get(b"dyn_oop_get_field_count\0").unwrap();
+            pub unsafe fn dyn_oop_get_field_count(type_name: *const std::os::raw::c_char) -> CInt {
+                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> CInt> = lib().get(b"dyn_oop_get_field_count\0").unwrap();
                 f(type_name)
             }
-            pub unsafe fn dyn_oop_get_field_name(type_name: *const std::os::raw::c_char, index: c_int) -> *const std::os::raw::c_char {
-                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char, c_int) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_field_name\0").unwrap();
+            pub unsafe fn dyn_oop_get_field_name(type_name: *const std::os::raw::c_char, index: CInt) -> *const std::os::raw::c_char {
+                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char, CInt) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_field_name\0").unwrap();
                 f(type_name, index)
             }
-            pub unsafe fn dyn_oop_get_method_count(type_name: *const std::os::raw::c_char) -> c_int {
-                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> c_int> = lib().get(b"dyn_oop_get_method_count\0").unwrap();
+            pub unsafe fn dyn_oop_get_method_count(type_name: *const std::os::raw::c_char) -> CInt {
+                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> CInt> = lib().get(b"dyn_oop_get_method_count\0").unwrap();
                 f(type_name)
             }
-            pub unsafe fn dyn_oop_get_method_name(type_name: *const std::os::raw::c_char, index: c_int) -> *const std::os::raw::c_char {
-                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char, c_int) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_method_name\0").unwrap();
+            pub unsafe fn dyn_oop_get_method_name(type_name: *const std::os::raw::c_char, index: CInt) -> *const std::os::raw::c_char {
+                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char, CInt) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_method_name\0").unwrap();
                 f(type_name, index)
             }
-            pub unsafe fn dyn_oop_get_method_sig_str(type_name: *const std::os::raw::c_char, index: c_int) -> *const std::os::raw::c_char {
-                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char, c_int) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_method_sig_str\0").unwrap();
+            pub unsafe fn dyn_oop_get_method_sig_str(type_name: *const std::os::raw::c_char, index: CInt) -> *const std::os::raw::c_char {
+                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char, CInt) -> *const std::os::raw::c_char> = lib().get(b"dyn_oop_get_method_sig_str\0").unwrap();
                 f(type_name, index)
             }
-            pub unsafe fn dyn_oop_get_op_count(type_name: *const std::os::raw::c_char) -> c_int {
-                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> c_int> = lib().get(b"dyn_oop_get_op_count\0").unwrap();
+            pub unsafe fn dyn_oop_get_op_count(type_name: *const std::os::raw::c_char) -> CInt {
+                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> CInt> = lib().get(b"dyn_oop_get_op_count\0").unwrap();
                 f(type_name)
             }
             pub unsafe fn dyn_oop_get_op_meta(
                 type_name: *const std::os::raw::c_char,
-                index: c_int,
+                index: CInt,
                 name_out: *mut *const std::os::raw::c_char,
                 sig_out: *mut *const std::os::raw::c_char,
                 desc_out: *mut *const std::os::raw::c_char,
-            ) -> c_int {
+            ) -> CInt {
                 let f: Symbol<
                     unsafe extern "C" fn(
                         *const std::os::raw::c_char,
-                        c_int,
+                        CInt,
                         *mut *const std::os::raw::c_char,
                         *mut *const std::os::raw::c_char,
                         *mut *const std::os::raw::c_char,
-                    ) -> c_int,
+                    ) -> CInt,
                 > = lib().get(b"dyn_oop_get_op_meta\0").unwrap();
                 f(type_name, index, name_out, sig_out, desc_out)
             }
@@ -544,13 +544,13 @@ impl Interpreter {
                 type_name: *const std::os::raw::c_char,
                 op_name: *const std::os::raw::c_char,
                 sig_out: *mut *const dyn_method_sig,
-            ) -> c_int {
+            ) -> CInt {
                 let f: Symbol<
                     unsafe extern "C" fn(
                         *const std::os::raw::c_char,
                         *const std::os::raw::c_char,
                         *mut *const dyn_method_sig,
-                    ) -> c_int,
+                    ) -> CInt,
                 > = lib().get(b"dyn_oop_get_op_typed\0").unwrap();
                 f(type_name, op_name, sig_out)
             }
@@ -558,21 +558,21 @@ impl Interpreter {
                 let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> *const std::ffi::c_void> = lib().get(b"dyn_oop_get_type_def\0").unwrap();
                 f(type_name)
             }
-            pub unsafe fn dyn_oop_register_type(type_name: *const std::os::raw::c_char) -> c_int {
-                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> c_int> = lib().get(b"dyn_oop_register_type\0").unwrap();
+            pub unsafe fn dyn_oop_register_type(type_name: *const std::os::raw::c_char) -> CInt {
+                let f: Symbol<unsafe extern "C" fn(*const std::os::raw::c_char) -> CInt> = lib().get(b"dyn_oop_register_type\0").unwrap();
                 f(type_name)
             }
             pub unsafe fn dyn_oop_set_type_meta(
                 type_name: *const std::os::raw::c_char,
                 desc: *const std::os::raw::c_char,
                 def: *const std::ffi::c_void,
-            ) -> c_int {
+            ) -> CInt {
                 let f: Symbol<
                     unsafe extern "C" fn(
                         *const std::os::raw::c_char,
                         *const std::os::raw::c_char,
                         *const std::ffi::c_void,
-                    ) -> c_int,
+                    ) -> CInt,
                 > = lib().get(b"dyn_oop_set_type_meta\0").unwrap();
                 f(type_name, desc, def)
             }
@@ -582,7 +582,7 @@ impl Interpreter {
                 sig: *const dyn_method_sig,
                 op_desc: *const std::os::raw::c_char,
                 fn_ptr: DynCallFn,
-            ) -> c_int {
+            ) -> CInt {
                 let f: Symbol<
                     unsafe extern "C" fn(
                         *const std::os::raw::c_char,
@@ -590,7 +590,7 @@ impl Interpreter {
                         *const dyn_method_sig,
                         *const std::os::raw::c_char,
                         DynCallFn,
-                    ) -> c_int,
+                    ) -> CInt,
                 > = lib().get(b"dyn_oop_register_op_typed\0").unwrap();
                 f(type_name, op_name, sig, op_desc, fn_ptr)
             }
@@ -598,12 +598,12 @@ impl Interpreter {
                 let s: Symbol<*const std::ffi::c_void> = lib().get(b"i64_def\0").unwrap();
                 *s
             }
-            pub unsafe fn typed_obj_alloc(o: *mut typed_obj, def: *const std::ffi::c_void) -> c_int {
-                let f: Symbol<unsafe extern "C" fn(*mut typed_obj, *const std::ffi::c_void) -> c_int> = lib().get(b"typed_obj_alloc\0").unwrap();
+            pub unsafe fn typed_obj_alloc(o: *mut typed_obj, def: *const std::ffi::c_void) -> CInt {
+                let f: Symbol<unsafe extern "C" fn(*mut typed_obj, *const std::ffi::c_void) -> CInt> = lib().get(b"typed_obj_alloc\0").unwrap();
                 f(o, def)
             }
-            pub unsafe fn typed_obj_delete(o: *mut typed_obj) -> c_int {
-                let f: Symbol<unsafe extern "C" fn(*mut typed_obj) -> c_int> = lib().get(b"typed_obj_delete\0").unwrap();
+            pub unsafe fn typed_obj_delete(o: *mut typed_obj) -> CInt {
+                let f: Symbol<unsafe extern "C" fn(*mut typed_obj) -> CInt> = lib().get(b"typed_obj_delete\0").unwrap();
                 f(o)
             }
             pub unsafe fn dyn_oop_do_op(
@@ -611,18 +611,18 @@ impl Interpreter {
                 op_name: *const std::os::raw::c_char,
                 self_obj: *mut typed_obj,
                 args: *const typed_obj,
-                argc: c_int,
+                argc: CInt,
                 out: *mut typed_obj,
-            ) -> c_int {
+            ) -> CInt {
                 let f: Symbol<
                     unsafe extern "C" fn(
                         *const std::os::raw::c_char,
                         *const std::os::raw::c_char,
                         *mut typed_obj,
                         *const typed_obj,
-                        c_int,
+                        CInt,
                         *mut typed_obj,
-                    ) -> c_int,
+                    ) -> CInt,
                 > = lib().get(b"dyn_oop_do_op\0").unwrap();
                 f(type_name, op_name, self_obj, args, argc, out)
             }
@@ -683,9 +683,9 @@ pub fn ensure_oop_demo_registered() {
 unsafe extern "C" fn demo_add_cb(
     _self_obj: *mut zig_ffi::typed_obj,
     args: *const zig_ffi::typed_obj,
-    argc: zig_ffi::c_int,
+    argc: zig_ffi::CInt,
     ret_out: *mut zig_ffi::typed_obj,
-) -> zig_ffi::c_int {
+) -> zig_ffi::CInt {
     if args.is_null() || ret_out.is_null() || argc < 2 {
         return -1;
     }
@@ -758,7 +758,7 @@ fn call_oop_method(obj_val: &Value, op_name: &str, args: &[Value]) -> Result<Val
                 _ => return Err("unsupported arg type".to_string()),
             }
         }
-        let rc = zig_ffi::dyn_oop_do_op(tn.as_ptr(), on.as_ptr(), &mut self_obj, if arg_objs.is_empty() { std::ptr::null() } else { arg_objs.as_ptr() }, arg_objs.len() as zig_ffi::c_int, &mut out_obj);
+        let rc = zig_ffi::dyn_oop_do_op(tn.as_ptr(), on.as_ptr(), &mut self_obj, if arg_objs.is_empty() { std::ptr::null() } else { arg_objs.as_ptr() }, arg_objs.len() as zig_ffi::CInt, &mut out_obj);
         
         let res = if rc < 0 {
             Err("op call failed".to_string())

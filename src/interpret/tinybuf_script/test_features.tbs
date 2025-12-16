@@ -1,26 +1,29 @@
-let make_obj(sym t) = {
-    print "creating object type: " 
-    print #t
-    return init(t)
-}
-
+let make_obj(sym t) = { return init(t); }
+let outer(int x) = { let inner(int y) = { return x + y; }; return inner(10); }
+print "Nested Function Result (outer(5) -> 5+10):"
+print outer(5)
+print "---"
+print "Creating Object 'testobj':"
 let obj = make_obj('testobj)
-print "Object created: " 
 print obj
-
-let res = call obj.add(10, 20)
-print "Add result: " 
+print "Calling Method 'add(100, 200)':"
+let res = obj.add(100, 200)
 print res
-
-let outer() = {
-    print "Outer running"
-    let inner(x) = {
-        print "Inner x: " 
-        print x
-        return x * 2
-    }
-    return inner(21)
-}
-
-print "Nested result: " 
-print outer()
+print "---"
+print "Symbol Type and Conversion:"
+let s = 'my_symbol
+print typeof(s)
+print #s
+print "---"
+print "Reflection (Variables):"
+let my_var = 999
+print val('my_var)
+print typeof(val('my_var))
+print "Reflection (System Types):"
+let ts = sys_types()
+print ts
+print "Reflection (System Methods for 'testobj):"
+let methods = sys_methods('testobj)
+print methods
+print "---"
+print "All Tests Completed Successfully."

@@ -229,6 +229,14 @@ impl Interpreter {
             Stmt::ExprStmt(expr) => {
                 let _ = eval(expr, &self.env, &self.ops)?;
             }
+            Stmt::Test(stmts) => {
+                let saved_env = self.env.clone();
+                let saved_ops = self.ops.clone();
+                let block_outputs = self.run(stmts)?;
+                self.env = saved_env;
+                self.ops = saved_ops;
+                outputs.extend(block_outputs);
+            }
         }
     }
         Ok(outputs)
@@ -674,7 +682,7 @@ fn eval_block(stmts: &[Stmt], ret: &Expr, env: &mut HashMap<String, Value>, ops:
             }
             Stmt::PrintExpr(_) | Stmt::PrintTemplate(_, _) => {}
             Stmt::Return(_) => {}
-            Stmt::ListTypes | Stmt::ListType(_) | Stmt::RegOp(_, _) | Stmt::Call(_, _, _) | Stmt::RunList(_) => {
+            Stmt::ListTypes | Stmt::ListType(_) | Stmt::RegOp(_, _) | Stmt::Call(_, _, _) | Stmt::RunList(_) | Stmt::Test(_) => {
                 return Err("invalid statement in function block".to_string());
             }
         }

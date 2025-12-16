@@ -12,6 +12,7 @@ pub enum Stmt {
     Call(String, String, Vec<Expr>),
     RunList(Vec<Expr>),
     ExprStmt(Expr),
+    Test(Vec<Stmt>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -218,13 +218,125 @@ impl Interpreter {
             body: sys_methods_body,
         }));
 
+        // sym(str) -> sym
+        let sym_body = Rc::new(|args: &[Value], _env: &HashMap<String, Value>| -> Result<Value, String> {
+             match &args[0] {
+                 Value::Str(s) => Ok(Value::Sym(s.clone())),
+                 _ => Err("sym expects string".to_string()),
+             }
+        });
+        env.insert("sym".to_string(), Value::NativeFunc(NativeFunc {
+             params: vec![(Some("str".to_string()), "s".to_string())],
+             body: sym_body,
+        }));
+
         Self { env, ops: HashMap::new() }
+    }
+
+    fn run_list_stmt(&mut self, items: &[Expr], outputs: &mut Vec<String>) -> Result<(), String> {
+        if items.is_empty() { return Ok(()); }
+        
+        let head = &items[0];
+        let head_sym = match head {
+            Expr::Sym(s) => Some(s.as_str()),
+            _ => None,
+        };
+        
+        if let Some(s) = head_sym {
+            match s {
+                "let" => {
+                    if items.len() < 3 { return Err("let requires name and value".to_string()); }
+                     let name = match &items[1] {
+                         Expr::Sym(n) | Expr::Var(n) => n.clone(),
+                         _ => return Err("let expects symbol/var name".to_string()),
+                     };
+                     let val = eval(&items[2], &self.env, &self.ops)?;
+                     self.env.insert(name, val);
+                     return Ok(());
+                }
+                "print" => {
+                    for arg in items.iter().skip(1) {
+                        let v = eval(arg, &self.env, &self.ops)?;
+                        outputs.push(to_string(&v));
+                    }
+                    return Ok(());
+                }
+                "run" => {
+                     if items.len() < 2 { return Err("run requires list".to_string()); }
+                     let v = eval(&items[1], &self.env, &self.ops)?;
+                     if let Value::List(sub_items, _) = v {
+                          return self.run_list_values(&sub_items, outputs);
+                     }
+                     return Err("run expects a list value".to_string());
+                }
+                _ => {}
+            }
+        }
+        
+        let list_expr = Expr::List(items.iter().map(|e| ListItem { key: None, value: e.clone() }).collect());
+        let res = eval(&list_expr, &self.env, &self.ops)?;
+        outputs.push(to_string(&res));
+        Ok(())
+    }
+
+    fn run_list_values(&mut self, items: &[Value], outputs: &mut Vec<String>) -> Result<(), String> {
+        if items.is_empty() { return Ok(()); }
+        
+        let head = &items[0];
+        let is_special = match head {
+            Value::Sym(s) => matches!(s.as_str(), "let" | "print" | "run"),
+            _ => false
+        };
+        
+        if is_special {
+             if let Value::Sym(s) = head {
+                 match s.as_str() {
+                     "let" => {
+                          if items.len() < 3 { return Err("let requires name and value".to_string()); }
+                          let name = match &items[1] {
+                              Value::Sym(n) | Value::Str(n) => n.clone(),
+                              _ => return Err("let expects symbol name".to_string()),
+                          };
+                          let val = items[2].clone();
+                          self.env.insert(name, val);
+                          return Ok(());
+                     }
+                     "print" => {
+                         for arg in items.iter().skip(1) {
+                             outputs.push(to_string(arg));
+                         }
+                         return Ok(());
+                     }
+                     "run" => {
+                          if items.len() < 2 { return Err("run requires list".to_string()); }
+                          if let Value::List(sub, _) = &items[1] {
+                              return self.run_list_values(sub, outputs);
+                          }
+                          return Err("run expects list".to_string());
+                     }
+                     _ => {}
+                 }
+             }
+        }
+        
+        let func = match &items[0] {
+            Value::Sym(s) => self.env.get(s).cloned().ok_or_else(|| format!("undefined function: {}", s))?,
+            v => v.clone(),
+        };
+        
+        let args = items[1..].to_vec();
+        let res = apply_func(&func, &args, &self.ops, &self.env)?;
+        outputs.push(to_string(&res));
+        Ok(())
     }
 
     pub fn run(&mut self, program: &[Stmt]) -> Result<Vec<String>, String> {
         let mut outputs = Vec::new();
         for stmt in program {
             match stmt {
+                Stmt::RunList(items) => {
+                    self.run_list_stmt(items, &mut outputs)?;
+                }
                 Stmt::Let(name, expr) => {
                     let v = eval(expr, &self.env, &self.ops)?;
                     self.env.insert(name.clone(), v);
@@ -811,17 +923,64 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             .cloned()
             .ok_or_else(|| format!("undefined variable: {}", name)),
         Expr::List(items) => {
-            let mut vals = Vec::new();
-            let mut keys = HashMap::new();
-            for (idx, it) in items.iter().enumerate() {
-                vals.push(eval(&it.value, env, ops)?);
-                if let Some(k) = &it.key {
-                    keys.insert(k.clone(), idx);
+            // Check if it's a function call (Lisp-style)
+            // Only if:
+            // 1. Not empty
+            // 2. First item has no key
+            // 3. First item evaluates to a function (or is a Var/Sym that resolves to one)
+            // 4. AND it's not a special form symbol like "let" (though "let" usually isn't in env as func)
+            
+            let treat_as_call = if !items.is_empty() && items[0].key.is_none() {
+                // Try to resolve head
+                match &items[0].value {
+                     Expr::Var(s) | Expr::Sym(s) => {
+                         if let Some(v) = env.get(s) {
+                             matches!(v, Value::Func(..) | Value::FuncBlock(..) | Value::NativeFunc(..))
+                         } else {
+                             false
+                         }
+                     }
+                     // If head is a list ((f) ...), try to eval it?
+                     Expr::List(_) => {
+                         if let Ok(v) = eval(&items[0].value, env, ops) {
+                              matches!(v, Value::Func(..) | Value::FuncBlock(..) | Value::NativeFunc(..))
+                         } else {
+                             false
+                         }
+                     }
+                     _ => false
                 }
+            } else {
+                false
+            };
+
+            if treat_as_call {
+                // Evaluate head
+                let func = eval(&items[0].value, env, ops)?;
+                // Evaluate args
+                let mut args = Vec::new();
+                for item in items.iter().skip(1) {
+                    if item.key.is_some() {
+                         return Err("named arguments not supported in Lisp-style call".to_string());
+                    }
+                    args.push(eval(&item.value, env, ops)?);
+                }
+                // Call
+                apply_func(&func, &args, ops, env)
+            } else {
+                // Return as List Value
+                let mut vals = Vec::new();
+                let mut keys = HashMap::new();
+                for (i, item) in items.iter().enumerate() {
+                    vals.push(eval(&item.value, env, ops)?);
+                    if let Some(k) = &item.key {
+                        keys.insert(k.clone(), i);
+                    }
+                }
+                Ok(Value::List(vals, keys))
             }
-            Ok(Value::List(vals, keys))
         }
-        Expr::Call(name, args) => {
+        Expr::Call(fname, args) => {
             let mut argv = Vec::new();
             for a in args {
                 argv.push(eval(a, env, ops)?);

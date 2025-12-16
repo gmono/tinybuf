@@ -164,7 +164,22 @@ Factor: Expr = {
     "'" <v:Ident> => Expr::Sym(v),
     "(" ")" => Expr::List(vec![]),
     "(" <items:CommaList> ")" => Expr::List(items),
-    "(" <first:Expr> ")" => Expr::Group(Box::new(first)),
+    "(" <e:Expr> ")" => Expr::Group(Box::new(e)),
+    "(" <h:LispKeyword> <t:LispArgs> ")" => {
+        let mut items = vec![ListItem { key: None, value: h }];
+        for e in t {
+            items.push(ListItem { key: None, value: e });
+        }
+        Expr::List(items)
+    },
+    "(" <h:LispKeyword> ")" => Expr::List(vec![ListItem { key: None, value: h }]),
+    "(" <h:Expr> <t:LispArgs> ")" => {
+         let mut items = vec![ListItem { key: None, value: h }];
+         for e in t {
+             items.push(ListItem { key: None, value: e });
+         }
+         Expr::List(items)
+    },
 };
 
 OptExpr: Option<Expr> = {

@@ -241,7 +241,10 @@ impl Interpreter {
                 if !self.test_mode { continue; }
                 let saved_env = self.env.clone();
                 let saved_ops = self.ops.clone();
+                let saved_mode = self.test_mode;
+                self.test_mode = false;
                 let block_outputs = self.run(stmts)?;
+                self.test_mode = saved_mode;
                 self.env = saved_env;
                 self.ops = saved_ops;
                 outputs.extend(block_outputs);

@@ -32,7 +32,8 @@ pub Program: Vec<Stmt> = Stmt*;
 Stmt: Stmt = {
     Sep* "let" <ls:LetStmt> Sep => ls,
     Sep* "print" <e:Expr> Sep => Stmt::PrintExpr(e),
-    Sep* "print" <s:StringLit> <o:OptExpr> Sep => Stmt::PrintTemplate(s, o),
+    Sep* "print" <s:StringLit> Sep => Stmt::PrintTemplate(s, None),
+    Sep* "print" <s:StringLit> <e:Expr> Sep => Stmt::PrintTemplate(s, Some(e)),
     Sep* "return" <e:Expr> Sep => Stmt::Return(e),
     Sep* "list" "types" Sep => Stmt::ListTypes,
     Sep* "list" "type" <name:Ident> Sep => Stmt::ListType(name),
@@ -55,8 +56,6 @@ LetStmt: Stmt = {
     <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" "{" <b:Stmt*> "}" => Stmt::LetFuncBlock(name, ps, b),
     <name:Ident> "=" <e:Expr> => Stmt::Let(name, e),
 };
-
-/* removed Block to avoid LR(1) ambiguity */
 
 ArgNonEmpty: Vec<Expr> = {
     <e:Expr> => vec![e],
@@ -90,31 +89,6 @@ AddSub: Expr = {
     Term,
 };
 
-LispKeyword: Expr = {
-    "let" => Expr::Sym("let".to_string()),
-    "print" => Expr::Sym("print".to_string()),
-    "run" => Expr::Sym("run".to_string()),
-    "return" => Expr::Sym("return".to_string()),
-    "list" => Expr::Sym("list".to_string()),
-    "call" => Expr::Sym("call".to_string()),
-    "get" => Expr::Sym("get".to_string()),
-    "types" => Expr::Sym("types".to_string()),
-    "type" => Expr::Sym("type".to_string()),
-    "reg" => Expr::Sym("reg".to_string()),
-    "operator" => Expr::Sym("operator".to_string()),
-};
-
-LispAtom: Expr = {
-    Expr,
-    LispKeyword,
-};
-
-LispArgs: Vec<Expr> = {
-    <e:LispAtom> => vec![e],
-    <l:LispArgs> "," <e:LispAtom> => l.into_iter().chain(std::iter::once(e)).collect(),
-    <l:LispArgs> <e:LispAtom> => l.into_iter().chain(std::iter::once(e)).collect(),
-};
-
 Term: Expr = {
     <l:Term> "*" <r:Power> => Expr::Mul(Box::new(l), Box::new(r)),
     <l:Term> "/" <r:Power> => Expr::Div(Box::new(l), Box::new(r)),
@@ -132,13 +106,19 @@ Unary: Expr = {
     Postfix,
 };
 
-CommaTail: Vec<ListItem> = {
-    <e:ListItem> => vec![e],
-    <l:CommaTail> "," <e:ListItem> => { l.into_iter().chain(std::iter::once(e)).collect() },
+Postfix: Expr = {
+    <p:Postfix> "[" <i:Expr> "]" => Expr::Index(Box::new(p), Box::new(i)),
+    <p:Postfix> "[" <s:StringLit> "]" => Expr::Index(Box::new(p), Box::new(Expr::Str(s))),
+    <p:Postfix> "." <m:Ident> "(" ")" => Expr::MethodCall(Box::new(p), m, vec![]),
+    <p:Postfix> "." <m:Ident> "(" <args:ArgNonEmpty> ")" => Expr::MethodCall(Box::new(p), m, args),
+    <p:Postfix> "(" ")" => Expr::Call(Box::new(p), vec![]),
+    <p:Postfix> "(" <args:ArgNonEmpty> ")" => Expr::Call(Box::new(p), args),
+    Factor,
 };
 
 CommaList: Vec<ListItem> = {
-    <e:ListItem> "," <t:CommaTail> => { std::iter::once(e).chain(t.into_iter()).collect() },
+    <e:ListItem> => vec![e],
+    <l:CommaList> "," <e:ListItem> => l.into_iter().chain(std::iter::once(e)).collect(),
 };
 
 ListItem: ListItem = {
@@ -147,44 +127,58 @@ ListItem: ListItem = {
     <v:Expr> => ListItem{ key: None, value: v },
 };
 
-Postfix: Expr = {
-    <p:Postfix> "[" <i:Expr> "]" => Expr::Index(Box::new(p), Box::new(i)),
-    <p:Postfix> "[" <s:StringLit> "]" => Expr::Index(Box::new(p), Box::new(Expr::Str(s))),
-    <p:Postfix> "." <m:Ident> "(" ")" => Expr::MethodCall(Box::new(p), m, vec![]),
-    <p:Postfix> "." <m:Ident> "(" <args:ArgNonEmpty> ")" => Expr::MethodCall(Box::new(p), m, args),
-    <f:Ident> "(" ")" => Expr::Call(f, vec![]),
-    <f:Ident> "(" <args:ArgNonEmpty> ")" => Expr::Call(f, args),
-    Factor,
+KeyValItem: ListItem = {
+    <k:Ident> "=" <v:Expr> => ListItem{ key: Some(k), value: v },
+    <k:StringLit> "=" <v:Expr> => ListItem{ key: Some(k), value: v },
+};
+
+LispKeyword: String = {
+    "let" => "let".to_string(),
+    "print" => "print".to_string(),
+    "return" => "return".to_string(),
+    "get" => "get".to_string(),
+    "list" => "list".to_string(),
+    "types" => "types".to_string(),
+    "type" => "type".to_string(),
+    "call" => "call".to_string(),
+    "reg" => "reg".to_string(),
+    "operator" => "operator".to_string(),
+    "run" => "run".to_string(),
+    "+" => "+".to_string(),
+    "-" => "-".to_string(),
+    "**" => "**".to_string(),
+    "*" => "*".to_string(),
+    "/" => "/".to_string(),
+    "%" => "%".to_string(),
+};
+
+LispAtom: ListItem = {
+    <kv:KeyValItem> => kv,
+    <v:Unary> => ListItem{ key: None, value: v },
+    <k:LispKeyword> => ListItem{ key: None, value: Expr::Var(k) },
+};
+
+LispArgs: Vec<ListItem> = {
+    <e:LispAtom> => vec![e],
+    <l:LispArgs> ","? <e:LispAtom> => l.into_iter().chain(std::iter::once(e)).collect(),
+};
+
+OneLispArg: ListItem = {
+    ","? <e:LispAtom> => e,
+};
+
+LispArgsRest: Vec<ListItem> = {
+    <e:OneLispArg> => vec![e],
+    <l:LispArgsRest> <e:OneLispArg> => l.into_iter().chain(std::iter::once(e)).collect(),
 };
 
 Factor: Expr = {
     <n:Number> => Expr::Int(n),
     <v:Ident> => Expr::Var(v),
-    "#" <s:StringLit> => Expr::Sym(s),
     "'" <v:Ident> => Expr::Sym(v),
+    <s:StringLit> => Expr::Str(s),
     "(" ")" => Expr::List(vec![]),
-    "(" <items:CommaList> ")" => Expr::List(items),
-    "(" <e:Expr> ")" => Expr::Group(Box::new(e)),
-    "(" <h:LispKeyword> <t:LispArgs> ")" => {
-        let mut items = vec![ListItem { key: None, value: h }];
-        for e in t {
-            items.push(ListItem { key: None, value: e });
-        }
-        Expr::List(items)
-    },
-    "(" <h:LispKeyword> ")" => Expr::List(vec![ListItem { key: None, value: h }]),
-    "(" <h:Expr> <t:LispArgs> ")" => {
-         let mut items = vec![ListItem { key: None, value: h }];
-         for e in t {
-             items.push(ListItem { key: None, value: e });
-         }
-         Expr::List(items)
-    },
-};
-
-OptExpr: Option<Expr> = {
-    => None,
-    <e:Expr> => Some(e),
+    "(" <items:LispArgs> ")" => crate::ast::parse_lisp_group(items),
 };
 
 Ident: String = r"[a-zA-Z_][a-zA-Z0-9_]*" => <>.to_string();

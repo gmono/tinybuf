@@ -31,6 +31,7 @@ impl fmt::Debug for OopObject {
 pub struct NativeFunc {
     pub params: Vec<(Option<String>, String)>,
     pub body: Rc<dyn Fn(&[Value], &HashMap<String, Value>) -> Result<Value, String>>,
+    pub variadic: bool,
 }
 
 impl fmt::Debug for NativeFunc {
@@ -51,9 +52,12 @@ pub enum Value {
     Object(Rc<OopObject>),
 }
 
-fn check_args(params: &[(Option<String>, String)], args: &[Value]) -> Result<(), String> {
-    if args.len() != params.len() {
+fn check_args(params: &[(Option<String>, String)], args: &[Value], variadic: bool) -> Result<(), String> {
+    if !variadic && args.len() != params.len() {
         return Err(format!("arity mismatch: expected {}, got {}", params.len(), args.len()));
+    }
+    if variadic && args.len() < params.len() {
+        return Err(format!("arity mismatch: expected at least {}, got {}", params.len(), args.len()));
     }
     for (i, (param_type, _)) in params.iter().enumerate() {
         if let Some(pt) = param_type {
@@ -74,7 +78,7 @@ fn check_args(params: &[(Option<String>, String)], args: &[Value]) -> Result<(),
 fn apply_func(func: &Value, args: &[Value], ops: &HashMap<String, String>, env: &HashMap<String, Value>) -> Result<Value, String> {
     match func {
         Value::Func(params, body, fenv) => {
-            check_args(params, args)?;
+            check_args(params, args, false)?;
             let mut call_env = fenv.clone();
             for (p, v) in params.iter().zip(args.iter()) {
                 call_env.insert(p.1.clone(), v.clone());
@@ -82,7 +86,7 @@ fn apply_func(func: &Value, args: &[Value], ops: &HashMap<String, String>, env: 
             eval(body, &call_env, ops)
         }
         Value::FuncBlock(params, body_stmts, fenv) => {
-            check_args(params, args)?;
+            check_args(params, args, false)?;
             let mut call_env = fenv.clone();
             for (p, v) in params.iter().zip(args.iter()) {
                 call_env.insert(p.1.clone(), v.clone());
@@ -90,7 +94,7 @@ fn apply_func(func: &Value, args: &[Value], ops: &HashMap<String, String>, env: 
             eval_block(body_stmts, &mut call_env, ops)
         }
         Value::NativeFunc(nf) => {
-            check_args(&nf.params, args)?;
+            check_args(&nf.params, args, nf.variadic)?;
             (nf.body)(args, env)
         }
         _ => Err("not a function".to_string()),
@@ -129,6 +133,7 @@ impl Interpreter {
         env.insert("init".to_string(), Value::NativeFunc(NativeFunc {
             params: vec![(Some("sym".to_string()), "type_name".to_string())],
             body: init_body,
+            variadic: false,
         }));
         
         // Reflection: typeof(val) -> str
@@ -146,6 +151,7 @@ impl Interpreter {
         env.insert("typeof".to_string(), Value::NativeFunc(NativeFunc {
             params: vec![(Some("any".to_string()), "val".to_string())],
             body: type_body,
+            variadic: false,
         }));
 
         // Reflection: val(sym) -> value
@@ -159,6 +165,7 @@ impl Interpreter {
         env.insert("val".to_string(), Value::NativeFunc(NativeFunc {
             params: vec![(Some("sym".to_string()), "var".to_string())],
             body: val_body,
+            variadic: false,
         }));
 
         // Reflection: sys_types() -> list<str>
@@ -228,42 +235,54 @@ impl Interpreter {
         env.insert("sym".to_string(), Value::NativeFunc(NativeFunc {
              params: vec![(Some("str".to_string()), "s".to_string())],
              body: sym_body,
+             variadic: false,
         }));
 
         Self { env, ops: HashMap::new() }
     }
 
-    fn run_list_stmt(&mut self, items: &[Expr], outputs: &mut Vec<String>) -> Result<(), String> {
+    fn run_list_stmt(&mut self, items: &[ListItem], outputs: &mut Vec<String>) -> Result<(), String> {
         if items.is_empty() { return Ok(()); }
         
-        let head = &items[0];
+        let head = &items[0].value;
         let head_sym = match head {
-            Expr::Sym(s) => Some(s.as_str()),
+            Expr::Sym(s) | Expr::Var(s) => Some(s.as_str()),
             _ => None,
         };
         
         if let Some(s) = head_sym {
             match s {
                 "let" => {
-                    if items.len() < 3 { return Err("let requires name and value".to_string()); }
-                     let name = match &items[1] {
-                         Expr::Sym(n) | Expr::Var(n) => n.clone(),
-                         _ => return Err("let expects symbol/var name".to_string()),
-                     };
-                     let val = eval(&items[2], &self.env, &self.ops)?;
-                     self.env.insert(name, val);
-                     return Ok(());
+                     // Case 1: (let a 1) -> 3 items: let, a, 1
+                     if items.len() == 3 {
+                         let name = match &items[1].value {
+                             Expr::Sym(n) | Expr::Var(n) => n.clone(),
+                             _ => return Err("let expects symbol/var name".to_string()),
+                         };
+                         let val = eval(&items[2].value, &self.env, &self.ops)?;
+                         self.env.insert(name, val);
+                         return Ok(());
+                     }
+                     // Case 2: (let a=1) -> 2 items: let, ListItem{key="a", value=1}
+                     if items.len() == 2 {
+                         if let Some(key) = &items[1].key {
+                             let val = eval(&items[1].value, &self.env, &self.ops)?;
+                             self.env.insert(key.clone(), val);
+                             return Ok(());
+                         }
+                     }
+                     return Err("let syntax error: expected (let a 1) or (let a=1)".to_string());
                 }
                 "print" => {
                     for arg in items.iter().skip(1) {
-                        let v = eval(arg, &self.env, &self.ops)?;
+                        let v = eval(&arg.value, &self.env, &self.ops)?;
                         outputs.push(to_string(&v));
                     }
                     return Ok(());
                 }
                 "run" => {
                      if items.len() < 2 { return Err("run requires list".to_string()); }
-                     let v = eval(&items[1], &self.env, &self.ops)?;
+                     let v = eval(&items[1].value, &self.env, &self.ops)?;
                      if let Value::List(sub_items, _) = v {
                           return self.run_list_values(&sub_items, outputs);
                      }
@@ -273,7 +292,10 @@ impl Interpreter {
             }
         }
         
-        let list_expr = Expr::List(items.iter().map(|e| ListItem { key: None, value: e.clone() }).collect());
+        // Convert ListItem to Expr::List to eval as a normal function call
+        // But Expr::List expects Vec<ListItem>. We have &[ListItem].
+        // We can clone.
+        let list_expr = Expr::List(items.to_vec());
         let res = eval(&list_expr, &self.env, &self.ops)?;
         outputs.push(to_string(&res));
         Ok(())
@@ -523,23 +545,7 @@ impl Interpreter {
                     }
                 }
             }
-            Stmt::RunList(items) => {
-                if items.is_empty() {
-                    outputs.push("empty list".to_string());
-                } else {
-                    match &items[0] {
-                        Expr::Var(fname) => {
-                            let mut argsv = Vec::new();
-                            for e in items.iter().skip(1) {
-                                argsv.push(eval(e, &self.env, &self.ops)?);
-                            }
-                            let out = self.call_func(fname, &argsv)?;
-                            outputs.push(to_string(&out));
-                        }
-                        _ => return Err("run expects list with function name first".to_string()),
-                    }
-                }
-            }
+
             Stmt::Return(_) => {
                 return Err("return outside function".to_string());
             }
@@ -980,16 +986,13 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
                 Ok(Value::List(vals, keys))
             }
         }
-        Expr::Call(fname, args) => {
+        Expr::Call(func_expr, args) => {
+            let func_val = eval(func_expr, env, ops)?;
             let mut argv = Vec::new();
             for a in args {
                 argv.push(eval(a, env, ops)?);
             }
-            if let Some(func_val) = env.get(name) {
-                apply_func(func_val, &argv, ops, env)
-            } else {
-                Err(format!("undefined function: {}", name))
-            }
+            apply_func(&func_val, &argv, ops, env)
         }
         Expr::MethodCall(obj_expr, op_name, args) => {
             let obj_val = eval(obj_expr, env, ops)?;

@@ -1,0 +1,48 @@
+// Test Lisp-style equivalence
+
+// 1. Basic list syntax and run
+run (print "Hello Lisp")
+
+// 2. Variable binding with let (Lisp style)
+run (let a 10)
+run (print "a is" a)
+
+// 3. Variable binding with let (Key-Value style inside run)
+run (let b=20)
+run (print "b is" b)
+
+// 4. List syntax variations (comma vs space)
+run (let c (1 2 3))
+run (let d (4, 5, 6))
+run (print "c is" c)
+run (print "d is" d)
+
+// 5. Symbol to string conversion with #
+run (let s1 'mysym)
+run (print "s1 is" s1)
+run (print "str(s1) is" #s1)
+run (print "str(directsym) is" #'directsym)
+
+// 6. String to symbol with sym()
+run (let s2 (sym "dynamic_sym"))
+run (print "s2 is" s2)
+run (print "str(s2) is" #s2)
+
+// 7. Nested run
+run (run (print "Nested Run"))
+
+// 8. Run with mixed syntax
+run (let e (a=1 b=2))
+run (print "e is" e)
+run (let f (x=10, y=20))
+run (print "f is" f)
+
+// 9. Complex expression in run
+run (let result (+ a b))
+run (print "a + b =" result)
+
+// 10. Check if (let a 1) works equivalent to let a=1
+// We already tested run (let a 10). 
+// Let's test standard syntax too for comparison.
+let standard_var = 100
+run (print "standard_var is" standard_var)

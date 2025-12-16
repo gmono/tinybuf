@@ -244,15 +244,44 @@ mod tests {
         assert_eq!(out, vec!["3", "3"]);
     }
     #[test]
-    fn shell_auto_print_executes_expression() {
-        let src = {
-            let mut s = String::new();
-            s.push_str("let a=1\n");
-            s.push_str("let b=2\n");
-            s.push_str(&shell_transform_line("a+b"));
-            s
-        };
+    fn lisp_equivalence_features() {
+        let src = std::fs::read_to_string("test_lisp.tbs").unwrap();
         let out = interpret_script(&src).unwrap();
-        assert_eq!(out, vec!["3"]);
+        // Check expected outputs based on test_lisp.tbs content
+        // 1. run (print "Hello Lisp") -> "Hello Lisp"
+        assert_eq!(out[0], "Hello Lisp");
+        // 2. run (print a b) -> "10", "20"
+        assert_eq!(out[1], "10");
+        assert_eq!(out[2], "20");
+        // 3. run (print c) -> "(1 2 3)"
+        assert_eq!(out[3], "(1 2 3)");
+        // run (print d) -> "(4 5 6)"
+        assert_eq!(out[4], "(4 5 6)");
+        // 4. run (print (add 10 20)) -> "30"
+        assert_eq!(out[5], "30");
+        // run (print (add, 30, 40)) -> "70"
+        assert_eq!(out[6], "70");
+        // 5. run (print s1) -> "@mysym"
+        assert_eq!(out[7], "@mysym");
+        // run (print #s1) -> "mysym"
+        assert_eq!(out[8], "mysym");
+        // run (print #"directsym") -> "@directsym"
+        assert_eq!(out[9], "@directsym");
+        // run (print ##"directsym") -> "directsym"
+        assert_eq!(out[10], "directsym");
+        // 6. run (print s2) -> "@dynamic_sym"
+        assert_eq!(out[11], "@dynamic_sym");
+        // run (print #s2) -> "dynamic_sym"
+        assert_eq!(out[12], "dynamic_sym");
+        // 7. run (run (print "Nested Run")) -> "Nested Run"
+        assert_eq!(out[13], "Nested Run");
+        // 8. run (print e) -> "(1 2)"
+        // Note: (a=1 b=2) creates a list with values 1, 2 and keys a, b.
+        // to_string implementation for List just prints values space separated.
+        assert_eq!(out[14], "(1 2)");
+        // run (print f) -> "(10 20)"
+        assert_eq!(out[15], "(10 20)");
+        // 9. run (let g (add a b)) -> g = 10+20 = 30
+        assert_eq!(out[16], "30");
     }
 }

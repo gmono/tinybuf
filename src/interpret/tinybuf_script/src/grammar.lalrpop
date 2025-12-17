@@ -107,6 +107,15 @@ BlockBody: Vec<Stmt> = {
     Sep* <s:StmtList> Sep+ => s,
 };
 
+StmtListAnySep: Vec<Stmt> = {
+    <s:Stmt> => vec![s],
+    <s:Stmt> Sep+ <l:StmtListAnySep> => {
+        let mut v = vec![s];
+        v.extend(l);
+        v
+    },
+};
+
 ParamNonEmpty: Vec<String> = {
     <p:Ident> => vec![p],
     <l:ParamNonEmpty> "," <p:Ident> => { l.into_iter().chain(std::iter::once(p)).collect() },

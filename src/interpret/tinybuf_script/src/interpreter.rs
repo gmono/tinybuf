@@ -882,6 +882,11 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
              let mut block_env = env.clone();
              eval_block_expr(stmts, &mut block_env, ops)
         },
+        Expr::BlockNoValue(stmts) => {
+             let mut block_env = env.clone();
+             let _ = eval_block_expr(stmts, &mut block_env, ops)?;
+             Ok(Value::Int(0))
+        },
         Expr::SList(items) => {
             let mut vals = Vec::new();
             for it in items {

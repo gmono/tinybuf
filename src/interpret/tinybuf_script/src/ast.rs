@@ -31,6 +31,7 @@ pub enum Expr {
     Sym(String),
     List(Vec<ListItem>),
     Block(Vec<Stmt>),
+    BlockNoValue(Vec<Stmt>),
     SList(Vec<Expr>),
     Call(String, Vec<Expr>),
     Add(Box<Expr>, Box<Expr>),

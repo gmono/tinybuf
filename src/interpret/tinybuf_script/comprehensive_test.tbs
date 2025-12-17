@@ -1,0 +1,137 @@
+// Comprehensive Test Suite for TinyBuf Script
+// Covers all grammar constructs and AST features
+
+// ==========================================
+// 1. Variable Definitions
+// ==========================================
+let int_val = 42
+let neg_val = -10
+let str_val = "Hello TinyBuf"
+let list_val = (1, 2, 3)
+let map_val = (x=10, y=20)
+let complex_list = (1, "two", (sub=3, v=4))
+
+print "--- Variables ---"
+print "int_val: {}" int_val
+print "neg_val: {}" neg_val
+print "str_val: {}" str_val
+print "list_val: {}" list_val
+print "map_val: {}" map_val
+
+// ==========================================
+// 2. Arithmetic and Logic Expressions
+// ==========================================
+let sum = 10 + 5
+let diff = 10 - 5
+let prod = 10 * 5
+let quot = 10 / 2
+let rem = 10 % 3
+let pow = 2 ** 3
+// Logic is not explicit in grammar as && ||, but maybe supported?
+// Grammar only shows +, -, *, /, %, **. No && || in `Expr`.
+// So we stick to arithmetic.
+
+print "--- Arithmetic ---"
+print "10 + 5 = {}" sum
+print "10 - 5 = {}" diff
+print "10 * 5 = {}" prod
+print "10 / 2 = {}" quot
+print "10 % 3 = {}" rem
+print "2 ** 3 = {}" pow
+
+// ==========================================
+// 3. Functions
+// ==========================================
+
+// 3.1 Short Form (Expression Body)
+let add(a, b) = a + b
+let square(x) = x * x
+
+// 3.2 Block Form (Statement Body)
+let factorial(n) = {
+    // No 'if' in grammar, so we can't do recursion with base case easily
+    // unless we have some native helper or if logic is handled via expressions?
+    // We'll just do a straight calculation test for block scope
+    let res = n * n
+    return res
+}
+
+// 3.3 No Arguments
+let get_constant() = {
+    return 100
+}
+
+print "--- Functions ---"
+print "add(3, 4) = {}" add(3, 4)
+print "square(5) = {}" square(5)
+print "factorial(5) [actually square logic for test] = {}" factorial(5)
+print "get_constant() = {}" get_constant()
+
+// ==========================================
+// 4. Advanced Expressions
+// ==========================================
+
+// 4.1 Indexing
+let item = list_val[1] // should be 2 (0-based?) or 2 (1-based?) - usually 0-based in Rust vectors
+let prop = map_val["x"]
+
+print "--- Indexing ---"
+print "list_val[1]: {}" item
+print "map_val['x']: {}" prop
+
+// 4.2 Map Operator (|)
+// Syntax: expr | func_name
+// Maps function over expression (or list items if supported, but let's test single value map first)
+let mapped_val = (5, 6) | square
+print "5,6 | square = {}" mapped_val
+
+// ==========================================
+// 5. Custom Operators
+// ==========================================
+let my_op_impl(a, b) = a * 10 + b
+reg operator <op> my_op_impl
+
+let op_res = 5 <op> 2
+print "--- Custom Operator ---"
+print "5 <op> 2 (expect 52) = {}" op_res
+
+// ==========================================
+// 6. 'Get' Statement
+// ==========================================
+print "--- Get Statement ---"
+get list_val 0
+get map_val "y"
+get map_val 'x
+
+// ==========================================
+// 7. 'Run' Statement
+// ==========================================
+// run (func_name, arg1, arg2...)
+print "--- Run Statement ---"
+run (add, 10, 20)
+
+// ==========================================
+// 8. Test Constructs
+// ==========================================
+
+test_init {
+    print ">>> TEST INIT EXECUTION <<<"
+    let test_global = "I am ready"
+}
+
+test {
+    print ">>> TEST BLOCK 1 <<<"
+    print "Verifying test_global: {}" test_global
+    let local_test = 123
+    print "add(test_global, local_test) - wait, types differ, but just printing"
+    print "local: {}" local_test
+}
+
+test {
+    print ">>> TEST BLOCK 2 <<<"
+    // Verify isolation - local_test should NOT be here
+    // But we can't check for failure easily without crashing.
+    // We'll just run a valid test.
+    let res = square(10)
+    print "square(10) in test = {}" res
+}

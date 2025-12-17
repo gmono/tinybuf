@@ -1,0 +1,9 @@
+print "Top-level: Always runs"
+
+test {
+    print "Test Block: Only in test mode"
+}
+
+notest {
+    print "NoTest Block: Only in normal mode"
+}

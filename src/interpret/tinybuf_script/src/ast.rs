@@ -13,6 +13,7 @@ pub enum Stmt {
     ExprStmt(Expr),
     Test(Vec<Stmt>),
     TestInit(Vec<Stmt>),
+    NoTest(Vec<Stmt>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

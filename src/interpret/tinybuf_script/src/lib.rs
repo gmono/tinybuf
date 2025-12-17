@@ -261,9 +261,9 @@ mod tests {
         let src = r#"
             let a=1
             let b=2
-            run ("let","c",a+b)
-            run ("print",c)
-            run ("print_template","c={}",c)
+            run (#"let","c",a+b)
+            run (#"print",c)
+            run (#"print_template","c={}",c)
         "#;
         let out = interpret_script(src).unwrap();
         assert_eq!(out, vec!["3", "c=3"]);
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn run_list_block_notest() {
         let src = r#"
-            run (("block","notest",()), (("print","hi"),("let","x",1)))
+            run ((#"block",#"notest",()), ((#"print","hi"),(#"let","x",1)))
         "#;
         let out = interpret_script(src).unwrap();
         assert_eq!(out, vec!["hi"]);

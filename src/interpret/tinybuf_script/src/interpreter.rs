@@ -807,7 +807,7 @@ fn list_to_stmt(items: &[Expr]) -> Result<Stmt, String> {
     }
     match &items[0] {
         Expr::Var(fname) => Ok(Stmt::RunList(items.to_vec())),
-        Expr::Str(s) => {
+        Expr::Sym(s) => {
             match s.as_str() {
                 "let" => {
                     if items.len() != 3 { return Err("let expects name and expr".to_string()); }
@@ -946,14 +946,14 @@ pub fn stmt_to_list_expr(stmt: &Stmt) -> Expr {
     match stmt {
         Stmt::Let(name, expr) => {
             Expr::List(vec![
-                ListItem { key: None, value: Expr::Str("let".to_string()) },
+                ListItem { key: None, value: Expr::Sym("let".to_string()) },
                 ListItem { key: None, value: Expr::Str(name.clone()) },
                 ListItem { key: None, value: expr.clone() },
             ])
         }
         Stmt::PrintTemplate(tpl, arg) => {
             let mut items = vec![
-                ListItem { key: None, value: Expr::Str("print_template".to_string()) },
+                ListItem { key: None, value: Expr::Sym("print_template".to_string()) },
                 ListItem { key: None, value: Expr::Str(tpl.clone()) },
             ];
             if let Some(e) = arg {
@@ -963,22 +963,22 @@ pub fn stmt_to_list_expr(stmt: &Stmt) -> Expr {
         }
         Stmt::PrintExpr(expr) => {
             Expr::List(vec![
-                ListItem { key: None, value: Expr::Str("print".to_string()) },
+                ListItem { key: None, value: Expr::Sym("print".to_string()) },
                 ListItem { key: None, value: expr.clone() },
             ])
         }
         Stmt::ListTypes => {
-            Expr::List(vec![ListItem { key: None, value: Expr::Str("list_types".to_string()) }])
+            Expr::List(vec![ListItem { key: None, value: Expr::Sym("list_types".to_string()) }])
         }
         Stmt::ListType(name) => {
             Expr::List(vec![
-                ListItem { key: None, value: Expr::Str("list_type".to_string()) },
+                ListItem { key: None, value: Expr::Sym("list_type".to_string()) },
                 ListItem { key: None, value: Expr::Str(name.clone()) },
             ])
         }
         Stmt::RegOp(op, fname) => {
             Expr::List(vec![
-                ListItem { key: None, value: Expr::Str("reg_operator".to_string()) },
+                ListItem { key: None, value: Expr::Sym("reg_operator".to_string()) },
                 ListItem { key: None, value: Expr::Str(op.clone()) },
                 ListItem { key: None, value: Expr::Str(fname.clone()) },
             ])
@@ -987,14 +987,14 @@ pub fn stmt_to_list_expr(stmt: &Stmt) -> Expr {
             let params_expr = Expr::List(params.iter().map(|p| ListItem { key: None, value: Expr::Str(p.clone()) }).collect());
             let body_expr = Expr::List(body.iter().map(|s| ListItem { key: None, value: stmt_to_list_expr(s) }).collect());
             Expr::List(vec![
-                ListItem { key: None, value: Expr::Str("let_func".to_string()) },
+                ListItem { key: None, value: Expr::Sym("let_func".to_string()) },
                 ListItem { key: None, value: Expr::Str(name.clone()) },
                 ListItem { key: None, value: params_expr },
                 ListItem { key: None, value: body_expr },
             ])
         }
         Stmt::Return(opt) => {
-            let mut items = vec![ListItem { key: None, value: Expr::Str("return".to_string()) }];
+            let mut items = vec![ListItem { key: None, value: Expr::Sym("return".to_string()) }];
             if let Some(e) = opt {
                 items.push(ListItem { key: None, value: e.clone() });
             }
@@ -1002,7 +1002,7 @@ pub fn stmt_to_list_expr(stmt: &Stmt) -> Expr {
         }
         Stmt::Call(t, op, args) => {
             let mut items = vec![
-                ListItem { key: None, value: Expr::Str("call".to_string()) },
+                ListItem { key: None, value: Expr::Sym("call".to_string()) },
                 ListItem { key: None, value: Expr::Str(t.clone()) },
                 ListItem { key: None, value: Expr::Str(op.clone()) },
             ];
@@ -1016,13 +1016,13 @@ pub fn stmt_to_list_expr(stmt: &Stmt) -> Expr {
         }
         Stmt::ExprStmt(e) => {
             Expr::List(vec![
-                ListItem { key: None, value: Expr::Str("expr".to_string()) },
+                ListItem { key: None, value: Expr::Sym("expr".to_string()) },
                 ListItem { key: None, value: e.clone() },
             ])
         }
         Stmt::Block(name, meta, body) => {
             let header = Expr::List(vec![
-                ListItem { key: None, value: Expr::Str("block".to_string()) },
+                ListItem { key: None, value: Expr::Sym("block".to_string()) },
                 ListItem { key: None, value: Expr::Str(name.clone()) },
                 ListItem { key: None, value: Expr::List(meta.clone()) },
             ]);

@@ -6,13 +6,13 @@ pub enum Stmt {
     ListTypes,
     ListType(String),
     RegOp(String, String),
-    LetFunc(String, Vec<String>, Expr),
-    LetFuncBlock(String, Vec<String>, Vec<Stmt>, Expr),
+    LetFunc(String, Vec<String>, Vec<Stmt>),
     Return(Expr),
     Call(String, String, Vec<Expr>),
     RunList(Vec<Expr>),
     ExprStmt(Expr),
     Test(Vec<Stmt>),
+    TestInit(Vec<Stmt>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

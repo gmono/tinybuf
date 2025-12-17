@@ -14,6 +14,7 @@ match {
     "operator",
     "run",
     "test",
+    "test_init",
     "=",
     "+", "-", "**", "*", "/",
     "%",
@@ -43,6 +44,7 @@ Stmt: Stmt = {
     Sep* "run" "(" ")" Sep => Stmt::RunList(vec![]),
     Sep* "run" "(" <items:ArgNonEmpty> ")" Sep => Stmt::RunList(items),
     Sep* "test" "{" <b:Stmt*> "}" Sep => Stmt::Test(b),
+    Sep* "test_init" "{" <b:Stmt*> "}" Sep => Stmt::TestInit(b),
     Sep* "get" <lst:Expr> <k:Ident> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
     Sep* "get" <lst:Expr> <k:StringLit> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
     Sep* "get" <lst:Expr> "'" <k:Ident> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
@@ -51,10 +53,14 @@ Stmt: Stmt = {
 };
 
 LetStmt: Stmt = {
-    <name:Ident> "(" ")" "=" <body:Expr> => Stmt::LetFunc(name, vec![], body),
-    <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" <body:Expr> => Stmt::LetFunc(name, ps, body),
-    <name:Ident> "(" ")" "=" "{" <b:Stmt*> "return" <ret:Expr> "}" => Stmt::LetFuncBlock(name, vec![], b, ret),
-    <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" "{" <b:Stmt*> "return" <ret:Expr> "}" => Stmt::LetFuncBlock(name, ps, b, ret),
+    <name:Ident> "(" ")" "=" <body:Expr> => Stmt::LetFunc(name, vec![], vec![Stmt::Return(body)]),
+    <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" <body:Expr> => Stmt::LetFunc(name, ps, vec![Stmt::Return(body)]),
+    <name:Ident> "(" ")" "=" "{" <b:Stmt*> "}" => {
+          Stmt::LetFunc(name, vec![], b)
+     },
+     <name:Ident> "(" <ps:ParamNonEmpty> ")" "=" "{" <b:Stmt*> "}" => {
+          Stmt::LetFunc(name, ps, b)
+     },
     <name:Ident> "=" <e:Expr> => Stmt::Let(name, e),
 };
 

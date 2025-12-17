@@ -300,25 +300,13 @@ mod tests {
             let b=2
             let c=3
             print (a,b,c)
-            print (#"a",#"b",#"c")
-        "#;
-        let out = interpret_script(src).unwrap();
-        assert_eq!(out, vec!["(1 2 3)", "(a b c)"]);
-    }
-    #[test]
-    #[ignore]
-    fn square_list_vs_paren_sym_table_future() {
-        let src = r#"
-            let a=1
-            let b=2
-            let c=3
             print [a,b,c]
-            print (a,b,c)
+            print value_of((a,b,c))
         "#;
-        // When '[' value-list is enabled and '(' becomes sym-table,
-        // expected output should be:
-        // "(1 2 3)", "(a b c)"
         let out = interpret_script(src).unwrap();
-        assert_eq!(out, vec!["(1 2 3)", "(a b c)"]);
+        // (a,b,c) is now a symbol table (list of symbols/strings)
+        // [a,b,c] is sugar for value_of((a,b,c)), which evaluates the symbols
+        assert_eq!(out, vec!["(a b c)", "(1 2 3)", "(1 2 3)"]);
     }
+
 }

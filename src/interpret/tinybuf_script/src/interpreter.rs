@@ -644,7 +644,12 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             let mut vals = Vec::new();
             let mut keys = HashMap::new();
             for (idx, it) in items.iter().enumerate() {
-                vals.push(eval(&it.value, env, ops)?);
+                // Treat Var as Sym in list construction (Symbol Table behavior)
+                let v = match &it.value {
+                    Expr::Var(name) => Value::Str(name.clone()),
+                    _ => eval(&it.value, env, ops)?,
+                };
+                vals.push(v);
                 if let Some(k) = &it.key {
                     keys.insert(k.clone(), idx);
                 }
@@ -652,6 +657,30 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             Ok(Value::List(vals, keys))
         }
         Expr::Call(name, args) => {
+            if name == "value_of" {
+                if args.len() != 1 {
+                    return Err("value_of expects 1 argument".to_string());
+                }
+                let list_val = eval(&args[0], env, ops)?;
+                if let Value::List(items, _keys) = list_val {
+                    let mut evaluated_items = Vec::new();
+                    for item in items {
+                         match item {
+                             Value::Str(s) => {
+                                 if let Some(val) = env.get(&s) {
+                                     evaluated_items.push(val.clone());
+                                 } else {
+                                     return Err(format!("undefined variable: {}", s));
+                                 }
+                             }
+                             _ => evaluated_items.push(item),
+                         }
+                    }
+                    return Ok(Value::List(evaluated_items, HashMap::new()));
+                } else {
+                    return Err("value_of expects a list".to_string());
+                }
+            }
             let mut argv = Vec::new();
             for a in args {
                 argv.push(eval(a, env, ops)?);

@@ -27,6 +27,7 @@ pub enum Expr {
     Var(String),
     Sym(String),
     List(Vec<ListItem>),
+    SList(Vec<Expr>),
     Call(String, Vec<Expr>),
     Add(Box<Expr>, Box<Expr>),
     Sub(Box<Expr>, Box<Expr>),

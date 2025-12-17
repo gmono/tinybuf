@@ -123,7 +123,7 @@ mod tests {
             let dd(x,y)=x+y
             let a=3
             let b=4
-            run (dd,a,b)
+            run (#"dd",a,b)
         "#;
         let out = interpret_script(src).unwrap();
         assert_eq!(out, vec!["7"]);
@@ -238,11 +238,13 @@ mod tests {
         let src = r#"
             let add(x,y)=x+y
             print add(1,2)
-            run (add,1,2)
+            run (#"add",1,2)
         "#;
         let out = interpret_script(src).unwrap();
         assert_eq!(out, vec!["3", "3"]);
     }
+    #[test]
+    fn square_list_literal_values() {}
     #[test]
     fn shell_auto_print_executes_expression() {
         let src = {
@@ -272,7 +274,7 @@ mod tests {
     #[test]
     fn run_list_block_notest() {
         let src = r#"
-            run ((#"block",#"notest",()), ((#"print","hi"),(#"let","x",1)))
+            run (#"block",#"notest",(), ((#"print","hi"),(#"let","x",1)))
         "#;
         let out = interpret_script(src).unwrap();
         assert_eq!(out, vec!["hi"]);

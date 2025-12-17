@@ -123,13 +123,13 @@ Postfix: Expr = {
     <p:Postfix> "[" <i:Expr> "]" => Expr::Index(Box::new(p), Box::new(i)),
     <f:Ident> "(" ")" => Expr::Call(f, vec![]),
     <f:Ident> "(" <args:ArgNonEmpty> ")" => Expr::Call(f, args),
-    Factor,
+    <v:Ident> => Expr::Var(v),
+    Atom,
 };
 
-Factor: Expr = {
+Atom: Expr = {
     <n:Number> => Expr::Int(n),
     <s:StringLit> => Expr::Str(s),
-    <v:Ident> => Expr::Var(v),
     "#" <s:StringLit> => Expr::Sym(s),
     "#" <v:Ident> => Expr::Str(v),
     "'" <v:Ident> => Expr::Str(v),

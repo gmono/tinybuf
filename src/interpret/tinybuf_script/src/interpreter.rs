@@ -251,18 +251,22 @@ impl Interpreter {
                     outputs.push("empty list".to_string());
                 } else {
                     match &items[0] {
-                        Expr::Var(fname) => {
-                            let mut argsv = Vec::new();
-                            for e in items.iter().skip(1) {
-                                argsv.push(eval(e, &self.env, &self.ops)?);
+                        Expr::Sym(name) => {
+                            if let Some(Value::Func(_, _, _)) = self.env.get(name) {
+                                let mut argsv = Vec::new();
+                                for e in items.iter().skip(1) {
+                                    argsv.push(eval(e, &self.env, &self.ops)?);
+                                }
+                                let out = self.call_func(name, &argsv)?;
+                                outputs.push(to_string(&out));
+                            } else {
+                                let stmt = list_to_stmt(items)?;
+                                let inner = self.run(std::slice::from_ref(&stmt))?;
+                                outputs.extend(inner);
                             }
-                            let out = self.call_func(fname, &argsv)?;
-                            outputs.push(to_string(&out));
                         }
                         _ => {
-                            let stmt = list_to_stmt(items)?;
-                            let inner = self.run(std::slice::from_ref(&stmt))?;
-                            outputs.extend(inner);
+                            return Err("list must start with sym".to_string());
                         }
                     }
                 }
@@ -627,6 +631,13 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             .get(name)
             .cloned()
             .ok_or_else(|| format!("undefined variable: {}", name)),
+        Expr::SList(items) => {
+            let mut vals = Vec::new();
+            for it in items {
+                vals.push(eval(it, env, ops)?);
+            }
+            Ok(Value::List(vals, HashMap::new()))
+        }
         Expr::List(items) => {
             let mut vals = Vec::new();
             let mut keys = HashMap::new();
@@ -806,7 +817,6 @@ fn list_to_stmt(items: &[Expr]) -> Result<Stmt, String> {
         return Err("empty stmt list".to_string());
     }
     match &items[0] {
-        Expr::Var(fname) => Ok(Stmt::RunList(items.to_vec())),
         Expr::Sym(s) => {
             match s.as_str() {
                 "let" => {

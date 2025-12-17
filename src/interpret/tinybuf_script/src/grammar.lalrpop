@@ -130,6 +130,7 @@ Postfix: Expr = {
 Atom: Expr = {
     <n:Number> => Expr::Int(n),
     <s:StringLit> => Expr::Str(s),
+    "let" => Expr::Var("let".to_string()),
     "#" <s:StringLit> => Expr::Sym(s),
     "#" <v:Ident> => Expr::Str(v),
     "'" <v:Ident> => Expr::Str(v),

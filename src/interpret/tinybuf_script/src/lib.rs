@@ -279,4 +279,46 @@ mod tests {
         let out = interpret_script(src).unwrap();
         assert_eq!(out, vec!["hi"]);
     }
+
+    #[test]
+    fn run_let_ident_equals_sym() {
+        let src = r#"
+            run (let, a, 1)
+            print a
+            let a=0
+            run (#"let", a, 1)
+            print a
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["1", "1"]);
+    }
+
+    #[test]
+    fn value_list_vs_sym_table() {
+        let src = r#"
+            let a=1
+            let b=2
+            let c=3
+            print (a,b,c)
+            print (#"a",#"b",#"c")
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["(1 2 3)", "(a b c)"]);
+    }
+    #[test]
+    #[ignore]
+    fn square_list_vs_paren_sym_table_future() {
+        let src = r#"
+            let a=1
+            let b=2
+            let c=3
+            print [a,b,c]
+            print (a,b,c)
+        "#;
+        // When '[' value-list is enabled and '(' becomes sym-table,
+        // expected output should be:
+        // "(1 2 3)", "(a b c)"
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["(1 2 3)", "(a b c)"]);
+    }
 }

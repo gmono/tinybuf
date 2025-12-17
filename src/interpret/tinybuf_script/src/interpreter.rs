@@ -266,7 +266,9 @@ impl Interpreter {
                             }
                         }
                         _ => {
-                            return Err("list must start with sym".to_string());
+                            let stmt = list_to_stmt(items)?;
+                            let inner = self.run(std::slice::from_ref(&stmt))?;
+                            outputs.extend(inner);
                         }
                     }
                 }
@@ -817,6 +819,11 @@ fn list_to_stmt(items: &[Expr]) -> Result<Stmt, String> {
         return Err("empty stmt list".to_string());
     }
     match &items[0] {
+        Expr::Var(name) => {
+            let mut converted = items.to_vec();
+            converted[0] = Expr::Sym(name.clone());
+            return list_to_stmt(&converted);
+        }
         Expr::Sym(s) => {
             match s.as_str() {
                 "let" => {

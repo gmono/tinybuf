@@ -308,6 +308,17 @@ mod tests {
     }
 
     #[test]
+    fn value_of_single_sym() {
+        let src = r#"
+            let a=7
+            print value_of(#"a")
+            print value_of('a)
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["7","7"]);
+    }
+
+    #[test]
     fn paren_group_vs_sym_list() {
         let src = r#"
             let a=1

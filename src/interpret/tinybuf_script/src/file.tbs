@@ -1,0 +1,25 @@
+//这里的东西都是内置实现 但内部要有一种统一的机制 来提供这种语句+函数支持的内置功能 例如read 1 as int 等价于 read(1,int) 其中int之所以能直接传递是有因为read函数接收的第二个参数是sym 或None
+//这里的read seek write其本地都应该是内置函数 其语法可以是内部的特定实现的语法糖
+withfile "test.bin" head{
+    //relmode里面 curr为当前指针 absmode里 curr永远为0
+    absmode;
+    let a=read 0;
+    let b=read 1; //读取1位置的字节
+    let c=read 1 as int;//其中int为预定义类型或oop类型 从1位置读取
+    let d=a+b;
+    relmode;
+    //seek支持seek curr xxx； seek end xxx;seek start xxx;等
+    seek start 10;
+    write curr d; //等同于write 0 d;
+    //针对read的特殊赋值方式 和let t=read curr 0等价
+    read curr 0 as t;
+    //和控制流结合 直接读取文件 这里xxx 
+    if read(0) >1{
+        print("test1")
+        //这里是write的第二种调用方式  函数式调用
+        write(0,d)
+    }else{
+        print("test2")
+    }
+
+}

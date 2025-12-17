@@ -8,9 +8,18 @@ pub enum Value {
     Str(String),
     List(Vec<Value>, std::collections::HashMap<String, usize>),
     Func(Vec<String>, Vec<Stmt>, HashMap<String, Value>),
+    Block(Vec<Stmt>),
 }
 
-type BlockHandler = fn(&mut Interpreter, Vec<ListItem>, Vec<Stmt>) -> Result<Vec<String>, String>;
+#[derive(Debug, Clone)]
+pub enum ControlFlow {
+    Continue,
+    Return(Option<Value>),
+    Break(Option<String>),
+    Next,
+}
+
+type BlockHandler = fn(&mut Interpreter, Vec<ListItem>, Vec<Stmt>) -> Result<(Vec<String>, ControlFlow), String>;
 
 pub struct Interpreter {
     env: HashMap<String, Value>,
@@ -31,6 +40,7 @@ impl Interpreter {
         interpreter.register_block_handler("test", Self::handle_test);
         interpreter.register_block_handler("test_init", Self::handle_test_init);
         interpreter.register_block_handler("notest", Self::handle_notest);
+        interpreter.register_block_handler("loop", Self::handle_loop);
         interpreter
     }
 
@@ -38,38 +48,224 @@ impl Interpreter {
         self.block_handlers.insert(name.to_string(), handler);
     }
 
-    fn handle_test(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<Vec<String>, String> {
-        if !interp.test_mode { return Ok(vec![]); }
+    fn handle_test(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<(Vec<String>, ControlFlow), String> {
+        if !interp.test_mode { return Ok((vec![], ControlFlow::Continue)); }
         let saved_env = interp.env.clone();
         let saved_ops = interp.ops.clone();
         let saved_mode = interp.test_mode;
         interp.test_mode = false;
-        let block_outputs = interp.run(&body)?;
+        let result = interp.run_block(&body);
         interp.test_mode = saved_mode;
         interp.env = saved_env;
         interp.ops = saved_ops;
-        Ok(block_outputs)
+        result
     }
 
-    fn handle_test_init(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<Vec<String>, String> {
-        if !interp.test_mode { return Ok(vec![]); }
+    fn handle_test_init(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<(Vec<String>, ControlFlow), String> {
+        if !interp.test_mode { return Ok((vec![], ControlFlow::Continue)); }
         let saved_mode = interp.test_mode;
         interp.test_mode = false;
-        let block_outputs = interp.run(&body)?;
+        let result = interp.run_block(&body);
         interp.test_mode = saved_mode;
-        Ok(block_outputs)
+        result
     }
 
-    fn handle_notest(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<Vec<String>, String> {
-        if interp.test_mode { return Ok(vec![]); }
+    fn handle_notest(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<(Vec<String>, ControlFlow), String> {
+        if interp.test_mode { return Ok((vec![], ControlFlow::Continue)); }
         let saved_mode = interp.test_mode;
         interp.test_mode = false;
-        let block_outputs = interp.run(&body)?;
+        let result = interp.run_block(&body);
         interp.test_mode = saved_mode;
-        Ok(block_outputs)
+        result
+    }
+    fn handle_loop(interp: &mut Interpreter, meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<(Vec<String>, ControlFlow), String> {
+        // Extract persist and step blocks from meta
+        let mut persist_stmts: Vec<Stmt> = Vec::new();
+        let mut step_stmts: Vec<Stmt> = Vec::new();
+        let mut config: HashMap<String, String> = HashMap::new();
+
+        for li in &meta {
+            match (&li.key, &li.value) {
+                (Some(k), v) if k == "persist" => {
+                    let v = unwrap_group(v);
+                    if let Expr::List(items) = v {
+                        let mut out = Vec::new();
+                        let is_single_stmt = items.first().map(|li| !matches!(li.value, Expr::List(_))).unwrap_or(false);
+                        
+                        if is_single_stmt && !items.is_empty() {
+                             if let Some(inner) = list_expr_items(v) {
+                                  out.push(list_to_stmt(&inner)?);
+                             }
+                        } else {
+                            for e in items {
+                                if let Some(inner) = list_expr_items(&e.value) {
+                                    out.push(list_to_stmt(&inner)?);
+                                }
+                            }
+                        }
+                        persist_stmts = out;
+                    }
+                }
+                (Some(k), v) if k == "step" => {
+                    let v = unwrap_group(v);
+                    if let Expr::List(items) = v {
+                        let mut out = Vec::new();
+                        let is_single_stmt = items.first().map(|li| !matches!(li.value, Expr::List(_))).unwrap_or(false);
+
+                        if is_single_stmt && !items.is_empty() {
+                             if let Some(inner) = list_expr_items(v) {
+                                  out.push(list_to_stmt(&inner)?);
+                             }
+                        } else {
+                            for e in items {
+                                if let Some(inner) = list_expr_items(&e.value) {
+                                    out.push(list_to_stmt(&inner)?);
+                                }
+                            }
+                        }
+                        step_stmts = out;
+                    }
+                }
+                (Some(k), Expr::Str(v)) => {
+                    config.insert(k.clone(), v.clone());
+                }
+                 _ => { /* ignore */ }
+            }
+        }
+        
+        // Handle persist initialization (run once in current scope)
+        // Wait, persist variables should be retained.
+        // If we run them in current scope, they pollute current scope but are retained.
+        // Loop usually creates a new scope.
+        // "persist variables are retained across body iterations"
+        // This implies they are local to the loop but outlive iterations.
+        // So we should create a loop scope.
+        
+        // Initialize persist env
+        let saved_env = interp.env.clone(); // Backup to restore later if we were modifying interp.env directly
+        // Actually, we can work on `interp.env` but use a temporary env for body?
+        // No, we need an intermediate scope `persist_env`.
+        
+        // Create persist scope
+        let mut persist_env = interp.env.clone();
+        
+        // Run persist stmts on persist_env
+        // We need to swap interp.env with persist_env to use `run_block`
+        interp.env = persist_env;
+        let (p_out, p_flow) = interp.run_block(&persist_stmts)?;
+        
+        if let ControlFlow::Return(_) = p_flow { return Ok((p_out, p_flow)); }
+        // Break/Next in persist block? Probably error or stop.
+        if matches!(p_flow, ControlFlow::Break(_) | ControlFlow::Next) {
+             // restore env
+             interp.env = saved_env;
+             return Ok((p_out, p_flow));
+        }
+        
+        persist_env = interp.env.clone(); // capture modified env
+        interp.env = saved_env.clone(); // restore for now
+        
+        let mut outputs = p_out;
+        
+        // Determine iterations? Infinite unless break?
+        // "Decide iteration count" - previously 2 or 3 for test.
+        // But real loop should run until break.
+        // The prompt says "support loop ...".
+        // `more.tbs` shows `if a>1:next`, `if b>2:break`.
+        // So it relies on break.
+        
+        let max_iters = if interp.test_mode { 100 } else { 1000 };
+        
+        let label = config.get("name").cloned();
+        
+        for _ in 0..max_iters {
+            // Prepare body env
+            let body_env = persist_env.clone();
+            
+            // Run body
+            interp.env = body_env;
+            let (b_out, b_flow) = interp.run_block(&body)?;
+            outputs.extend(b_out);
+            
+            // Handle flow
+            match b_flow {
+                ControlFlow::Return(v) => {
+                    interp.env = saved_env;
+                    return Ok((outputs, ControlFlow::Return(v)));
+                }
+                ControlFlow::Break(l) => {
+                     // Check label
+                     if let Some(target) = l {
+                         if let Some(my_label) = &label {
+                             if *my_label == target {
+                                 // Break this loop
+                                 break;
+                             } else {
+                                 // Break outer loop
+                                 interp.env = saved_env;
+                                 return Ok((outputs, ControlFlow::Break(Some(target))));
+                             }
+                         } else {
+                             // I don't have label, propagate
+                             interp.env = saved_env;
+                             return Ok((outputs, ControlFlow::Break(Some(target))));
+                         }
+                     } else {
+                         // Unlabeled break, break this loop
+                         break;
+                     }
+                }
+                ControlFlow::Next => {
+                    // Continue to step
+                }
+                ControlFlow::Continue => {
+                    // Normal completion
+                }
+            }
+            
+            // Run step
+            // Step runs in persist_env (updates counters)
+            interp.env = persist_env;
+            let (s_out, s_flow) = interp.run_block(&step_stmts)?;
+            outputs.extend(s_out);
+            persist_env = interp.env.clone(); // Capture updates
+            
+             match s_flow {
+                ControlFlow::Return(v) => {
+                    interp.env = saved_env;
+                    return Ok((outputs, ControlFlow::Return(v)));
+                }
+                ControlFlow::Break(l) => {
+                     // Handle break in step same as body
+                     if let Some(target) = l {
+                         if let Some(my_label) = &label {
+                             if *my_label == target { break; } 
+                             else { interp.env = saved_env; return Ok((outputs, ControlFlow::Break(Some(target)))); }
+                         } else { interp.env = saved_env; return Ok((outputs, ControlFlow::Break(Some(target)))); }
+                     } else { break; }
+                }
+                ControlFlow::Next => { /* ignore or continue? */ }
+                ControlFlow::Continue => {}
+            }
+            
+            // Restore saved_env for safety between iterations? No we loop.
+        }
+        
+        interp.env = saved_env;
+        Ok((outputs, ControlFlow::Continue))
     }
 
     pub fn run(&mut self, program: &[Stmt]) -> Result<Vec<String>, String> {
+        let (out, flow) = self.run_block(program)?;
+         match flow {
+            ControlFlow::Continue => Ok(out),
+            ControlFlow::Return(_) => Err("Return not allowed at top level".to_string()),
+            ControlFlow::Break(_) => Err("Break not allowed at top level".to_string()),
+            ControlFlow::Next => Err("Next not allowed at top level".to_string()),
+        }
+    }
+    
+    pub fn run_block(&mut self, program: &[Stmt]) -> Result<(Vec<String>, ControlFlow), String> {
         let mut outputs = Vec::new();
         for stmt in program {
             match stmt {
@@ -276,43 +472,9 @@ impl Interpreter {
             Stmt::Return(opt_val) => {
                 if let Some(val) = opt_val {
                     let v = eval(val, &self.env, &self.ops)?;
-                    // Since eval returns Value, we can't directly return it from run which returns Strings.
-                    // But Return is usually inside a function call.
-                    // If we are at top level, it's an error.
-                    // Wait, `run` returns `Result<Vec<String>, String>`.
-                    // We need to signal a Return. 
-                    // But currently `run` doesn't support returning Value directly to caller of `run`.
-                    // It only supports printing.
-                    // Actually, `call_func` uses `eval_block` which is what we need.
-                    // But `eval_block` logic is inside `run`.
-                    // We need to refactor `run` to support return values or just error here.
-                    // For now, let's just error if return is hit in `run` because `run` expects to output strings.
-                    // The function execution logic in `call_func` needs to handle Return.
-                    // Let's look at `call_func`.
-                    // `call_func` calls `self.run(&body)`.
-                    // If `run` encounters `Return`, it should return that value.
-                    // But `run` returns `Vec<String>`.
-                    // This implies `Return` statement inside `run` is problematic if `run` signature is fixed.
-                    // We need `run` to return `Result<(Vec<String>, Option<Value>), String>`.
-                    // Or `call_func` should handle execution differently.
-                    // Let's check `call_func`.
-                    
-                    // Actually, `call_func` implementation:
-                    // `let outputs = self.run(&body)?;`
-                    // `if let Some(last) = outputs.last() { ... }`
-                    // This suggests function return value is printed? No, that's not right.
-                    // Previous implementation of `LetFunc` body was `Expr`.
-                    // Now it is `Vec<Stmt>`.
-                    // If `Return` is used, we need to propagate the value.
-                    // But `run` returns strings.
-                    // This is a design issue in `run`.
-                    // For now, to fix compilation, I will implement `Return` as error in `run` or just ignore it?
-                    // The error `Return(Expr)` vs `Return(Option<Expr>)` was fixed in AST.
-                    // Now we need to handle `Option<Expr>` here.
-                    
-                    return Err("Return statement not supported in top-level run".to_string());
+                    return Ok((outputs, ControlFlow::Return(Some(v))));
                 } else {
-                     return Err("Return statement not supported in top-level run".to_string());
+                    return Ok((outputs, ControlFlow::Return(None)));
                 }
             }
             Stmt::ExprStmt(expr) => {
@@ -320,14 +482,45 @@ impl Interpreter {
             }
             Stmt::Block(name, meta, stmts) => {
                 if let Some(&handler) = self.block_handlers.get(name) {
-                    outputs.extend(handler(self, meta.clone(), stmts.clone())?);
+                    let (out, flow) = handler(self, meta.clone(), stmts.clone())?;
+                    outputs.extend(out);
+                    if !matches!(flow, ControlFlow::Continue) {
+                        return Ok((outputs, flow));
+                    }
                 } else {
                     return Err(format!("Unknown block type: {}", name));
                 }
             }
+            Stmt::If(cond, then_stmt, else_stmt) => {
+                let v = eval(cond, &self.env, &self.ops)?;
+                let is_true = match v {
+                    Value::Int(i) => i != 0,
+                    Value::Str(s) => !s.is_empty(),
+                     _ => false,
+                };
+                if is_true {
+                    let (out, flow) = self.run_block(std::slice::from_ref(then_stmt))?;
+                    outputs.extend(out);
+                    if !matches!(flow, ControlFlow::Continue) {
+                        return Ok((outputs, flow));
+                    }
+                } else if let Some(else_s) = else_stmt {
+                    let (out, flow) = self.run_block(std::slice::from_ref(else_s))?;
+                    outputs.extend(out);
+                    if !matches!(flow, ControlFlow::Continue) {
+                        return Ok((outputs, flow));
+                    }
+                }
+            }
+            Stmt::Break(label) => {
+                return Ok((outputs, ControlFlow::Break(label.clone())));
+            }
+            Stmt::Next => {
+                return Ok((outputs, ControlFlow::Next));
+            }
         }
     }
-        Ok(outputs)
+        Ok((outputs, ControlFlow::Continue))
     }
     fn call_func(&self, name: &str, args: &[Value]) -> Result<Value, String> {
         match self.env.get(name) {
@@ -339,10 +532,61 @@ impl Interpreter {
                 for (p, v) in params.iter().zip(args.iter()) {
                     call_env.insert(p.clone(), v.clone());
                 }
-                eval_func_body(&body_stmts, &mut call_env, &self.ops)
+                
+                // Hack: We need mut access to self to call run_block, but self is borrowed.
+                // However, run_block needs self.env and self.ops and self.block_handlers.
+                // We have call_env which we want to use as env.
+                // We can clone self.ops and self.block_handlers?
+                // self.block_handlers contains fn pointers (Copy/Clone).
+                // self.ops is HashMap<String, String>.
+                // So we can create a temporary Interpreter?
+                // But block handlers expect &mut Interpreter.
+                // If we create a temp one, it's fine.
+                // BUT if block handler modifies Interpreter state (e.g. registers new op or changes env),
+                // we want that to persist?
+                // Usually functions are isolated except for return value.
+                // But `RegOp` inside function?
+                // If we use temp interpreter, `RegOp` affects temp ops.
+                // If we want it to affect global ops, we need to copy back.
+                // But `eval_func_body` passed `ops` as immutable ref.
+                // So `RegOp` was NOT supported/allowed inside functions in old implementation?
+                // `eval_func_body` did NOT support `RegOp`.
+                // So using temp interpreter with cloned ops is safe/compatible.
+                
+                let mut temp_interp = Interpreter {
+                    env: call_env,
+                    ops: self.ops.clone(),
+                    block_handlers: self.block_handlers.clone(),
+                    test_mode: self.test_mode,
+                };
+                
+                let (out, flow) = temp_interp.run_block(body_stmts)?;
+                // Ignore output strings? Or print them?
+                // Usually functions shouldn't print unless they use Print stmt.
+                // `run_block` collects outputs.
+                // We should probably print them to stdout if we are not capturing?
+                // But `call_func` returns `Value`.
+                // The output strings are side effect.
+                for s in out {
+                    println!("{}", s);
+                }
+                
+                match flow {
+                    ControlFlow::Return(val) => Ok(val.unwrap_or(Value::Int(0))),
+                    ControlFlow::Continue => Ok(Value::Int(0)), // Default return
+                    _ => Err("Unexpected control flow in function".to_string()),
+                }
             }
             _ => Err(format!("undefined function: {}", name)),
         }
+    }
+}
+
+fn unwrap_group(e: &Expr) -> &Expr {
+    if let Expr::Group(inner) = e {
+        unwrap_group(inner)
+    } else {
+        e
     }
 }
 
@@ -621,6 +865,7 @@ fn to_string(v: &Value) -> String {
             out
         }
         Value::Func(_, _, _) => "<func>".to_string(),
+        Value::Block(_) => "<block>".to_string(),
     }
 }
 
@@ -633,6 +878,7 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             .get(name)
             .cloned()
             .ok_or_else(|| format!("undefined variable: {}", name)),
+        Expr::Block(stmts) => Ok(Value::Block(stmts.clone())),
         Expr::SList(items) => {
             let mut vals = Vec::new();
             for it in items {
@@ -738,6 +984,22 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
                 eval_func_body(body, &mut call_env, ops)
             } else {
                 Err(format!("undefined operator function: {}", fname))
+            }
+        }
+        Expr::Gt(a, b) => {
+            let va = eval(a, env, ops)?;
+            let vb = eval(b, env, ops)?;
+            match (va, vb) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(if x > y { 1 } else { 0 })),
+                _ => Err("type error: > expects integers".to_string()),
+            }
+        }
+        Expr::Lt(a, b) => {
+            let va = eval(a, env, ops)?;
+            let vb = eval(b, env, ops)?;
+            match (va, vb) {
+                (Value::Int(x), Value::Int(y)) => Ok(Value::Int(if x < y { 1 } else { 0 })),
+                _ => Err("type error: < expects integers".to_string()),
             }
         }
         Expr::Group(e) => eval(e, env, ops),
@@ -906,6 +1168,39 @@ fn list_to_stmt(items: &[Expr]) -> Result<Stmt, String> {
                         Err("return expects 0 or 1 arg".to_string())
                     }
                 }
+                "break" => {
+                    if items.len() == 1 {
+                        Ok(Stmt::Break(None))
+                    } else {
+                        Err("break expects no arguments".to_string())
+                    }
+                }
+                "break_to" => {
+                    if items.len() == 2 {
+                        let label = expr_to_string(&items[1]).ok_or_else(|| "label must be string or ident".to_string())?;
+                        Ok(Stmt::Break(Some(label)))
+                    } else {
+                        Err("break_to expects 1 arg".to_string())
+                    }
+                }
+                "next" => {
+                    if items.len() == 1 {
+                        Ok(Stmt::Next)
+                    } else {
+                        Err("next expects no arguments".to_string())
+                    }
+                }
+                "if" => {
+                    if items.len() != 3 { return Err("if expects condition and then stmt".to_string()); }
+                    let cond = items[1].clone();
+                    // then must be a list encoding a stmt
+                    if let Some(inner) = list_expr_items(&items[2]) {
+                        let then_stmt = list_to_stmt(&inner)?;
+                        Ok(Stmt::If(cond, Box::new(then_stmt), None))
+                    } else {
+                        Err("if then must be a list-encoded stmt".to_string())
+                    }
+                }
                 "call" => {
                     if items.len() < 3 { return Err("call expects type, op and args".to_string()); }
                     let t = expr_to_string(&items[1]).ok_or_else(|| "type must be string".to_string())?;
@@ -1055,6 +1350,30 @@ pub fn stmt_to_list_expr(stmt: &Stmt) -> Expr {
                 items.push(ListItem { key: None, value: e.clone() });
             }
             Expr::List(items)
+        }
+        Stmt::Break(None) => {
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Sym("break".to_string()) },
+            ])
+        }
+        Stmt::Break(Some(lbl)) => {
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Sym("break_to".to_string()) },
+                ListItem { key: None, value: Expr::Str(lbl.clone()) },
+            ])
+        }
+        Stmt::Next => {
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Sym("next".to_string()) },
+            ])
+        }
+        Stmt::If(cond, then_s, _else_s) => {
+            let then_expr = stmt_to_list_expr(then_s);
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Sym("if".to_string()) },
+                ListItem { key: None, value: cond.clone() },
+                ListItem { key: None, value: then_expr },
+            ])
         }
         Stmt::Call(t, op, args) => {
             let mut items = vec![

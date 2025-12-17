@@ -19,19 +19,271 @@ pub enum ScriptError {
 }
 
 pub fn parse_program(input: &str) -> Result<Vec<Stmt>, ScriptError> {
+    let transformed = lower_extended_syntax(input)?;
     grammar::ProgramParser::new()
-        .parse(input)
+        .parse(&transformed)
         .map_err(|e| ScriptError::ParseError(format!("{e}")))
 }
 
 pub fn interpret_script(input: &str) -> Result<Vec<String>, ScriptError> {
+    let transformed = lower_extended_syntax(input)?;
     let ast = grammar::ProgramParser::new()
-        .parse(input)
+        .parse(&transformed)
         .map_err(|e| ScriptError::ParseError(format!("{e}")))?;
     let outputs = interpreter::run(&ast).map_err(|e| ScriptError::RuntimeError(e))?;
     Ok(outputs)
 }
 
+fn lower_extended_syntax(src: &str) -> Result<String, ScriptError> {
+    // 1) Replace a++ with let a=a+1
+    let re_inc = Regex::new(r"(?m)\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\+\+\s*([;\n])").unwrap();
+    let tmp = re_inc.replace_all(src, "let $1=$1+1$2").to_string();
+    // 2) Lower loop extended syntax:
+    //    - loop(name=aaa) with { ... } step { ... } for { ... }
+    //    - loop with { ... } { ... }   // body without explicit `for`
+    //    into: run (#"block",#"loop",(persist=((...)),step=((...)),name="aaa"),(body_items))
+    let mut out = String::new();
+    let mut i = 0;
+    let bytes = tmp.as_bytes();
+    while i < bytes.len() {
+        if i + 4 <= bytes.len() && &bytes[i..i+4] == b"loop" {
+            let mut cursor = i + 4;
+            // Optional config: ( ... )
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() { cursor += 1; }
+            let mut name_opt: Option<String> = None;
+            if cursor < bytes.len() && bytes[cursor] == b'(' {
+                // Extract until matching ')'
+                let mut depth = 1usize;
+                let start = cursor + 1;
+                cursor += 1;
+                while cursor < bytes.len() && depth > 0 {
+                    let c = bytes[cursor] as char;
+                    if c == '(' { depth += 1; }
+                    else if c == ')' { depth -= 1; }
+                    cursor += 1;
+                }
+                let cfg = &tmp[start..(cursor-1)];
+                // Parse simplistic "name=IDENT_OR_STRING"
+                if let Some(rest) = cfg.trim().strip_prefix("name=") {
+                    let val = rest.trim();
+                    let label = if val.starts_with('"') && val.ends_with('"') && val.len() >= 2 {
+                        val[1..val.len()-1].to_string()
+                    } else {
+                        val.to_string()
+                    };
+                    name_opt = Some(label);
+                }
+                while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() { cursor += 1; }
+            }
+            // Expect "with"
+            if cursor + 4 > bytes.len() || &bytes[cursor..cursor+4] != b"with" {
+                // Not a loop; emit and advance one char
+                out.push(bytes[i] as char);
+                i += 1;
+                continue;
+            }
+            cursor += 4;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() { cursor += 1; }
+            if cursor >= bytes.len() || bytes[cursor] != b'{' {
+                return Err(ScriptError::ParseError("expected `{` after `loop with`".to_string()));
+            }
+            // Parse persist block
+            let (persist_src, after_persist) = extract_brace_block(&tmp[cursor..])?;
+            cursor += after_persist;
+            // Optional step block: "step" "{...}"
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() { cursor += 1; }
+            let mut step_src_opt: Option<String> = None;
+            if cursor + 4 <= bytes.len() && &bytes[cursor..cursor+4] == b"step" {
+                cursor += 4;
+                while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() { cursor += 1; }
+                if cursor >= bytes.len() || bytes[cursor] != b'{' {
+                    return Err(ScriptError::ParseError("expected `{` after `step`".to_string()));
+                }
+                let (step_src, after_step) = extract_brace_block(&tmp[cursor..])?;
+                step_src_opt = Some(step_src);
+                cursor += after_step;
+            }
+            // Optional "for"
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() { cursor += 1; }
+            if cursor + 3 <= bytes.len() && &bytes[cursor..cursor+3] == b"for" {
+                cursor += 3;
+                while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() { cursor += 1; }
+            }
+            // Expect body block "{...}"
+            if cursor >= bytes.len() || bytes[cursor] != b'{' {
+                return Err(ScriptError::ParseError("expected `{` for loop body".to_string()));
+            }
+            let (body_src, after_body) = extract_brace_block(&tmp[cursor..])?;
+            // Recursively lower inner loops before parsing
+            let persist_src2 = lower_extended_syntax(&persist_src)?;
+            let persist_src3 = {
+                let mut s = persist_src2;
+                if !s.ends_with('\n') { s.push('\n'); }
+                s
+            };
+            let persist_ast = grammar::ProgramParser::new().parse(&persist_src3)
+                .map_err(|e| ScriptError::ParseError(format!("{e}")))?;
+            let step_ast = if let Some(step_src) = &step_src_opt {
+                let step_src2 = lower_extended_syntax(step_src)?;
+                let step_src3 = {
+                    let mut s = step_src2;
+                    if !s.ends_with('\n') { s.push('\n'); }
+                    s
+                };
+                Some(grammar::ProgramParser::new().parse(&step_src3)
+                    .map_err(|e| ScriptError::ParseError(format!("{e}")))?)
+            } else { None };
+            let body_src2 = lower_extended_syntax(&body_src)?;
+            let body_src3 = {
+                let mut s = body_src2;
+                if !s.ends_with('\n') { s.push('\n'); }
+                s
+            };
+            let body_ast = grammar::ProgramParser::new().parse(&body_src3)
+                .map_err(|e| ScriptError::ParseError(format!("{e}")))?;
+            // Render lists
+            let persist_lists = persist_ast.iter()
+                .map(|s| render_expr(&interpreter::stmt_to_list_expr(s)))
+                .collect::<Vec<_>>()
+                .join(",");
+            let step_lists = step_ast.as_ref().map(|stms| {
+                stms.iter()
+                    .map(|s| render_expr(&interpreter::stmt_to_list_expr(s)))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            });
+            let body_lists = body_ast.iter()
+                .map(|s| render_expr(&interpreter::stmt_to_list_expr(s)))
+                .collect::<Vec<_>>()
+                .join(",");
+            // Compose meta keyed list
+            let mut meta_elems: Vec<String> = Vec::new();
+            meta_elems.push(format!("persist=({})", persist_lists));
+            if let Some(sl) = step_lists {
+                meta_elems.push(format!("step=({})", sl));
+            }
+            if let Some(n) = &name_opt {
+                meta_elems.push(format!("name=\"{}\"", n));
+            }
+            out.push_str("run (#\"block\",#\"loop\",(");
+            let meta_str = meta_elems.join(",");
+            out.push_str(&meta_str);
+            if !meta_str.is_empty() {
+                out.push(',');
+            }
+            out.push_str("),(");
+            out.push_str(&body_lists);
+            if !body_lists.is_empty() {
+                out.push(',');
+            }
+            out.push_str("))\n");
+            i = cursor + after_body;
+        } else {
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    // println!("TRANSFORMED:\n{}", out);
+    Ok(out)
+}
+
+fn extract_brace_block(s: &str) -> Result<(String, usize), ScriptError> {
+    let mut depth = 1usize;
+    let mut out = String::new();
+    let mut i = 0usize;
+    let b = s.as_bytes();
+    if i >= b.len() || b[i] != b'{' {
+        return Err(ScriptError::ParseError("expected `{`".to_string()));
+    }
+    i += 1;
+    while i < b.len() && depth > 0 {
+        let c = b[i] as char;
+        if c == '{' {
+            depth += 1;
+            out.push(c);
+        } else if c == '}' {
+            depth -= 1;
+            if depth > 0 { out.push(c); }
+        } else {
+            out.push(c);
+        }
+        i += 1;
+    }
+    if depth != 0 {
+        return Err(ScriptError::ParseError("unbalanced `{}` in loop syntax".to_string()));
+    }
+    Ok((out, i))
+}
+
+fn render_expr(e: &ast::Expr) -> String {
+    match e {
+        ast::Expr::Int(i) => i.to_string(),
+        ast::Expr::Str(s) => {
+            let mut t = String::new();
+            t.push('"');
+            t.push_str(s);
+            t.push('"');
+            t
+        }
+        ast::Expr::Var(s) => s.clone(),
+        ast::Expr::Sym(s) => {
+            let mut t = String::new();
+            t.push_str("#\"");
+            t.push_str(s);
+            t.push('"');
+            t
+        }
+        ast::Expr::List(items) => {
+            let inner = items.iter().map(|li| {
+                if let Some(k) = &li.key {
+                    format!("{}={}", k, render_expr(&li.value))
+                } else {
+                    render_expr(&li.value)
+                }
+            }).collect::<Vec<_>>().join(",");
+            let mut t = String::new();
+            t.push('(');
+            t.push_str(&inner);
+            if items.len() == 1 {
+                t.push(',');
+            }
+            t.push(')');
+            t
+        }
+        ast::Expr::Block(stmts) => {
+            // Render block as { <stmts as list exprs> }
+            let inner = stmts.iter().map(|s| render_expr(&interpreter::stmt_to_list_expr(s))).collect::<Vec<_>>().join(",");
+            let mut t = String::new();
+            t.push('{');
+            t.push_str(&inner);
+            t.push('}');
+            t
+        }
+        ast::Expr::SList(items) => {
+            let inner = items.iter().map(|x| render_expr(x)).collect::<Vec<_>>().join(",");
+            format!("({})", inner)
+        }
+        ast::Expr::Call(name, args) => {
+            let inner = args.iter().map(|x| render_expr(x)).collect::<Vec<_>>().join(",");
+            format!("{}({})", name, inner)
+        }
+        ast::Expr::Add(a,b) => format!("({}+{})", render_expr(a), render_expr(b)),
+        ast::Expr::Sub(a,b) => format!("({}-{})", render_expr(a), render_expr(b)),
+        ast::Expr::Mul(a,b) => format!("({}*{})", render_expr(a), render_expr(b)),
+        ast::Expr::Div(a,b) => format!("({}/{})", render_expr(a), render_expr(b)),
+        ast::Expr::Mod(a,b) => format!("({}%{})", render_expr(a), render_expr(b)),
+        ast::Expr::Pow(a,b) => format!("({}**{})", render_expr(a), render_expr(b)),
+        ast::Expr::Gt(a,b) => format!("({}>{})", render_expr(a), render_expr(b)),
+        ast::Expr::Lt(a,b) => format!("({}<{})", render_expr(a), render_expr(b)),
+        ast::Expr::Custom(a, op, b) => format!("({} <{}> {})", render_expr(a), op, render_expr(b)),
+        ast::Expr::Map(list_expr, func_name) => format!("({})|{}", render_expr(list_expr), func_name),
+        ast::Expr::Group(g) => format!("({})", render_expr(g)),
+        ast::Expr::Index(lst, idx) => format!("{}[{}]", render_expr(lst), render_expr(idx)),
+    }
+}
 pub fn shell_transform_line(line: &str) -> String {
     let line = line.trim();
     if line.is_empty() {
@@ -354,6 +606,16 @@ mod tests {
             super::ScriptError::ParseError(_) => {},
             _ => panic!("expected parse error for [a][0]"),
         }
+    }
+
+    #[test]
+    fn run_more_tbs_loop_demo() {
+        let src = std::fs::read_to_string("src/more.tbs").unwrap();
+        let out = interpret_script(&src).unwrap();
+        // In test mode the shell sets test_mode=true; here we run normal mode (2 iterations if test_mode, 3 otherwise),
+        // Our interpreter runs 3 iterations in normal mode: sums 5,7,9
+        // The second loop prints "outer start" and then breaks to label "aaa", so "outer end" is skipped and loop terminates.
+        assert_eq!(out, vec!["5","7","9","outer start"]);
     }
 
 }

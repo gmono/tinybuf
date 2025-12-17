@@ -1,0 +1,18 @@
+loop with {let a=1;let b=2;} step{a++;b++;} for {
+    a++;
+    b++;
+    print a+b;
+    if a<4:next //跳到循环头 执行step如果有 step是可选的  以及这些关键字和{}之间的空格也是可有也可以无
+    if b>2:break
+}
+//循环可以设置标签例如 这里标签可以是str也可以是符号 
+loop(name=aaa) with {let a=1;}{
+    print "outer start";
+    loop with {let b=2}{
+        if b>1:break to aaa; //这里首先跳出自己的范围 然后再连续执行break一直遇到aaa；如果一直到顶层都没有aaa则报错
+    }
+    print "outer end";
+}
+
+
+//上面的loop中  with后面跟着的是一个循环限定的持久化block这些变量在整个body的循环过程中保持 后面的for后面的是body body里面的每次执行都是一个新的block空间

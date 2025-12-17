@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::interpreter::stmt_to_list_expr;
 grammar;
 
 match {
@@ -7,6 +8,10 @@ match {
     "reg",
     "operator",
     "return",
+    "if",
+    "break",
+    "next",
+    "to",
     "list",
     "types",
     "type",
@@ -15,7 +20,8 @@ match {
     "run",
     "with",
     "=",
-    "+", "-", "**", "*", "/",
+    ":",
+    "+", "-", "**", "*", "/", ">", "<",
     "%",
     "(", ")", "{", "}", ".", ",", "#", "'", "|", "[", "]",
     ";",
@@ -28,13 +34,17 @@ match {
     r"<[a-zA-Z0-9_]+>",
 }
 
-pub Program: Vec<Stmt> = Stmt*;
+pub Program: Vec<Stmt> = <s:Stmt*> Sep* => s;
 
 Stmt: Stmt = {
     Sep* "let" <ls:LetStmt> Sep => ls,
     Sep* "print" <s:StringLit> <e:Expr> Sep => Stmt::PrintTemplate(s, Some(e)),
     Sep* "print" <e:Expr> Sep => Stmt::PrintExpr(e),
     Sep* "return" <e:Expr?> Sep => Stmt::Return(e),
+    Sep* "break" "to" <lbl:Ident> Sep => Stmt::Break(Some(lbl)),
+    Sep* "break" Sep => Stmt::Break(None),
+    Sep* "next" Sep => Stmt::Next,
+    Sep* "if" <c:Expr> ":" <t:ThenStmt> Sep => Stmt::If(c, Box::new(t), None),
     Sep* "list" "types" Sep => Stmt::ListTypes,
     Sep* "list" "type" <name:Ident> Sep => Stmt::ListType(name),
     Sep* "call" <t:Ident> "." <op:Ident> "(" ")" Sep => Stmt::Call(t, op, vec![]),
@@ -43,8 +53,6 @@ Stmt: Stmt = {
     Sep* "run" "(" ")" Sep => Stmt::RunList(vec![]),
     Sep* "run" "(" <items:ArgNonEmpty> ")" Sep => Stmt::RunList(items),
     Sep* <e:Expr> Sep => Stmt::ExprStmt(e),
-    Sep* <name:Ident> "{" <b:Stmt*> "}" Sep => Stmt::Block(name, vec![], b),
-    Sep* <name:Ident> "with" "(" <meta:CommaList> ")" "{" <b:Stmt*> "}" Sep => Stmt::Block(name, meta, b),
     Sep* "get" <lst:Expr> <k:Ident> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
     Sep* "get" <lst:Expr> <k:StringLit> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
     Sep* "get" <lst:Expr> "'" <k:Ident> Sep => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
@@ -65,6 +73,12 @@ LetStmt: Stmt = {
 
 /* removed Block to avoid LR(1) ambiguity */
 
+ThenStmt: Stmt = {
+    "next" => Stmt::Next,
+    "break" => Stmt::Break(None),
+    "break" "to" <lbl:Ident> => Stmt::Break(Some(lbl)),
+};
+
 ArgNonEmpty: Vec<Expr> = {
     <e:Expr> => vec![e],
     <l:ArgNonEmpty> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
@@ -82,7 +96,17 @@ CustomOp: String = r"<[a-zA-Z0-9_]+>" => {
 
 Sep: () = { ";" => (), "\n" => () };
 
-Expr: Expr = AddSub;
+Expr: Expr = Cmp;
+
+BlockBody: Vec<Stmt> = {
+    "{" Sep* <b:Stmt*> Sep* "}" => b,
+};
+
+Cmp: Expr = {
+    <l:AddSub> ">" <r:AddSub> => Expr::Gt(Box::new(l), Box::new(r)),
+    <l:AddSub> "<" <r:AddSub> => Expr::Lt(Box::new(l), Box::new(r)),
+    AddSub,
+};
 
 AddSub: Expr = {
     <l:AddSub> "+" <r:Term> => Expr::Add(Box::new(l), Box::new(r)),

@@ -12,6 +12,9 @@ pub enum Stmt {
     RunList(Vec<Expr>),
     ExprStmt(Expr),
     Block(String, Vec<ListItem>, Vec<Stmt>),
+    Break(Option<String>),
+    Next,
+    If(Expr, Box<Stmt>, Option<Box<Stmt>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +30,7 @@ pub enum Expr {
     Var(String),
     Sym(String),
     List(Vec<ListItem>),
+    Block(Vec<Stmt>),
     SList(Vec<Expr>),
     Call(String, Vec<Expr>),
     Add(Box<Expr>, Box<Expr>),
@@ -35,6 +39,8 @@ pub enum Expr {
     Div(Box<Expr>, Box<Expr>),
     Mod(Box<Expr>, Box<Expr>),
     Pow(Box<Expr>, Box<Expr>),
+    Gt(Box<Expr>, Box<Expr>),
+    Lt(Box<Expr>, Box<Expr>),
     Custom(Box<Expr>, String, Box<Expr>),
     Map(Box<Expr>, String),
     Group(Box<Expr>),

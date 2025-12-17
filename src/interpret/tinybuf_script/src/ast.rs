@@ -7,13 +7,11 @@ pub enum Stmt {
     ListType(String),
     RegOp(String, String),
     LetFunc(String, Vec<String>, Vec<Stmt>),
-    Return(Expr),
+    Return(Option<Expr>),
     Call(String, String, Vec<Expr>),
     RunList(Vec<Expr>),
     ExprStmt(Expr),
-    Test(Vec<Stmt>),
-    TestInit(Vec<Stmt>),
-    NoTest(Vec<Stmt>),
+    Block(String, Vec<ListItem>, Vec<Stmt>),
 }
 
 #[derive(Debug, Clone, PartialEq)]

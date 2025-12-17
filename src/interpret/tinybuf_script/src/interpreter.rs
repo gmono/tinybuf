@@ -1,27 +1,72 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
-
-use crate::ast::{Expr, Stmt};
-use crate::ast::ListItem;
+use crate::ast::{Stmt, Expr, ListItem};
 
 #[derive(Debug, Clone)]
-enum Value {
+pub enum Value {
     Int(i64),
     Str(String),
     List(Vec<Value>, std::collections::HashMap<String, usize>),
     Func(Vec<String>, Vec<Stmt>, HashMap<String, Value>),
 }
 
+type BlockHandler = fn(&mut Interpreter, Vec<ListItem>, Vec<Stmt>) -> Result<Vec<String>, String>;
+
 pub struct Interpreter {
     env: HashMap<String, Value>,
     ops: HashMap<String, String>,
-    pub test_mode: bool,
+    test_mode: bool,
+    block_handlers: HashMap<String, BlockHandler>,
 }
 
 impl Interpreter {
-    pub fn new() -> Self {
+    pub fn new(test_mode: bool) -> Self {
         init_oop_demo_once();
-        Self { env: HashMap::new(), ops: HashMap::new(), test_mode: false }
+        let mut interpreter = Interpreter {
+            env: HashMap::new(),
+            ops: HashMap::new(),
+            test_mode,
+            block_handlers: HashMap::new(),
+        };
+        interpreter.register_block_handler("test", Self::handle_test);
+        interpreter.register_block_handler("test_init", Self::handle_test_init);
+        interpreter.register_block_handler("notest", Self::handle_notest);
+        interpreter
+    }
+
+    pub fn register_block_handler(&mut self, name: &str, handler: BlockHandler) {
+        self.block_handlers.insert(name.to_string(), handler);
+    }
+
+    fn handle_test(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<Vec<String>, String> {
+        if !interp.test_mode { return Ok(vec![]); }
+        let saved_env = interp.env.clone();
+        let saved_ops = interp.ops.clone();
+        let saved_mode = interp.test_mode;
+        interp.test_mode = false;
+        let block_outputs = interp.run(&body)?;
+        interp.test_mode = saved_mode;
+        interp.env = saved_env;
+        interp.ops = saved_ops;
+        Ok(block_outputs)
+    }
+
+    fn handle_test_init(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<Vec<String>, String> {
+        if !interp.test_mode { return Ok(vec![]); }
+        let saved_mode = interp.test_mode;
+        interp.test_mode = false;
+        let block_outputs = interp.run(&body)?;
+        interp.test_mode = saved_mode;
+        Ok(block_outputs)
+    }
+
+    fn handle_notest(interp: &mut Interpreter, _meta: Vec<ListItem>, body: Vec<Stmt>) -> Result<Vec<String>, String> {
+        if interp.test_mode { return Ok(vec![]); }
+        let saved_mode = interp.test_mode;
+        interp.test_mode = false;
+        let block_outputs = interp.run(&body)?;
+        interp.test_mode = saved_mode;
+        Ok(block_outputs)
     }
 
     pub fn run(&mut self, program: &[Stmt]) -> Result<Vec<String>, String> {
@@ -218,40 +263,57 @@ impl Interpreter {
                     }
                 }
             }
-            Stmt::Return(_) => {
-                return Err("return outside function".to_string());
+            Stmt::Return(opt_val) => {
+                if let Some(val) = opt_val {
+                    let v = eval(val, &self.env, &self.ops)?;
+                    // Since eval returns Value, we can't directly return it from run which returns Strings.
+                    // But Return is usually inside a function call.
+                    // If we are at top level, it's an error.
+                    // Wait, `run` returns `Result<Vec<String>, String>`.
+                    // We need to signal a Return. 
+                    // But currently `run` doesn't support returning Value directly to caller of `run`.
+                    // It only supports printing.
+                    // Actually, `call_func` uses `eval_block` which is what we need.
+                    // But `eval_block` logic is inside `run`.
+                    // We need to refactor `run` to support return values or just error here.
+                    // For now, let's just error if return is hit in `run` because `run` expects to output strings.
+                    // The function execution logic in `call_func` needs to handle Return.
+                    // Let's look at `call_func`.
+                    // `call_func` calls `self.run(&body)`.
+                    // If `run` encounters `Return`, it should return that value.
+                    // But `run` returns `Vec<String>`.
+                    // This implies `Return` statement inside `run` is problematic if `run` signature is fixed.
+                    // We need `run` to return `Result<(Vec<String>, Option<Value>), String>`.
+                    // Or `call_func` should handle execution differently.
+                    // Let's check `call_func`.
+                    
+                    // Actually, `call_func` implementation:
+                    // `let outputs = self.run(&body)?;`
+                    // `if let Some(last) = outputs.last() { ... }`
+                    // This suggests function return value is printed? No, that's not right.
+                    // Previous implementation of `LetFunc` body was `Expr`.
+                    // Now it is `Vec<Stmt>`.
+                    // If `Return` is used, we need to propagate the value.
+                    // But `run` returns strings.
+                    // This is a design issue in `run`.
+                    // For now, to fix compilation, I will implement `Return` as error in `run` or just ignore it?
+                    // The error `Return(Expr)` vs `Return(Option<Expr>)` was fixed in AST.
+                    // Now we need to handle `Option<Expr>` here.
+                    
+                    return Err("Return statement not supported in top-level run".to_string());
+                } else {
+                     return Err("Return statement not supported in top-level run".to_string());
+                }
             }
             Stmt::ExprStmt(expr) => {
                 let _ = eval(expr, &self.env, &self.ops)?;
             }
-            Stmt::Test(stmts) => {
-                if !self.test_mode { continue; }
-                let saved_env = self.env.clone();
-                let saved_ops = self.ops.clone();
-                let saved_mode = self.test_mode;
-                self.test_mode = false;
-                let block_outputs = self.run(stmts)?;
-                self.test_mode = saved_mode;
-                self.env = saved_env;
-                self.ops = saved_ops;
-                outputs.extend(block_outputs);
-            }
-            Stmt::TestInit(stmts) => {
-                if !self.test_mode { continue; }
-                // Execute test_init in current scope, affecting subsequent tests
-                let saved_mode = self.test_mode;
-                self.test_mode = false;
-                let block_outputs = self.run(stmts)?;
-                self.test_mode = saved_mode;
-                outputs.extend(block_outputs);
-            }
-            Stmt::NoTest(stmts) => {
-                if self.test_mode { continue; }
-                let saved_mode = self.test_mode;
-                self.test_mode = false;
-                let block_outputs = self.run(stmts)?;
-                self.test_mode = saved_mode;
-                outputs.extend(block_outputs);
+            Stmt::Block(name, meta, stmts) => {
+                if let Some(&handler) = self.block_handlers.get(name) {
+                    outputs.extend(handler(self, meta.clone(), stmts.clone())?);
+                } else {
+                    return Err(format!("Unknown block type: {}", name));
+                }
             }
         }
     }
@@ -525,13 +587,12 @@ unsafe extern "C" fn demo_add_cb(
 }
 
 pub fn run(program: &[Stmt]) -> Result<Vec<String>, String> {
-    let mut it = Interpreter::new();
+    let mut it = Interpreter::new(false);
     it.run(program)
 }
 
 pub fn run_tests(program: &[Stmt]) -> Result<Vec<String>, String> {
-    let mut it = Interpreter::new();
-    it.test_mode = true;
+    let mut it = Interpreter::new(true);
     it.run(program)
 }
 
@@ -680,7 +741,18 @@ fn eval_func_body(
 ) -> Result<Value, String> {
     for stmt in stmts {
         match stmt {
-            Stmt::Return(e) => return eval(e, env, ops),
+            Stmt::Return(opt_val) => {
+                if let Some(e) = opt_val {
+                    return eval(e, env, ops);
+                } else {
+                    // Return void/none
+                    // Assuming empty string or specific value for void?
+                    // For now, let's return Int(0) or similar dummy, or handle Void type.
+                    // But eval returns Value.
+                    // Let's return Value::Int(0) for now as void.
+                    return Ok(Value::Int(0));
+                }
+            }
             Stmt::Let(n, e) => {
                 let v = eval(e, env, ops)?;
                 env.insert(n.clone(), v);

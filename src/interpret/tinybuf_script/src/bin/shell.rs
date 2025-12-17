@@ -21,8 +21,7 @@ fn main() {
             }
         };
         
-        let mut interp = Interpreter::new();
-        interp.test_mode = test_mode;
+        let mut interp = Interpreter::new(test_mode);
         match parse_program(&src) {
             Ok(ast) => match interp.run(&ast) {
                 Ok(outputs) => {
@@ -43,7 +42,7 @@ fn main() {
         return;
     }
 
-    let mut interp = Interpreter::new();
+    let mut interp = Interpreter::new(false);
     println!("tinybuf_script shell");
     loop {
         print!("tbs> ");

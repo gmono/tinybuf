@@ -322,4 +322,27 @@ mod tests {
         assert_eq!(out, vec!["1","(a)","(a b)","(a b)","(1)","(1)"]);
     }
 
+    #[test]
+    fn index_on_grouped_square_list() {
+        let src = r#"
+            let a=42
+            print ([a])[0]
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["42"]);
+    }
+
+    #[test]
+    fn square_list_index_without_group_should_fail() {
+        let src = r#"
+            let a=1
+            print [a][0]
+        "#;
+        let err = interpret_script(src).unwrap_err();
+        match err {
+            super::ScriptError::ParseError(_) => {},
+            _ => panic!("expected parse error for [a][0]"),
+        }
+    }
+
 }

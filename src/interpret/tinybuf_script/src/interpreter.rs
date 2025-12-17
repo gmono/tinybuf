@@ -661,24 +661,34 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
                 if args.len() != 1 {
                     return Err("value_of expects 1 argument".to_string());
                 }
-                let list_val = eval(&args[0], env, ops)?;
-                if let Value::List(items, _keys) = list_val {
-                    let mut evaluated_items = Vec::new();
-                    for item in items {
-                         match item {
-                             Value::Str(s) => {
-                                 if let Some(val) = env.get(&s) {
-                                     evaluated_items.push(val.clone());
-                                 } else {
-                                     return Err(format!("undefined variable: {}", s));
+                let arg_val = eval(&args[0], env, ops)?;
+                match arg_val {
+                    Value::List(items, _keys) => {
+                        let mut evaluated_items = Vec::new();
+                        for item in items {
+                             match item {
+                                 Value::Str(s) => {
+                                     if let Some(val) = env.get(&s) {
+                                         evaluated_items.push(val.clone());
+                                     } else {
+                                         return Err(format!("undefined variable: {}", s));
+                                     }
                                  }
+                                 _ => evaluated_items.push(item),
                              }
-                             _ => evaluated_items.push(item),
-                         }
+                        }
+                        return Ok(Value::List(evaluated_items, HashMap::new()));
                     }
-                    return Ok(Value::List(evaluated_items, HashMap::new()));
-                } else {
-                    return Err("value_of expects a list".to_string());
+                    Value::Str(s) => {
+                        if let Some(val) = env.get(&s) {
+                            return Ok(val.clone());
+                        } else {
+                            return Err(format!("undefined variable: {}", s));
+                        }
+                    }
+                    _ => {
+                        return Err("value_of expects a list or sym/string".to_string());
+                    }
                 }
             }
             let mut argv = Vec::new();

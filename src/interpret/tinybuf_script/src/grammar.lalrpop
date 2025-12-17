@@ -131,6 +131,7 @@ Postfix: Expr = {
     <p:Postfix> "[" <i:Expr> "]" => Expr::Index(Box::new(p), Box::new(i)),
     <f:Ident> "(" ")" => Expr::Call(f, vec![]),
     <f:Ident> "(" <args:ArgNonEmpty> ")" => Expr::Call(f, args),
+    "(" <e:Expr> ")" => Expr::Group(Box::new(e)),
     <v:Ident> => Expr::Var(v),
 };
 
@@ -143,7 +144,6 @@ Atom: Expr = {
     "'" <v:Ident> => Expr::Str(v),
     "(" ")" => Expr::List(vec![]),
     "(" <items:CommaList> ")" => Expr::List(items),
-    "(" <first:Expr> ")" => Expr::Group(Box::new(first)),
     "[" "]" => Expr::Call("value_of".to_string(), vec![Expr::List(vec![])]),
     "[" <item:ListItem> "]" => Expr::Call("value_of".to_string(), vec![Expr::List(vec![item])]),
     "[" <items:CommaList> "]" => Expr::Call("value_of".to_string(), vec![Expr::List(items)]),

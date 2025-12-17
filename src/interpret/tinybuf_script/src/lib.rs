@@ -304,9 +304,22 @@ mod tests {
             print value_of((a,b,c))
         "#;
         let out = interpret_script(src).unwrap();
-        // (a,b,c) is now a symbol table (list of symbols/strings)
-        // [a,b,c] is sugar for value_of((a,b,c)), which evaluates the symbols
         assert_eq!(out, vec!["(a b c)", "(1 2 3)", "(1 2 3)"]);
+    }
+
+    #[test]
+    fn paren_group_vs_sym_list() {
+        let src = r#"
+            let a=1
+            print (a)
+            print (a,)
+            print (a,b)
+            print (a,b,)
+            print [a]
+            print [a,]
+        "#;
+        let out = interpret_script(src).unwrap();
+        assert_eq!(out, vec!["1","(a)","(a b)","(a b)","(1)","(1)"]);
     }
 
 }

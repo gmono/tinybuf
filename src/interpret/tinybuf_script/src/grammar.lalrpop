@@ -116,7 +116,9 @@ CommaTail: Vec<ListItem> = {
 };
 
 CommaList: Vec<ListItem> = {
+    <e:ListItem> "," <t:CommaTail> "," => { std::iter::once(e).chain(t.into_iter()).collect() },
     <e:ListItem> "," <t:CommaTail> => { std::iter::once(e).chain(t.into_iter()).collect() },
+    <e:ListItem> "," => vec![e],
 };
 
 ListItem: ListItem = {

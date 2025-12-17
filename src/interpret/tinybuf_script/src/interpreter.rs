@@ -259,7 +259,11 @@ impl Interpreter {
                             let out = self.call_func(fname, &argsv)?;
                             outputs.push(to_string(&out));
                         }
-                        _ => return Err("run expects list with function name first".to_string()),
+                        _ => {
+                            let stmt = list_to_stmt(items)?;
+                            let inner = self.run(std::slice::from_ref(&stmt))?;
+                            outputs.extend(inner);
+                        }
                     }
                 }
             }
@@ -778,5 +782,255 @@ fn bin_int(
     match (va, vb) {
         (Value::Int(x), Value::Int(y)) => Ok(Value::Int(f(x, y))),
         _ => Err("type error: expected integers".to_string()),
+    }
+}
+
+fn expr_to_string(e: &Expr) -> Option<String> {
+    match e {
+        Expr::Str(s) => Some(s.clone()),
+        Expr::Var(s) => Some(s.clone()),
+        Expr::Sym(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn list_expr_items(e: &Expr) -> Option<Vec<Expr>> {
+    match e {
+        Expr::List(items) => Some(items.iter().map(|li| li.value.clone()).collect()),
+        _ => None,
+    }
+}
+
+fn list_to_stmt(items: &[Expr]) -> Result<Stmt, String> {
+    if items.is_empty() {
+        return Err("empty stmt list".to_string());
+    }
+    match &items[0] {
+        Expr::Var(fname) => Ok(Stmt::RunList(items.to_vec())),
+        Expr::Str(s) => {
+            match s.as_str() {
+                "let" => {
+                    if items.len() != 3 { return Err("let expects name and expr".to_string()); }
+                    let name = expr_to_string(&items[1]).ok_or_else(|| "let name must be string or ident".to_string())?;
+                    Ok(Stmt::Let(name, items[2].clone()))
+                }
+                "print" => {
+                    if items.len() != 2 { return Err("print expects expr".to_string()); }
+                    Ok(Stmt::PrintExpr(items[1].clone()))
+                }
+                "print_template" => {
+                    if items.len() == 2 {
+                        let tpl = expr_to_string(&items[1]).ok_or_else(|| "template must be string".to_string())?;
+                        Ok(Stmt::PrintTemplate(tpl, None))
+                    } else if items.len() == 3 {
+                        let tpl = expr_to_string(&items[1]).ok_or_else(|| "template must be string".to_string())?;
+                        Ok(Stmt::PrintTemplate(tpl, Some(items[2].clone())))
+                    } else {
+                        Err("print_template expects 1 or 2 args".to_string())
+                    }
+                }
+                "list_types" => Ok(Stmt::ListTypes),
+                "list_type" => {
+                    if items.len() != 2 { return Err("list_type expects name".to_string()); }
+                    let name = expr_to_string(&items[1]).ok_or_else(|| "type name must be string".to_string())?;
+                    Ok(Stmt::ListType(name))
+                }
+                "reg_operator" => {
+                    if items.len() != 3 { return Err("reg_operator expects op and function".to_string()); }
+                    let op = expr_to_string(&items[1]).ok_or_else(|| "op must be string".to_string())?;
+                    let fname = expr_to_string(&items[2]).ok_or_else(|| "function name must be string".to_string())?;
+                    Ok(Stmt::RegOp(op, fname))
+                }
+                "return" => {
+                    if items.len() == 1 {
+                        Ok(Stmt::Return(None))
+                    } else if items.len() == 2 {
+                        Ok(Stmt::Return(Some(items[1].clone())))
+                    } else {
+                        Err("return expects 0 or 1 arg".to_string())
+                    }
+                }
+                "call" => {
+                    if items.len() < 3 { return Err("call expects type, op and args".to_string()); }
+                    let t = expr_to_string(&items[1]).ok_or_else(|| "type must be string".to_string())?;
+                    let op = expr_to_string(&items[2]).ok_or_else(|| "op must be string".to_string())?;
+                    let mut args = Vec::new();
+                    for e in items.iter().skip(3) {
+                        args.push(e.clone());
+                    }
+                    Ok(Stmt::Call(t, op, args))
+                }
+                "let_func" => {
+                    if items.len() != 4 { return Err("let_func expects name, params, body".to_string()); }
+                    let name = expr_to_string(&items[1]).ok_or_else(|| "func name must be string".to_string())?;
+                    let params = list_expr_items(&items[2]).ok_or_else(|| "params must be list".to_string())?;
+                    let mut ps = Vec::new();
+                    for p in params {
+                        let s = expr_to_string(&p).ok_or_else(|| "param must be string or ident".to_string())?;
+                        ps.push(s);
+                    }
+                    let bl = list_expr_items(&items[3]).ok_or_else(|| "body must be list".to_string())?;
+                    let mut body_stmts = Vec::new();
+                    for e in bl {
+                        if let Some(inner) = list_expr_items(&e) {
+                            body_stmts.push(list_to_stmt(&inner)?);
+                        } else {
+                            return Err("body items must be list".to_string());
+                        }
+                    }
+                    Ok(Stmt::LetFunc(name, ps, body_stmts))
+                }
+                "expr" => {
+                    if items.len() != 2 { return Err("expr expects 1 arg".to_string()); }
+                    Ok(Stmt::ExprStmt(items[1].clone()))
+                }
+                "block" => {
+                    if items.len() == 2 {
+                        let header_items = list_expr_items(&items[0]).ok_or_else(|| "block header must be list".to_string())?;
+                        if header_items.len() < 2 { return Err("block header must contain name and meta".to_string()); }
+                        let name = expr_to_string(&header_items[1]).ok_or_else(|| "block name must be string".to_string())?;
+                        let meta_expr = header_items.get(2).cloned().unwrap_or(Expr::List(vec![]));
+                        let meta_vec = match meta_expr {
+                            Expr::List(v) => v,
+                            _ => return Err("block meta must be list".to_string()),
+                        };
+                        let body_items = list_expr_items(&items[1]).ok_or_else(|| "block body must be list".to_string())?;
+                        let mut stmts = Vec::new();
+                        for e in body_items {
+                            if let Some(inner) = list_expr_items(&e) {
+                                stmts.push(list_to_stmt(&inner)?);
+                            } else {
+                                return Err("block body items must be list".to_string());
+                            }
+                        }
+                        Ok(Stmt::Block(name, meta_vec, stmts))
+                    } else if items.len() == 4 {
+                        let name = expr_to_string(&items[1]).ok_or_else(|| "block name must be string".to_string())?;
+                        let meta_expr = items[2].clone();
+                        let meta_vec = match meta_expr {
+                            Expr::List(v) => v,
+                            _ => return Err("block meta must be list".to_string()),
+                        };
+                        let body_items = list_expr_items(&items[3]).ok_or_else(|| "block body must be list".to_string())?;
+                        let mut stmts = Vec::new();
+                        for e in body_items {
+                            if let Some(inner) = list_expr_items(&e) {
+                                stmts.push(list_to_stmt(&inner)?);
+                            } else {
+                                return Err("block body items must be list".to_string());
+                            }
+                        }
+                        Ok(Stmt::Block(name, meta_vec, stmts))
+                    } else {
+                        Err("block expects header and body".to_string())
+                    }
+                }
+                _ => Err("unknown directive".to_string()),
+            }
+        }
+        Expr::List(h) => {
+            let mut hv = Vec::new();
+            for li in h {
+                hv.push(li.value.clone());
+            }
+            let mut items2 = Vec::new();
+            items2.extend(hv);
+            items2.extend(items.iter().skip(1).cloned());
+            list_to_stmt(&items2)
+        }
+        _ => Err("invalid stmt list".to_string()),
+    }
+}
+
+pub fn stmt_to_list_expr(stmt: &Stmt) -> Expr {
+    match stmt {
+        Stmt::Let(name, expr) => {
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Str("let".to_string()) },
+                ListItem { key: None, value: Expr::Str(name.clone()) },
+                ListItem { key: None, value: expr.clone() },
+            ])
+        }
+        Stmt::PrintTemplate(tpl, arg) => {
+            let mut items = vec![
+                ListItem { key: None, value: Expr::Str("print_template".to_string()) },
+                ListItem { key: None, value: Expr::Str(tpl.clone()) },
+            ];
+            if let Some(e) = arg {
+                items.push(ListItem { key: None, value: e.clone() });
+            }
+            Expr::List(items)
+        }
+        Stmt::PrintExpr(expr) => {
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Str("print".to_string()) },
+                ListItem { key: None, value: expr.clone() },
+            ])
+        }
+        Stmt::ListTypes => {
+            Expr::List(vec![ListItem { key: None, value: Expr::Str("list_types".to_string()) }])
+        }
+        Stmt::ListType(name) => {
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Str("list_type".to_string()) },
+                ListItem { key: None, value: Expr::Str(name.clone()) },
+            ])
+        }
+        Stmt::RegOp(op, fname) => {
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Str("reg_operator".to_string()) },
+                ListItem { key: None, value: Expr::Str(op.clone()) },
+                ListItem { key: None, value: Expr::Str(fname.clone()) },
+            ])
+        }
+        Stmt::LetFunc(name, params, body) => {
+            let params_expr = Expr::List(params.iter().map(|p| ListItem { key: None, value: Expr::Str(p.clone()) }).collect());
+            let body_expr = Expr::List(body.iter().map(|s| ListItem { key: None, value: stmt_to_list_expr(s) }).collect());
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Str("let_func".to_string()) },
+                ListItem { key: None, value: Expr::Str(name.clone()) },
+                ListItem { key: None, value: params_expr },
+                ListItem { key: None, value: body_expr },
+            ])
+        }
+        Stmt::Return(opt) => {
+            let mut items = vec![ListItem { key: None, value: Expr::Str("return".to_string()) }];
+            if let Some(e) = opt {
+                items.push(ListItem { key: None, value: e.clone() });
+            }
+            Expr::List(items)
+        }
+        Stmt::Call(t, op, args) => {
+            let mut items = vec![
+                ListItem { key: None, value: Expr::Str("call".to_string()) },
+                ListItem { key: None, value: Expr::Str(t.clone()) },
+                ListItem { key: None, value: Expr::Str(op.clone()) },
+            ];
+            for a in args {
+                items.push(ListItem { key: None, value: a.clone() });
+            }
+            Expr::List(items)
+        }
+        Stmt::RunList(items) => {
+            Expr::List(items.iter().map(|e| ListItem { key: None, value: e.clone() }).collect())
+        }
+        Stmt::ExprStmt(e) => {
+            Expr::List(vec![
+                ListItem { key: None, value: Expr::Str("expr".to_string()) },
+                ListItem { key: None, value: e.clone() },
+            ])
+        }
+        Stmt::Block(name, meta, body) => {
+            let header = Expr::List(vec![
+                ListItem { key: None, value: Expr::Str("block".to_string()) },
+                ListItem { key: None, value: Expr::Str(name.clone()) },
+                ListItem { key: None, value: Expr::List(meta.clone()) },
+            ]);
+            let body_list = Expr::List(body.iter().map(|s| ListItem { key: None, value: stmt_to_list_expr(s) }).collect());
+            Expr::List(vec![
+                ListItem { key: None, value: header },
+                ListItem { key: None, value: body_list },
+            ])
+        }
     }
 }

@@ -44,7 +44,7 @@ Stmt: Stmt = {
     Sep* "break" "to" <lbl:Ident> Sep => Stmt::Break(Some(lbl)),
     Sep* "break" Sep => Stmt::Break(None),
     Sep* "next" Sep => Stmt::Next,
-    Sep* "if" <c:Expr> ":" <t:ThenStmt> Sep => Stmt::If(c, Box::new(t), None),
+    Sep* "if" <c:Expr> ":" <s:Stmt> => Stmt::If(c, Box::new(s), None),
     Sep* "list" "types" Sep => Stmt::ListTypes,
     Sep* "list" "type" <name:Ident> Sep => Stmt::ListType(name),
     Sep* "call" <t:Ident> "." <op:Ident> "(" ")" Sep => Stmt::Call(t, op, vec![]),
@@ -73,12 +73,6 @@ LetStmt: Stmt = {
 
 /* removed Block to avoid LR(1) ambiguity */
 
-ThenStmt: Stmt = {
-    "next" => Stmt::Next,
-    "break" => Stmt::Break(None),
-    "break" "to" <lbl:Ident> => Stmt::Break(Some(lbl)),
-};
-
 ArgNonEmpty: Vec<Expr> = {
     <e:Expr> => vec![e],
     <l:ArgNonEmpty> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
@@ -96,7 +90,20 @@ CustomOp: String = r"<[a-zA-Z0-9_]+>" => {
 
 Sep: () = { ";" => (), "\n" => () };
 
-Expr: Expr = Cmp;
+Expr: Expr = {
+    IfExpr,
+    Cmp,
+};
+
+IfExpr: Expr = {
+    "if" <c:Expr> <t:BlockExpr> => Expr::If(Box::new(c), Box::new(t), None),
+    "if" <c:Expr> <t:BlockExpr> "else" <e:BlockExpr> => Expr::If(Box::new(c), Box::new(t), Some(Box::new(e))),
+    "if" <c:Expr> <t:BlockExpr> "else" <e:IfExpr> => Expr::If(Box::new(c), Box::new(t), Some(Box::new(e))),
+};
+
+BlockExpr: Expr = {
+    <s:BlockBody> => Expr::Block(s),
+};
 
 BlockBody: Vec<Stmt> = {
     "{" Sep* <b:Stmt*> Sep* "}" => b,

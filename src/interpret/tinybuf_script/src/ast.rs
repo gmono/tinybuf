@@ -41,6 +41,7 @@ pub enum Expr {
     Pow(Box<Expr>, Box<Expr>),
     Gt(Box<Expr>, Box<Expr>),
     Lt(Box<Expr>, Box<Expr>),
+    If(Box<Expr>, Box<Expr>, Option<Box<Expr>>),
     Custom(Box<Expr>, String, Box<Expr>),
     Map(Box<Expr>, String),
     Group(Box<Expr>),

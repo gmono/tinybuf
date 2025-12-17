@@ -878,7 +878,10 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
             .get(name)
             .cloned()
             .ok_or_else(|| format!("undefined variable: {}", name)),
-        Expr::Block(stmts) => Ok(Value::Block(stmts.clone())),
+        Expr::Block(stmts) => {
+             let mut block_env = env.clone();
+             eval_block_expr(stmts, &mut block_env, ops)
+        },
         Expr::SList(items) => {
             let mut vals = Vec::new();
             for it in items {
@@ -1002,6 +1005,21 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
                 _ => Err("type error: < expects integers".to_string()),
             }
         }
+        Expr::If(cond, then_expr, else_expr) => {
+             let v = eval(cond, env, ops)?;
+             let is_true = match v {
+                 Value::Int(i) => i != 0,
+                 Value::Str(s) => !s.is_empty(),
+                 _ => false,
+             };
+             if is_true {
+                 eval(then_expr, env, ops)
+             } else if let Some(else_e) = else_expr {
+                 eval(else_e, env, ops)
+             } else {
+                 Ok(Value::Int(0)) // Void/Nil
+             }
+        }
         Expr::Group(e) => eval(e, env, ops),
         Expr::Map(list_expr, func_name) => {
             let lv = eval(list_expr, env, ops)?;
@@ -1052,37 +1070,57 @@ fn eval(expr: &Expr, env: &HashMap<String, Value>, ops: &HashMap<String, String>
     }
 }
 
-fn eval_func_body(
+fn eval_block_expr(
     stmts: &[Stmt],
     env: &mut HashMap<String, Value>,
     ops: &HashMap<String, String>,
 ) -> Result<Value, String> {
+    let mut last_val = Value::Int(0);
     for stmt in stmts {
         match stmt {
-            Stmt::Return(opt_val) => {
-                if let Some(e) = opt_val {
-                    return eval(e, env, ops);
-                } else {
-                    // Return void/none
-                    // Assuming empty string or specific value for void?
-                    // For now, let's return Int(0) or similar dummy, or handle Void type.
-                    // But eval returns Value.
-                    // Let's return Value::Int(0) for now as void.
-                    return Ok(Value::Int(0));
-                }
-            }
             Stmt::Let(n, e) => {
                 let v = eval(e, env, ops)?;
                 env.insert(n.clone(), v);
             }
             Stmt::PrintExpr(e) => {
                 let v = eval(e, env, ops)?;
-                println!("{}", to_string(&v)); // Functions print directly for now or could collect output
+                println!("{}", to_string(&v));
             }
-             _ => return Err("unsupported statement in function block".to_string()),
+            Stmt::ExprStmt(e) => {
+                last_val = eval(e, env, ops)?;
+            }
+            Stmt::Return(opt_e) => {
+                if let Some(e) = opt_e {
+                    return eval(e, env, ops);
+                } else {
+                    return Ok(Value::Int(0));
+                }
+            }
+            Stmt::If(cond, then_stmt, else_stmt) => {
+                 let v = eval(cond, env, ops)?;
+                 let is_true = match v {
+                     Value::Int(i) => i != 0,
+                     Value::Str(s) => !s.is_empty(),
+                     _ => false,
+                 };
+                 if is_true {
+                     last_val = eval_block_expr(std::slice::from_ref(then_stmt), env, ops)?;
+                 } else if let Some(else_s) = else_stmt {
+                     last_val = eval_block_expr(std::slice::from_ref(else_s), env, ops)?;
+                 }
+            }
+            _ => return Err("unsupported statement in expression block".to_string()),
         }
     }
-    Ok(Value::Int(0)) // Default return
+    Ok(last_val)
+}
+
+fn eval_func_body(
+    stmts: &[Stmt],
+    env: &mut HashMap<String, Value>,
+    ops: &HashMap<String, String>,
+) -> Result<Value, String> {
+    eval_block_expr(stmts, env, ops)
 }
 fn bin_int(
     a: &Expr,
@@ -1191,14 +1229,29 @@ fn list_to_stmt(items: &[Expr]) -> Result<Stmt, String> {
                     }
                 }
                 "if" => {
-                    if items.len() != 3 { return Err("if expects condition and then stmt".to_string()); }
-                    let cond = items[1].clone();
-                    // then must be a list encoding a stmt
-                    if let Some(inner) = list_expr_items(&items[2]) {
-                        let then_stmt = list_to_stmt(&inner)?;
-                        Ok(Stmt::If(cond, Box::new(then_stmt), None))
+                    if items.len() == 3 {
+                        let cond = items[1].clone();
+                        if let Some(inner) = list_expr_items(&items[2]) {
+                            let then_stmt = list_to_stmt(&inner)?;
+                            Ok(Stmt::If(cond, Box::new(then_stmt), None))
+                        } else {
+                            Err("if then must be a list-encoded stmt".to_string())
+                        }
+                    } else if items.len() == 4 {
+                        let cond = items[1].clone();
+                        let then_stmt = if let Some(inner) = list_expr_items(&items[2]) {
+                            list_to_stmt(&inner)?
+                        } else {
+                            return Err("if then must be a list-encoded stmt".to_string());
+                        };
+                        let else_stmt = if let Some(inner) = list_expr_items(&items[3]) {
+                            list_to_stmt(&inner)?
+                        } else {
+                            return Err("if else must be a list-encoded stmt".to_string());
+                        };
+                        Ok(Stmt::If(cond, Box::new(then_stmt), Some(Box::new(else_stmt))))
                     } else {
-                        Err("if then must be a list-encoded stmt".to_string())
+                         Err("if expects 2 or 3 args".to_string())
                     }
                 }
                 "call" => {
@@ -1367,13 +1420,17 @@ pub fn stmt_to_list_expr(stmt: &Stmt) -> Expr {
                 ListItem { key: None, value: Expr::Sym("next".to_string()) },
             ])
         }
-        Stmt::If(cond, then_s, _else_s) => {
+        Stmt::If(cond, then_s, else_s) => {
             let then_expr = stmt_to_list_expr(then_s);
-            Expr::List(vec![
+            let mut items = vec![
                 ListItem { key: None, value: Expr::Sym("if".to_string()) },
                 ListItem { key: None, value: cond.clone() },
                 ListItem { key: None, value: then_expr },
-            ])
+            ];
+            if let Some(e) = else_s {
+                items.push(ListItem { key: None, value: stmt_to_list_expr(e) });
+            }
+            Expr::List(items)
         }
         Stmt::Call(t, op, args) => {
             let mut items = vec![

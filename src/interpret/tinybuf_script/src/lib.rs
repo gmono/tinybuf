@@ -282,6 +282,14 @@ fn render_expr(e: &ast::Expr) -> String {
         ast::Expr::Map(list_expr, func_name) => format!("({})|{}", render_expr(list_expr), func_name),
         ast::Expr::Group(g) => format!("({})", render_expr(g)),
         ast::Expr::Index(lst, idx) => format!("{}[{}]", render_expr(lst), render_expr(idx)),
+        ast::Expr::If(c, t, e) => {
+            let mut s = format!("if {} {}", render_expr(c), render_expr(t));
+            if let Some(else_e) = e {
+                s.push_str(" else ");
+                s.push_str(&render_expr(else_e));
+            }
+            s
+        }
     }
 }
 pub fn shell_transform_line(line: &str) -> String {

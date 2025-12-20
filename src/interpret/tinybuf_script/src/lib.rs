@@ -186,8 +186,31 @@ fn lower_extended_syntax(src: &str) -> Result<String, ScriptError> {
     if !out.ends_with('\n') {
         out.push('\n');
     }
-    // println!("TRANSFORMED:\n{}", out);
-    Ok(out)
+    // Pass 2: inject `return` before `}` for blocks whose last non-whitespace char inside is ';'
+    let mut out2 = String::new();
+    let mut j = 0usize;
+    let ob = out.as_bytes();
+    while j < ob.len() {
+        if ob[j] == b'{' {
+            let (body, consumed) = extract_brace_block(&out[j..])?;
+            // Determine if body ends with ';' ignoring trailing whitespace
+            let trimmed_end = body.trim_end_matches(|c: char| c.is_ascii_whitespace());
+            if trimmed_end.ends_with(';') {
+                out2.push('{');
+                out2.push_str(&body);
+                out2.push_str("return\n}");
+            } else {
+                out2.push('{');
+                out2.push_str(&body);
+                out2.push('}');
+            }
+            j += consumed;
+        } else {
+            out2.push(ob[j] as char);
+            j += 1;
+        }
+    }
+    Ok(out2)
 }
 
 fn extract_brace_block(s: &str) -> Result<(String, usize), ScriptError> {
@@ -349,6 +372,8 @@ pub fn shell_transform_line(line: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{interpret_script, shell_transform_line};
+    use crate::ast::{Expr, Stmt};
+    use crate::interpreter::{eval_expr_for_tests, Value};
 
     #[test]
     fn basic_script() {
@@ -634,4 +659,53 @@ mod tests {
         assert_eq!(out, vec!["5","7","9","outer start"]);
     }
 
+    #[test]
+    fn block_no_value_semicolon_suppresses_expr_value() {
+        let expr = Expr::If(
+            Box::new(Expr::Int(1)),
+            Box::new(Expr::BlockNoValue(vec![
+                Stmt::ExprStmt(Expr::Int(100)),
+            ])),
+            Some(Box::new(Expr::Block(vec![
+                Stmt::ExprStmt(Expr::Int(200)),
+            ]))),
+        );
+        let v = eval_expr_for_tests(&expr).unwrap();
+        match v {
+            Value::Int(i) => assert_eq!(i, 0),
+            _ => panic!("expected int 0"),
+        }
+    }
+
+    #[test]
+    fn block_returns_last_expr_without_semicolon() {
+        let expr = Expr::If(
+            Box::new(Expr::Int(1)),
+            Box::new(Expr::Block(vec![
+                Stmt::ExprStmt(Expr::Int(100)),
+            ])),
+            Some(Box::new(Expr::Block(vec![
+                Stmt::ExprStmt(Expr::Int(200)),
+            ]))),
+        );
+        let v = eval_expr_for_tests(&expr).unwrap();
+        match v {
+            Value::Int(i) => assert_eq!(i, 100),
+            _ => panic!("expected int 100"),
+        }
+    }
+
+    #[test]
+    fn lower_ext_syntax_injects_return_for_semicolon_block() {
+        let src = r#"
+            let y = if 1 { 
+                100;
+            } else { 
+                200 
+            }
+            print y
+        "#;
+        let transformed = super::lower_extended_syntax(src).unwrap();
+        assert!(transformed.contains("{ \n                100;\n            return\n}"));
+    }
 }

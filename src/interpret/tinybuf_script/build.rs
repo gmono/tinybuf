@@ -2,7 +2,7 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    let _ = lalrpop::process_root();
+    lalrpop::process_root().expect("lalrpop generate failed");
     let crate_dir = std::fs::canonicalize(env::var("CARGO_MANIFEST_DIR").unwrap()).unwrap();
     let zig_out_dir = crate_dir
         .parent().unwrap() // src/interpret
@@ -23,9 +23,6 @@ fn main() {
             let dll_dst2 = deps_dir.join("dyn_sys_zig_dll.dll");
             let _ = std::fs::copy(&dll_src, &dll_dst1);
             let _ = std::fs::copy(&dll_src, &dll_dst2);
-            return;
         }
     }
-
-    let _ = ();
 }

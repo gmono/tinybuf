@@ -35,23 +35,22 @@ match {
     r"<[a-zA-Z0-9_]+>",
 }
 
-pub Program: Vec<Stmt> = {
-    Sep* <s:StmtList> Sep* => s,
-    Sep* => vec![],
-};
-
 StmtList: Vec<Stmt> = {
-    <s:Stmt> => vec![s],
-    <s:Stmt> Sep+ <l:StmtList> => {
-        let mut v = vec![s];
-        v.extend(l);
+    => vec![],
+    <first:Stmt> <rest:(Sep+ <Stmt>)*> => {
+        let mut v = vec![first];
+        for st in rest { v.push(st); }
         v
     },
 };
 
+pub Program: Vec<Stmt> = {
+    Sep* <list:StmtList> => list,
+};
+
 Stmt: Stmt = {
-    SimpleStmt,
-    IfColonStmt,
+    MatchedStmt,
+    UnmatchedStmt,
 };
 
 SimpleStmt: Stmt = {
@@ -69,18 +68,29 @@ SimpleStmt: Stmt = {
     "reg" "operator" <op:CustomOp> <fname:Ident> => Stmt::RegOp(op, fname),
     "run" "(" <items:ArgNonEmpty> ")" => Stmt::RunList(items),
     "run" "(" ")" => Stmt::RunList(vec![]),
-    <e:Expr> => Stmt::ExprStmt(e),
+    <name:Ident> "=" <e:Expr> => Stmt::Let(name, e),
+    <e:ExprNoIf> => Stmt::ExprStmt(e),
     "get" <lst:Expr> <k:Ident> => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
     "get" <lst:Expr> <k:StringLit> => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
     "get" <lst:Expr> "'" <k:Ident> => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Str(k)))),
     "get" <lst:Expr> <i:Number> => Stmt::PrintExpr(Expr::Index(Box::new(lst), Box::new(Expr::Int(i)))),
 };
 
-IfColonStmt: Stmt = {
-    "if" <c:Expr> ":" <s:SimpleStmt> => Stmt::If(c, Box::new(s), None),
-    "if" <c:Expr> ":" <s:SimpleStmt> "else" ":" <e:SimpleStmt> => Stmt::If(c, Box::new(s), Some(Box::new(e))),
-    "if" <c:Expr> ":" <s:SimpleStmt> Sep+ "else" ":" <e:SimpleStmt> => Stmt::If(c, Box::new(s), Some(Box::new(e))),
+MatchedStmt: Stmt = {
+    SimpleStmt,
+    "if" <c:Expr> <t:StmtBlock> "else" <e:MatchedStmt> => Stmt::If(c, Box::new(t), Some(Box::new(e))),
 };
+
+UnmatchedStmt: Stmt = {
+    "if" <c:Expr> <t:StmtBlock> => Stmt::If(c, Box::new(t), None),
+    "if" <c:Expr> <t:StmtBlock> "else" <e:UnmatchedStmt> => Stmt::If(c, Box::new(t), Some(Box::new(e))),
+};
+
+StmtBlock: Stmt = {
+    <b:Block> => Stmt::ExprStmt(Expr::BlockNoValue(b)),
+};
+
+/* colon-if lowered in lexer prepass */
 
 LetStmt: Stmt = {
     <name:Ident> "(" ")" "=" <body:Expr> => Stmt::LetFunc(name, vec![], vec![Stmt::Return(Some(body))]),
@@ -94,27 +104,28 @@ LetStmt: Stmt = {
     <name:Ident> "=" <e:Expr> => Stmt::Let(name, e),
 };
 
+/* dangling-else unsupported in statement form; use if-expr */
+
 ArgNonEmpty: Vec<Expr> = {
     <e:Expr> => vec![e],
     <l:ArgNonEmpty> "," <e:Expr> => { l.into_iter().chain(std::iter::once(e)).collect() },
 };
 
+ArgNonEmptyNoIf: Vec<Expr> = {
+    <e:ExprNoIf> => vec![e],
+    <l:ArgNonEmptyNoIf> "," <e:ExprNoIf> => { l.into_iter().chain(std::iter::once(e)).collect() },
+};
+
 Block: Vec<Stmt> = {
-    "{" <b:BlockBody> "}" => b,
-};
-
-BlockBody: Vec<Stmt> = {
-    Sep* <s:StmtList> Sep+ => s,
-};
-
-StmtListAnySep: Vec<Stmt> = {
-    <s:Stmt> => vec![s],
-    <s:Stmt> Sep+ <l:StmtListAnySep> => {
-        let mut v = vec![s];
-        v.extend(l);
+    "{" Sep* "}" => vec![],
+    "{" Sep* <first:Stmt> <rest:(Sep+ <Stmt>)*> Sep* "}" => {
+        let mut v = vec![first];
+        for st in rest { v.push(st); }
         v
     },
 };
+
+/* colon-if lowered in lexer prepass */
 
 ParamNonEmpty: Vec<String> = {
     <p:Ident> => vec![p],
@@ -129,14 +140,16 @@ CustomOp: String = r"<[a-zA-Z0-9_]+>" => {
 Sep: () = { ";" => (), "\n" => () };
 
 Expr: Expr = {
-    IfExpr,
+    IfExprWithElse,
     Cmp,
 };
 
-IfExpr: Expr = {
-    "if" <c:Expr> <t:BlockExpr> => Expr::If(Box::new(c), Box::new(t), None),
+ExprNoIf: Expr = {
+    Cmp,
+};
+
+IfExprWithElse: Expr = {
     "if" <c:Expr> <t:BlockExpr> "else" <e:BlockExpr> => Expr::If(Box::new(c), Box::new(t), Some(Box::new(e))),
-    "if" <c:Expr> <t:BlockExpr> "else" <e:IfExpr> => Expr::If(Box::new(c), Box::new(t), Some(Box::new(e))),
 };
 
 BlockExpr: Expr = {
@@ -175,23 +188,21 @@ Base: Expr = {
     Postfix,
     Atom,
 };
-
-
-ItemsNonEmpty: Vec<ListItem> = {
-    <e:Expr> => vec![ListItem{ key: None, value: e }],
-    <l:ItemsNonEmpty> "," <e:Expr> => {
-        let mut v = l;
-        v.push(ListItem{ key: None, value: e });
-        v
-    },
+PrimaryIndexable: Expr = {
+    "(" <e:Expr> ")" => Expr::Group(Box::new(e)),
+    <v:Ident> => Expr::Var(v),
 };
 
 Postfix: Expr = {
     <p:Postfix> "[" <i:Expr> "]" => Expr::Index(Box::new(p), Box::new(i)),
-    <f:Ident> "(" ")" => Expr::Call(f, vec![]),
     <f:Ident> "(" <args:ArgNonEmpty> ")" => Expr::Call(f, args),
-    "(" <e:Expr> ")" => Expr::Group(Box::new(e)),
-    <v:Ident> => Expr::Var(v),
+    <f:Ident> "(" ")" => Expr::Call(f, vec![]),
+    PrimaryIndexable,
+};
+
+CallArgs: Vec<Expr> = {
+    "(" <args:ArgNonEmpty> ")" => args,
+    "(" ")" => vec![],
 };
 
 Atom: Expr = {
@@ -201,14 +212,82 @@ Atom: Expr = {
     "#" <s:StringLit> => Expr::Sym(s),
     "#" <v:Ident> => Expr::Str(v),
     "'" <v:Ident> => Expr::Str(v),
+    "(" <items:ListItemsNonEmpty> ")" => Expr::List(items),
+    "(" <items:ListItemsNonEmpty> "," ")" => Expr::List(items),
     "(" ")" => Expr::List(vec![]),
     "[" "]" => Expr::Call("value_of".to_string(), vec![Expr::List(vec![])]),
-    "[" <items:ItemsNonEmpty> "]" => Expr::Call("value_of".to_string(), vec![Expr::List(items)]),
+    "[" <items:ListItemsNonEmpty> "]" => Expr::Call("value_of".to_string(), vec![Expr::List(items)]),
+    "[" <items:ListItemsNonEmpty> "," "]" => Expr::Call("value_of".to_string(), vec![Expr::List(items)]),
 };
+
+AtomNoGroup: Expr = {
+    <n:Number> => Expr::Int(n),
+    <s:StringLit> => Expr::Str(s),
+    "let" => Expr::Var("let".to_string()),
+};
+
+PostfixNoGroup: Expr = {
+    <p:PostfixNoGroup> "[" <i:ExprNoGroup> "]" => Expr::Index(Box::new(p), Box::new(i)),
+    PrimaryIndexableNoGroup,
+};
+
+PrimaryIndexableNoGroup: Expr = {
+    <v:Ident> => Expr::Var(v),
+};
+
+PowerNoGroup: Expr = {
+    <l:BaseNoGroup> "**" <r:PowerNoGroup> => Expr::Pow(Box::new(l), Box::new(r)),
+    BaseNoGroup,
+};
+
+TermNoGroup: Expr = {
+    <l:TermNoGroup> "*" <r:PowerNoGroup> => Expr::Mul(Box::new(l), Box::new(r)),
+    <l:TermNoGroup> "/" <r:PowerNoGroup> => Expr::Div(Box::new(l), Box::new(r)),
+    <l:TermNoGroup> "%" <r:PowerNoGroup> => Expr::Mod(Box::new(l), Box::new(r)),
+    PowerNoGroup,
+};
+
+AddSubNoGroup: Expr = {
+    TermNoGroup,
+};
+
+CmpNoGroup: Expr = {
+    <l:AddSubNoGroup> ">" <r:AddSubNoGroup> => Expr::Gt(Box::new(l), Box::new(r)),
+    <l:AddSubNoGroup> "<" <r:AddSubNoGroup> => Expr::Lt(Box::new(l), Box::new(r)),
+    AddSubNoGroup,
+};
+
+BaseNoGroup: Expr = {
+    PostfixNoGroup,
+    AtomNoGroup,
+};
+
+
+ListItemExpr: ListItem = {
+    <e:ExprNoGroup> => ListItem{ key: None, value: e },
+    <k:Ident> "=" <v:ExprNoGroup> => ListItem{ key: Some(k), value: v },
+};
+
+ListItemsNonEmpty: Vec<ListItem> = {
+    <i:ListItemExpr> => vec![i],
+    <l:ListItemsNonEmpty> "," <i:ListItemExpr> => {
+        let mut v = l;
+        v.push(i);
+        v
+    },
+};
+
+/* removed Primary */
+
+/* merged into Base */
 
 Ident: String = r"[a-zA-Z_][a-zA-Z0-9_]*" => <>.to_string();
 Number: i64 = r"-?[0-9]+" => <>.parse().unwrap();
 StringLit: String = r#""([^"\\]|\\.)*""# => {
     let s = <>;
     s[1..s.len()-1].to_string()
+};
+
+ExprNoGroup: Expr = {
+    CmpNoGroup,
 };

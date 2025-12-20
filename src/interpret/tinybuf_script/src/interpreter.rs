@@ -850,6 +850,11 @@ pub fn run_tests(program: &[Stmt]) -> Result<Vec<String>, String> {
     it.run(program)
 }
 
+pub fn eval_expr_for_tests(expr: &Expr) -> Result<Value, String> {
+    let env = std::collections::HashMap::new();
+    let ops = std::collections::HashMap::new();
+    eval(expr, &env, &ops)
+}
 fn to_string(v: &Value) -> String {
     match v {
         Value::Int(i) => i.to_string(),

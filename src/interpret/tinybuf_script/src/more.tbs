@@ -2,14 +2,14 @@ loop with {let a=1;let b=2;} step{a++;b++;} for {
     a++;
     b++;
     print a+b;
-    if a<4:next //跳到循环头 执行step如果有 step是可选的  以及这些关键字和{}之间的空格也是可有也可以无
-    if b>2:break
+    if a<4 { next } //跳到循环头 执行step如果有 step是可选的  以及这些关键字和{}之间的空格也是可有也可以无
+    if b>2 { break }
 }
 //循环可以设置标签例如 这里标签可以是str也可以是符号 
 loop(name=aaa) with {let a=1;}{
     print "outer start";
     loop with {let b=2}{
-        if b>1:break to aaa; //这里首先跳出自己的范围 然后再连续执行break一直遇到aaa；如果一直到顶层都没有aaa则报错
+        if b>1 { break to aaa; } //这里首先跳出自己的范围 然后再连续执行break一直遇到aaa；如果一直到顶层都没有aaa则报错
     }
     print "outer end";
 }
@@ -17,15 +17,15 @@ loop(name=aaa) with {let a=1;}{
 let a=1
 loop for{
     print("hello")
-    if a>10:break
-    else:a++
+    if a>10 { break }
+    else { a++ }
 }
 a=1;
 //简单循环2
 loop {
         print("hello")
-    if a>10:break
-    else:a++
+    if a>10 { break }
+    else { a++ }
 }
 
 //上面的loop中  with后面跟着的是一个循环限定的持久化block这些变量在整个body的循环过程中保持 后面的for后面的是body body里面的每次执行都是一个新的block空间
@@ -33,13 +33,13 @@ loop {
 // Test: Statement mode with colon (single line)
 print "--- if-else colon syntax ---"
 let x = 10
-if x > 5: print "x is greater than 5"
-if x < 5: print "x is less than 5" // Should not print
+if x > 5 { print "x is greater than 5" }
+if x < 5 { print "x is less than 5" } // Should not print
 
 // Test: Statement mode with return (in function)
 print "--- if-else colon return ---"
 let func_test_colon(n) = {
-    if n > 10: return "big"
+    if n > 10 { return "big" }
     return "small"
 }
 print func_test_colon(20)
@@ -61,16 +61,17 @@ print "--- nested if-else (elseif) ---"
 let val = 15
 if val < 10 {
     print "val < 10"
-} else if val < 20 {
+} else { if val < 20 {
     print "10 <= val < 20"
 } else {
     print "val >= 20"
-}
+} }
 
 // Test: Parenthesis usage (optional)
 print "--- parenthesis tests ---"
 if (x > 5) { print "parens work in block if" }
-if (x > 5): print "parens work in colon if"
+// unified without colon syntax
+if (x > 5) { print "parens work in colon if" }
 if (x < 5) { print "fail" } else if (x > 5) { print "parens work in else if" }
 
 // Test: Recursion with if-else

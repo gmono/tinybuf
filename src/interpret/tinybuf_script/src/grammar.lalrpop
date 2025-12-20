@@ -83,7 +83,6 @@ MatchedStmt: Stmt = {
 
 UnmatchedStmt: Stmt = {
     "if" <c:Expr> <t:StmtBlock> => Stmt::If(c, Box::new(t), None),
-    "if" <c:Expr> <t:StmtBlock> "else" <e:UnmatchedStmt> => Stmt::If(c, Box::new(t), Some(Box::new(e))),
 };
 
 StmtBlock: Stmt = {
